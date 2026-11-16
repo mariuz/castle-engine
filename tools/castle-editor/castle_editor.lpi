@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="121">
+    <Units Count="123">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -687,6 +687,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormVolumetricStudio"/>
       </Unit120>
+      <Unit121>
+        <Filename Value="../common-code/toolgeometryscript.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGeometryScript"/>
+      </Unit121>
+      <Unit122>
+        <Filename Value="code/formgeometryscript.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGeometryScript"/>
+      </Unit122>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

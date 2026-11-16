@@ -151,6 +151,7 @@ uses
   TestToolMetaSoundStudio,
   TestToolTilemapStudio,
   TestToolVolumetricStudio,
+  TestToolGeometryScript,
   TestCastleVulkanRHI;
 
 implementation

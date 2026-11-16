@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -814,6 +814,8 @@ type
       MenuTreeViewItemTilemapStudio: TMenuItem;
       ButtonVolumetricStudio: TSpeedButton;
       MenuTreeViewItemVolumetricStudio: TMenuItem;
+      ButtonGeometryScript: TSpeedButton;
+      MenuTreeViewItemGeometryScript: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1325,6 +1327,8 @@ type
     procedure MenuTreeViewItemTilemapStudioClick(Sender: TObject);
     procedure ButtonVolumetricStudioClick(Sender: TObject);
     procedure MenuTreeViewItemVolumetricStudioClick(Sender: TObject);
+    procedure ButtonGeometryScriptClick(Sender: TObject);
+    procedure MenuTreeViewItemGeometryScriptClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2800,6 +2804,7 @@ type
     procedure ShowMetaSoundStudioDialog;
     procedure ShowTilemapStudioDialog;
     procedure ShowVolumetricStudioDialog;
+    procedure ShowGeometryScriptDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2821,7 +2826,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7421,6 +7426,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonVolumetricStudio,
       PanelMiddleTop.GetControlIndex(ButtonTilemapStudio) + 1);
 
+  ButtonGeometryScript := TSpeedButton.Create(Self);
+  ButtonGeometryScript.Caption := 'GeoMesh';
+  ButtonGeometryScript.Hint := 'Open Geometry Script Procedural Mesh Stack & 3D L-System Studio.' + NL +
+    'Build non-destructive Subdivide/Twist/Displace/Solidify stacks & 3D L-System trees.';
+  ButtonGeometryScript.ShowHint := true;
+  ButtonGeometryScript.AutoSize := true;
+  ButtonGeometryScript.Constraints.MinHeight := 33;
+  ButtonGeometryScript.Constraints.MinWidth := 62;
+  ButtonGeometryScript.BorderSpacing.Left := 2;
+  ButtonGeometryScript.OnClick := @ButtonGeometryScriptClick;
+  ButtonGeometryScript.Parent := PanelMiddleTop;
+  if ButtonVolumetricStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonGeometryScript,
+      PanelMiddleTop.GetControlIndex(ButtonVolumetricStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10465,6 +10485,11 @@ begin
   MenuTreeViewItemVolumetricStudio.Caption := 'Volumetric Height Fog, God-Rays && Reflection Probe Studio...';
   MenuTreeViewItemVolumetricStudio.OnClick := @MenuTreeViewItemVolumetricStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemVolumetricStudio);
+
+  MenuTreeViewItemGeometryScript := TMenuItem.Create(Self);
+  MenuTreeViewItemGeometryScript.Caption := 'Geometry Script Mesh Stack && 3D L-System Studio...';
+  MenuTreeViewItemGeometryScript.OnClick := @MenuTreeViewItemGeometryScriptClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemGeometryScript);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15767,6 +15792,10 @@ var
         Suffix := Suffix + ' ' + TCastleVolumetricAtmosphere(NodeObj).VolumetricSummaryBadge
       else if NodeObj is TCastleReflectionProbe then
         Suffix := Suffix + ' ' + TCastleReflectionProbe(NodeObj).ProbeSummaryBadge
+      else if NodeObj is TCastleGeometryScriptMesh then
+        Suffix := Suffix + ' ' + TCastleGeometryScriptMesh(NodeObj).GeoSummaryBadge
+      else if NodeObj is TCastleLSystemBotanical then
+        Suffix := Suffix + ' ' + TCastleLSystemBotanical(NodeObj).BotanicalSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -56005,6 +56034,7 @@ begin
   else if SameText(AStudioId, 'metasound_studio') then ShowMetaSoundStudioDialog
   else if SameText(AStudioId, 'tilemap_studio') then ShowTilemapStudioDialog
   else if SameText(AStudioId, 'volumetric_studio') then ShowVolumetricStudioDialog
+  else if SameText(AStudioId, 'geometry_script') then ShowGeometryScriptDialog
   else
     Result := False;
 end;
@@ -56252,6 +56282,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemVolumetricStudioClick(Sender: TObject);
 begin
   ShowVolumetricStudioDialog;
+end;
+
+procedure TDesignFrame.ShowGeometryScriptDialog;
+var
+  Dlg: TGeometryScriptForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TGeometryScriptForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonGeometryScriptClick(Sender: TObject);
+begin
+  ShowGeometryScriptDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemGeometryScriptClick(Sender: TObject);
+begin
+  ShowGeometryScriptDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

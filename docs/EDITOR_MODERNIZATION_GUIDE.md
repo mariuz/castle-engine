@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–324** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–325** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3549,6 +3549,30 @@ TVolumetricStudioHelper.BlendReflectionProbesAtPoint(Viewport, DesignOwner, Play
 
 ---
 
+## 66AX. Geometry Script Non-Destructive Procedural Mesh Stack & 3D L-System Botanical Studio (Phase 325)
+
+Castle Game Engine provides a non-destructive Geometry Script mesh modifier pipeline and parametric 3D Turtle L-System tree/vine generation matching Unreal Engine 6.0+'s Geometry Scripting and PCG Vegetation workflows:
+
+1. **Geometry Script & 3D L-System Runtime (`src/scene/castlegeometryscript.pas`)**:
+   - `TCastleGeometryScriptMesh` evaluates ordered `gmkLinearSubdivide4x`, `gmkTwistAroundY`, `gmkTaperAlongY`, `gmkPerlinNormalDisplace`, and `gmkSolidifyShell` stages non-destructively over `gbsRevolveAmphora` / `gbsSubdividedBox` / `gbsUvSphere` generators.
+   - `TCastleLSystemBotanical` rewrites `Axiom` / `RuleF` / `RuleX` (`ExpandLSystemString`) and interprets 3D yaw/pitch/roll/push/pop turtle commands with `TropismY` bending, tapered bark segments, and PBR canopy leaf cards.
+2. **Geometry Script & Botanical Studio (`TGeometryScriptForm` & `TGeometryScriptHelper`)**:
+   - Open via the top-bar **`GeoMesh`** button, Hierarchy context menu, or **`Design -> Geometry Script Procedural Mesh Stack & 3D L-System Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TGeometryScriptHelper.SpawnGeometryAndTreeShowcaseDemo(Viewport, DesignOwner, AmphoraMesh, OakTree);
+AmphoraMesh.AddModifier(gmkLinearSubdivide4x, 1.0, 0.0, True);
+OakTree.ApplyPreset(lspWeepingWillowTree);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Procedural X3D Geometry](https://castle-engine.io/x3d_implementation_rendering.php) · [UE Geometry Scripting](https://dev.epicgames.com/documentation/en-us/unreal-engine/geometry-scripting-users-guide-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Procedural 3D Meshes & Foliage (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Shader Showcase](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3661,4 +3685,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolmetasoundstudio.pas`](../tests/code/testcases/testtoolmetasoundstudio.pas) (`TTestToolMetaSoundStudio` — 2 tests)**: Verifies `EvaluateAdsrEnvelope`, RBJ 2-pole Biquad low-pass RMS attenuation (`240 Hz` vs. `9500 Hz`), valid 44-byte RIFF/WAVE 16-bit PCM stream export, downward `WorldRay` `Stone`/`Wood`/`Metal` footstep surface classification, `120 BPM` `mqbNextBar` quantized music stem transition & crossfade, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltilemapstudio.pas`](../tests/code/testcases/testtooltilemapstudio.pas) (`TTestToolTilemapStudio` — 2 tests)**: Verifies 4-bit cardinal (`0..15`) & 8-bit corner-gated Blob (`0..255`) auto-tile masks, exact 2D greedy collider merging (`6x4 = 24` cells -> `1` box) with `WorldRay` hit verification, `csTransient`-clean JSON roundtrips, and `TCastleFlipbook2D` UV sub-rect stepping, non-loop hold, and frame-exact `OnFlipbookNotify` firing (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvolumetricstudio.pas`](../tests/code/testcases/testtoolvolumetricstudio.pas) (`TTestToolVolumetricStudio` — 2 tests)**: Verifies valley vs. mountaintop exponential height fog optical depth, exact inclined-ray $A \leftrightarrow B$ transmittance reciprocity, Henyey-Greenstein forward scattering lobe (`g = 0.76`), finite-room `ComputeBoxParallaxReflectionDir` wall pinning, `Priority` reflection probe override & `BlendDistance` feathering, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolgeometryscript.pas`](../tests/code/testcases/testtoolgeometryscript.pas) (`TTestToolGeometryScript` — 2 tests)**: Verifies exact `4x` `gmkLinearSubdivide4x` (`48 -> 192` tris), `2x` `gmkSolidifyShell` (`192 -> 384` tris), non-destructive modifier stage disabling restoring exact baseline triangles & surface area, `csTransient`-clean JSON roundtrips, `ExpandLSystemString` rewriting, 3D yaw/pitch/roll crown spread, and `TropismY` phototropism vs. weeping gravitropism height response (`0 unfreed memory blocks`).
 

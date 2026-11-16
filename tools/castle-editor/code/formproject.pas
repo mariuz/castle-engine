@@ -638,6 +638,7 @@ type
       MenuItemMetaSoundStudio: TMenuItem;
       MenuItemTilemapStudio: TMenuItem;
       MenuItemVolumetricStudio: TMenuItem;
+      MenuItemGeometryScript: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -696,6 +697,7 @@ type
     procedure MenuItemMetaSoundStudioClick(Sender: TObject);
     procedure MenuItemTilemapStudioClick(Sender: TObject);
     procedure MenuItemVolumetricStudioClick(Sender: TObject);
+    procedure MenuItemGeometryScriptClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2510,6 +2512,11 @@ begin
   MenuItemVolumetricStudio.Caption := 'Volumetric Height Fog, God-Rays & Reflection Probe Studio...';
   MenuItemVolumetricStudio.OnClick := @MenuItemVolumetricStudioClick;
   MenuItemDesign.Add(MenuItemVolumetricStudio);
+
+  MenuItemGeometryScript := TMenuItem.Create(MenuItemDesign);
+  MenuItemGeometryScript.Caption := 'Geometry Script Procedural Mesh Stack & 3D L-System Studio...';
+  MenuItemGeometryScript.OnClick := @MenuItemGeometryScriptClick;
+  MenuItemDesign.Add(MenuItemGeometryScript);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5714,6 +5721,12 @@ procedure TProjectForm.MenuItemVolumetricStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowVolumetricStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemGeometryScriptClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowGeometryScriptDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
