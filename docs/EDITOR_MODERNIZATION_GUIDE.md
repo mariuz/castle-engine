@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–331** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–332** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3714,6 +3714,32 @@ Rig.StepPhysicalAnimation(0.06);
 
 ---
 
+## 66BE. CommonUI Gamepad Spatial Focus Router, Device Glyphs & MVVM Studio (Phase 332)
+
+Castle Game Engine provides spatial 2D D-Pad cone focus routing, modal activatable widget stacks, automatic input-device prompt glyph substitution, and declarative two-way MVVM RTTI property binding matching Unreal Engine 6.0+'s CommonUI and UMG ViewModel workflows:
+
+1. **CommonUI & MVVM Runtime (`src/scene/castlecommonuimvvm.pas`)**:
+   - `TCastleCommonUiRouter` navigates focusable `TCastleUserInterface` widgets via `EvaluateSpatialNavScore`, isolates modal popups via `PushActivatableLayer` / `PopActivatableLayer`, and expands `{Prompt:*}` tokens across 5 device families.
+   - `TCastleMvvmBinder` synchronizes ViewModel variables with UI RTTI properties (`PushViewModelToUi` & `PullUiToViewModel`).
+2. **CommonUI & MVVM Studio (`TCommonUiStudioForm` & `TCommonUiStudioHelper`)**:
+   - Open via the top-bar **`CommonUI`** button, Hierarchy context menu, or **`Design -> CommonUI Gamepad Focus, Prompt Glyphs & MVVM Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TCommonUiStudioHelper.SpawnCommonUiMenuAndMvvmHudDemo(RootUi, DesignOwner, MenuRoot, Popup, Router, Binder);
+Router.NavigateDirection(cndRight);
+Router.ActiveDevice := idfPlayStationDualSense;
+Binder.SetFloat('HealthRatio', 0.60);
+Binder.PushViewModelToUi(MenuRoot, DesignOwner);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE User Interface](https://castle-engine.io/user_interface) · [UE CommonUI](https://dev.epicgames.com/documentation/en-us/unreal-engine/common-ui-plugin-for-advanced-user-interfaces-in-unreal-engine) · [UE UMG ViewModel](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-viewmodel-for-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Cross-Platform 2D UI & Menus (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE UI Editor](https://castle-engine.io/images/thumb_const_height_size/ui_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3833,4 +3859,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolvoxelstudio.pas`](../tests/code/testcases/testtoolvoxelstudio.pas) (`TTestToolVoxelStudio` — 2 tests)**: Verifies `SdfSphere3D`, `SdfCapsule3D`, C1 polynomial `SmoothSdfUnion` / `SmoothSdfSubtract`, `WorldRay` ceiling overhang (`+Y`), floor (`-Y`), side wall (`+X`), and open Z-tunnel portal pass-through on `vvpWalkthroughCaveTunnel`, non-destructive arch brush toggling (`vvpNaturalStoneArchOverhang`), `vvpFloatingSkyIslandPillars`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolfluidstudio.pas`](../tests/code/testcases/testtoolfluidstudio.pas) (`TTestToolFluidStudio` — 2 tests)**: Verifies Virtual-Pipe Hydrostatic exact water volume conservation (`< 0.1%` drift across `60` dam-break steps), downhill East-basin pooling, turbulent whitewater `Foam` & shoreline `Wetness` retention, `BakeTerrainBedFromWorld` `WorldRay` terrace elevation sampling, `+3.0 m^3/s` spring volume integration, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolragdollstudio.pas`](../tests/code/testcases/testtoolragdollstudio.pas) (`TTestToolRagdollStudio` — 2 tests)**: Verifies `ApplyPointHitImpulse` nearest-bone headshot selection (`rbiHead`), topological hop attenuation (`Head > SpineChest > Pelvis > 0`), critically-damped PD motor spring upright recovery (`MaxPoseDeviationMeters < 0.015m`), `KnockdownThreshold` transition to `prmFullLimpRagdoll` with floor clamping & PBD neck-length preservation, `BeginGetUpRecovery` smooth stand-up blend, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcommonuistudio.pas`](../tests/code/testcases/testtoolcommonuistudio.pas) (`TTestToolCommonUiStudio` — 2 tests)**: Verifies 2x2 cardinal D-Pad cone navigation (`cndRight`/`cndDown`/`cndLeft`/`cndUp`), `PushActivatableLayer` modal focus isolation & `PopActivatableLayer` prior-focus restoration, live `KB/Mouse` (`[Enter]`) -> `Xbox` (`(A)`) -> `DualSense` (`(Cross)`) prompt glyph updates, formatted/scaled `PushViewModelToUi` (`84.0px`, `'HP: 35%'`), two-way `PullUiToViewModel` (`Slider.Value`, `Checkbox.Checked`), and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

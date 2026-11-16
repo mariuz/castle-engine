@@ -158,6 +158,7 @@ uses
   TestToolVoxelStudio,
   TestToolFluidStudio,
   TestToolRagdollStudio,
+  TestToolCommonUiStudio,
   TestCastleVulkanRHI;
 
 implementation

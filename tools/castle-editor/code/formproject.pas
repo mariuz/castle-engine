@@ -645,6 +645,7 @@ type
       MenuItemVoxelStudio: TMenuItem;
       MenuItemFluidStudio: TMenuItem;
       MenuItemRagdollStudio: TMenuItem;
+      MenuItemCommonUiStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -710,6 +711,7 @@ type
     procedure MenuItemVoxelStudioClick(Sender: TObject);
     procedure MenuItemFluidStudioClick(Sender: TObject);
     procedure MenuItemRagdollStudioClick(Sender: TObject);
+    procedure MenuItemCommonUiStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2559,6 +2561,11 @@ begin
   MenuItemRagdollStudio.Caption := 'Physical Animation Hit-Reaction & Articulated Ragdoll Studio...';
   MenuItemRagdollStudio.OnClick := @MenuItemRagdollStudioClick;
   MenuItemDesign.Add(MenuItemRagdollStudio);
+
+  MenuItemCommonUiStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemCommonUiStudio.Caption := 'CommonUI Gamepad Focus, Prompt Glyphs & MVVM Studio...';
+  MenuItemCommonUiStudio.OnClick := @MenuItemCommonUiStudioClick;
+  MenuItemDesign.Add(MenuItemCommonUiStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5805,6 +5812,12 @@ procedure TProjectForm.MenuItemRagdollStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowRagdollStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemCommonUiStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCommonUiStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
