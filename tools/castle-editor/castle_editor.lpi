@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="107">
+    <Units Count="109">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -617,6 +617,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormVehicleStudio"/>
       </Unit106>
+      <Unit107>
+        <Filename Value="../common-code/toolblendmontage.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolBlendMontage"/>
+      </Unit107>
+      <Unit108>
+        <Filename Value="code/formblendmontage.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormBlendMontage"/>
+      </Unit108>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–317** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–318** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3380,6 +3380,30 @@ Car.StepVehicle(0.25);
 
 ---
 
+## 66AQ. 2D Locomotion Blend Space, Motion Warping & Anim Montage Studio (Phase 318)
+
+Castle Game Engine provides 2D Gradient-Band Locomotion Blend Spaces, frame-exact Animation Montages, combo branching, and Hermite root-motion target warping matching Unreal Engine 6.0+'s BlendSpaces and Motion Warping workflows:
+
+1. **2D Blend Space & Anim Montage Runtime (`src/scene/castleblendmontage.pas`)**:
+   - `TCastleBlendSpace2DBehavior` evaluates `EvaluateGradientBandWeights2D` across 2D locomotion clips (`bspEightWayLocomotion`, `bspSwordShieldStrafe`, `bspFlightHoverPitchYaw`) with exponential parameter damping and optional `TCastleScene` clip driving.
+   - `TCastleAnimMontageBehavior` orchestrates multi-section combat/traversal montages (`mpThreeHitSwordCombo`, `mpDodgeRollInvuln`, `mpVaultMantleLedge`) with `Montage.ComboWindow` input queueing, instant & durational `TAnimNotifyDef` tag windows, and `WarpTargetTransform` melee standoff warping.
+2. **BlendSpace & Montage Studio (`TBlendMontageForm` & `TBlendMontageHelper`)**:
+   - Open via the top-bar **`Blend2D`** button, Hierarchy context menu, or **`Design -> 2D Locomotion Blend Space, Motion Warping & Anim Montage Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TBlendMontageHelper.SpawnHeroLocomotionAndMontageDemo(Viewport, DesignOwner, Hero, Dummy, Blend, Montage);
+Blend.EvaluateImmediate(45.0, 4.2);
+Montage.PlayMontageSection('Slash1');
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Scene Animations](https://castle-engine.io/manual_scene.php) · [UE Blend Spaces](https://dev.epicgames.com/documentation/en-us/unreal-engine/blend-spaces-in-unreal-engine) · [UE Animation Montage](https://dev.epicgames.com/documentation/en-us/unreal-engine/animation-montage-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Character Animations & Gameplay (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Character Viewport](https://castle-engine.io/images/thumb_const_height_size/transform_scene.webp) · [CGE Behavior Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3485,4 +3509,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolsavereplay.pas`](../tests/code/testcases/testtoolsavereplay.pas) (`TTestToolSaveReplay` — 2 tests)**: Verifies `TCastleSaveSlotManager` multi-system world snapshot capture & restoration across `TCastleTransform` poses/visibility, `TCastleAbilitySystemBehavior` HP/Mana/tags/cooldowns, and `TCastleQuestTracker` state + `v1 -> v2` schema migration (`PlayerGold -> Economy.Gold`), and verifies `TCastleReplayRecorder` keyframe/cue recording, `ExportReplayJson`/`ImportReplayJson`, midpoint quaternion `SLerp` pose scrubbing, and `OnCueFired` event playback (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolstudiohub.pas`](../tests/code/testcases/testtoolstudiohub.pas) (`TTestToolStudioHub` — 2 tests)**: Verifies all 36 Horizon 2–5 studios across 6 `TStudioHubCategory` buckets + multi-token case-insensitive keyword/phase search filtering, and verifies `TStudioHubManager.AuditEntireDesign` detection and full 100/100 `A+ Ship-Ready` remediation across 6 cross-studio integration hazards (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvehiclestudio.pas`](../tests/code/testcases/testtoolvehiclestudio.pas) (`TTestToolVehicleStudio` — 2 tests)**: Verifies exact Ackermann steering inner/outer cotangent invariant ($\cot\delta_{\text{outer}} - \cot\delta_{\text{inner}} = W / L$), engine torque curve peak & rev-limiter cutoff, 4-wheel `WorldRay` Hooke suspension equilibrium & raised-platform nose-up pitch, automatic multi-gear upshifting, handbrake rear slip amplification, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolblendmontage.pas`](../tests/code/testcases/testtoolblendmontage.pas) (`TTestToolBlendMontage` — 2 tests)**: Verifies 2D Gradient Band Interpolation Kronecker delta, collinear outer-ring shadowing (`RunForward = 0.0` halfway between `Idle` and `WalkForward`), partition of unity, exponential parameter damping, `ConfigJson` roundtrips, `Montage.ComboWindow` combo branching (`Slash1 -> Slash2 -> HeavyFinisher`), `Status.Immunity.DodgeIframe` tag windows, and Hermite `1.20m` melee standoff motion warping (`0 unfreed memory blocks`).
 

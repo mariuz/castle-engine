@@ -631,6 +631,7 @@ type
       MenuItemSaveReplay: TMenuItem;
       MenuItemStudioHub: TMenuItem;
       MenuItemVehicleStudio: TMenuItem;
+      MenuItemBlendMontage: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -682,6 +683,7 @@ type
     procedure MenuItemSaveReplayClick(Sender: TObject);
     procedure MenuItemStudioHubClick(Sender: TObject);
     procedure MenuItemVehicleStudioClick(Sender: TObject);
+    procedure MenuItemBlendMontageClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2461,6 +2463,11 @@ begin
   MenuItemVehicleStudio.Caption := 'Chaos Wheeled Vehicle, Suspension & Drivetrain Studio...';
   MenuItemVehicleStudio.OnClick := @MenuItemVehicleStudioClick;
   MenuItemDesign.Add(MenuItemVehicleStudio);
+
+  MenuItemBlendMontage := TMenuItem.Create(MenuItemDesign);
+  MenuItemBlendMontage.Caption := '2D Locomotion Blend Space, Motion Warping & Anim Montage Studio...';
+  MenuItemBlendMontage.OnClick := @MenuItemBlendMontageClick;
+  MenuItemDesign.Add(MenuItemBlendMontage);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5623,6 +5630,12 @@ procedure TProjectForm.MenuItemVehicleStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowVehicleStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemBlendMontageClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowBlendMontageDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

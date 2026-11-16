@@ -144,6 +144,7 @@ uses
   TestToolSaveReplay,
   TestToolStudioHub,
   TestToolVehicleStudio,
+  TestToolBlendMontage,
   TestCastleVulkanRHI;
 
 implementation
