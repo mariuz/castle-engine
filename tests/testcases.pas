@@ -156,6 +156,7 @@ uses
   TestToolMotionMatching,
   TestToolMassEntity,
   TestToolVoxelStudio,
+  TestToolFluidStudio,
   TestCastleVulkanRHI;
 
 implementation

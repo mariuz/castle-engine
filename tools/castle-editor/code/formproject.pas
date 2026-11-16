@@ -643,6 +643,7 @@ type
       MenuItemMotionMatching: TMenuItem;
       MenuItemMassEntity: TMenuItem;
       MenuItemVoxelStudio: TMenuItem;
+      MenuItemFluidStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -706,6 +707,7 @@ type
     procedure MenuItemMotionMatchingClick(Sender: TObject);
     procedure MenuItemMassEntityClick(Sender: TObject);
     procedure MenuItemVoxelStudioClick(Sender: TObject);
+    procedure MenuItemFluidStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2545,6 +2547,11 @@ begin
   MenuItemVoxelStudio.Caption := '3D Voxel SDF Cave, Overhang & Marching-Tetrahedra Studio...';
   MenuItemVoxelStudio.OnClick := @MenuItemVoxelStudioClick;
   MenuItemDesign.Add(MenuItemVoxelStudio);
+
+  MenuItemFluidStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemFluidStudio.Caption := '2.5D Shallow-Water Fluid, Waterfall & Foam Studio...';
+  MenuItemFluidStudio.OnClick := @MenuItemFluidStudioClick;
+  MenuItemDesign.Add(MenuItemFluidStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5779,6 +5786,12 @@ procedure TProjectForm.MenuItemVoxelStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowVoxelStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemFluidStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowFluidStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
