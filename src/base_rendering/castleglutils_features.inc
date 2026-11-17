@@ -229,6 +229,7 @@ type
     FLineWidth: TVector2;
     FTextureMaxLevel: Boolean;
     FTransformFeedbackVaryings: Boolean;
+    FParallelShaderCompile: Boolean;
     FMaxFragmentUniformComponents: Cardinal;
     FMaxVertexUniformComponents: Cardinal;
     FDepthBufferFormat: TGLenum;
@@ -632,6 +633,11 @@ type
 
     { Supports glTransformFeedbackVaryings }
     property TransformFeedbackVaryings: Boolean read FTransformFeedbackVaryings;
+
+    { The driver compiles and links shaders on its own threads and can tell
+      whether a link has completed without waiting for it
+      (GL_ARB_parallel_shader_compile). TGLSLProgram.LinkReady uses it. }
+    property ParallelShaderCompile: Boolean read FParallelShaderCompile;
 
     { Limit on uniforms size in fragment stage.
       See GL_MAX_FRAGMENT_UNIFORM_COMPONENTS
@@ -1571,6 +1577,18 @@ begin
     {$elseif defined(OpenGLES)} VersionES_3_0
     {$else} Version_3_0 and Shaders
     {$endif};
+
+  {$if defined(CASTLE_WEBGL) or defined(OpenGLES)}
+  FParallelShaderCompile := false;
+  {$else}
+  FParallelShaderCompile := Shaders and
+    HasExtension('GL_ARB_parallel_shader_compile') and
+    Assigned(glMaxShaderCompilerThreadsARB);
+  { let the driver use as many threads as it likes
+    (the default is implementation-dependent) }
+  if FParallelShaderCompile then
+    glMaxShaderCompilerThreadsARB($FFFFFFFF);
+  {$endif}
 
   if Shaders then
   begin
