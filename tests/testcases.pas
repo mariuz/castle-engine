@@ -166,6 +166,7 @@ uses
   TestToolStateTree,
   TestToolControlRig,
   TestToolSpringArm,
+  TestToolErosionStudio,
   TestCastleVulkanRHI;
 
 implementation

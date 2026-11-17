@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–339** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–340** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3904,6 +3904,30 @@ SA.StepSpringArm(0.016, Viewport.Items); // Instant pull-in to 1.75m
 
 ---
 
+## 66BM. Landscape Thermal Talus & Hydraulic Raindrop Erosion Baker Studio (Phase 340)
+
+Castle Game Engine provides symmetric mass-conserving Olsen thermal talus slumping, Beyer Lagrangian raindrop hydraulic gully carving, and 4-channel `R + G + B + A = 255` RGBA splatmap baking matching Unreal Engine 6.0+'s Landscape Erosion workflows:
+
+1. **Landscape Erosion Runtime (`src/scene/castleerosionbaker.pas`)**:
+   - `TCastleTerrainErosionBaker` relaxes over-steep cliffs toward `TalusAngleDeg` (`RunThermalErosionSteps`), carves branching runoff gullies & deposits alluvial aprons (`RunHydraulicDroplets`), and bakes `TRGBAlphaImage` splatmaps (`ExportSplatmapRgbaImage`).
+2. **Erosion Studio (`TErosionStudioForm` & `TErosionStudioHelper`)**:
+   - Open via the top-bar **`Erosion`** button, Hierarchy context menu, or **`Design -> Landscape Thermal & Hydraulic Erosion Baker Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TErosionStudioHelper.SpawnErodedAlpinePeakDemo(Viewport, DesignOwner, Baker);
+Baker.RunThermalErosionSteps(15);
+Baker.RunHydraulicDroplets(2000);
+SplatImg := Baker.ExportSplatmapRgbaImage;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Terrains](https://castle-engine.io/terrain) · [UE Landscape Sculpt & Erosion](https://dev.epicgames.com/documentation/en-us/unreal-engine/landscape-sculpt-mode-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Terrains & Multi-Layer Shaders (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Terrain Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4031,4 +4055,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolstatetree.pas`](../tests/code/testcases/testtoolstatetree.pas) (`TTestToolStateTree` — 2 tests)**: Verifies `TCastleStateTreeBehavior` spatial `ThreatDistance` evaluator, nested selector drilldown (`Root/Patrol/WaypointWalk` -> `Root/Combat/RangedSuppress` -> `Root/Combat/MeleeEngage`), timed `stttOnStateCompleted` task cycling, **parent `Combat` transition preemption** of leaf `MeleeEngage` into `Root/FleeSurvival/RetreatCover` on critical HP, Boss/Medic presets, `ValidateTree`, nested Mermaid `stateDiagram-v2` export, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcontrolrig.pas`](../tests/code/testcases/testtoolcontrolrig.pas) (`TTestToolControlRig` — 2 tests)**: Verifies 6-joint (`4.00m`) `FABRIK` reachable tip convergence (`< 0.005m`) and out-of-reach straight-line extension (`(0, 0, 4.0)`) with exact `0.80m` segment length preservation (`MaxSegmentLengthDrift < 0.0005m`), progressive `0°..90°` forearm/spine twist distribution, 8-joint sinusoidal tail waves, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolspringarm.pas`](../tests/code/testcases/testtoolspringarm.pas) (`TTestToolSpringArm` — 2 tests)**: Verifies 5-whisker `WorldRay` instant corridor-wall pull-in (`4.50m -> 1.75m` at `Z = 2.0m`), asymmetric smooth exponential ease-out recovery when cleared, off-center grazing pillar corner catch (`Center` clear while `+X` whisker hits), `PositionLagSpeed` chase smoothing, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolerosionstudio.pas`](../tests/code/testcases/testtoolerosionstudio.pas) (`TTestToolErosionStudio` — 2 tests)**: Verifies exact terrain volume conservation across `25` Olsen thermal talus passes on `etpMesaPlateauEscarpment` alongside `> 12°` cliff slope relaxation, verifies `1,200`-droplet Beyer hydraulic gully carving & alluvial deposition, exact `R + G + B + A = 255` RGBA splatmap partition of unity across every texel, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="151">
+    <Units Count="153">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -837,6 +837,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSpringArm"/>
       </Unit150>
+      <Unit151>
+        <Filename Value="../common-code/toolerosionstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolErosionStudio"/>
+      </Unit151>
+      <Unit152>
+        <Filename Value="code/formerosionstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormErosionStudio"/>
+      </Unit152>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -653,6 +653,7 @@ type
       MenuItemStateTree: TMenuItem;
       MenuItemControlRig: TMenuItem;
       MenuItemSpringArm: TMenuItem;
+      MenuItemErosionStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -726,6 +727,7 @@ type
     procedure MenuItemStateTreeClick(Sender: TObject);
     procedure MenuItemControlRigClick(Sender: TObject);
     procedure MenuItemSpringArmClick(Sender: TObject);
+    procedure MenuItemErosionStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2615,6 +2617,11 @@ begin
   MenuItemSpringArm.Caption := 'Spring-Arm Camera Whisker Occlusion & Lag Studio...';
   MenuItemSpringArm.OnClick := @MenuItemSpringArmClick;
   MenuItemDesign.Add(MenuItemSpringArm);
+
+  MenuItemErosionStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemErosionStudio.Caption := 'Landscape Thermal & Hydraulic Erosion Baker Studio...';
+  MenuItemErosionStudio.OnClick := @MenuItemErosionStudioClick;
+  MenuItemDesign.Add(MenuItemErosionStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5909,6 +5916,12 @@ procedure TProjectForm.MenuItemSpringArmClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSpringArmDialog;
+end;
+
+procedure TProjectForm.MenuItemErosionStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowErosionStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
