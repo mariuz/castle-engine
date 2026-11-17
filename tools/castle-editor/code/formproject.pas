@@ -648,6 +648,7 @@ type
       MenuItemCommonUiStudio: TMenuItem;
       MenuItemHlodStudio: TMenuItem;
       MenuItemRibbonStudio: TMenuItem;
+      MenuItemSettlementStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -716,6 +717,7 @@ type
     procedure MenuItemCommonUiStudioClick(Sender: TObject);
     procedure MenuItemHlodStudioClick(Sender: TObject);
     procedure MenuItemRibbonStudioClick(Sender: TObject);
+    procedure MenuItemSettlementStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2580,6 +2582,11 @@ begin
   MenuItemRibbonStudio.Caption := 'Niagara Ribbon Slash Trail & Arc Lightning VFX Studio...';
   MenuItemRibbonStudio.OnClick := @MenuItemRibbonStudioClick;
   MenuItemDesign.Add(MenuItemRibbonStudio);
+
+  MenuItemSettlementStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemSettlementStudio.Caption := 'PCG Biome Settlement, Road Graph & Building Lot Studio...';
+  MenuItemSettlementStudio.OnClick := @MenuItemSettlementStudioClick;
+  MenuItemDesign.Add(MenuItemSettlementStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5844,6 +5851,12 @@ procedure TProjectForm.MenuItemRibbonStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowRibbonStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemSettlementStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSettlementStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

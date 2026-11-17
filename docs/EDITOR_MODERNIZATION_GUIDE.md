@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–334** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–335** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3787,6 +3787,29 @@ Beam.StrikeNow(2026);
 
 ---
 
+## 66BH. PCG Spline-Biome Settlement, Road Graph & Building Lot Studio (Phase 335)
+
+Castle Game Engine provides deterministic road-intersection graphs, zero-overlap setback building parcel subdivision, procedural multi-story gabled-roof houses, streetlamps, and gate-aware perimeter palisade fences matching Unreal Engine 6.0+'s PCG Biome Settlement workflows:
+
+1. **PCG Settlement Runtime (`src/scene/castlepcgsettlement.pas`)**:
+   - `TCastlePcgSettlement` constructs road graphs (`pspCrossroadsHamlet`, `pspWalledMarketTown`, `pspLinearHighwayOutpost`), enforces strict road setback (`CountRoadIntrudingLots = 0`) and pairwise AABB non-overlap (`CountOverlappingLotPairs = 0`), snaps foundations onto terrain via `WorldRay`, and emits a single batched `csTransient` mesh.
+2. **Settlement Studio (`TSettlementStudioForm` & `TSettlementStudioHelper`)**:
+   - Open via the top-bar **`Village`** button, Hierarchy context menu, or **`Design -> PCG Biome Settlement, Road Graph & Building Lot Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TSettlementStudioHelper.SpawnCrossroadsVillageDemo(Viewport, DesignOwner, Settl);
+Settl.Preset := pspWalledMarketTown;
+Settl.RebuildSettlement(Viewport.Items);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Terrains & Worlds](https://castle-engine.io/terrain) · [UE PCG Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-overview)
+- **Videos & Movies:** 🎬 [CGE Official Video — Procedural Worlds & Villages (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3909,4 +3932,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolcommonuistudio.pas`](../tests/code/testcases/testtoolcommonuistudio.pas) (`TTestToolCommonUiStudio` — 2 tests)**: Verifies 2x2 cardinal D-Pad cone navigation (`cndRight`/`cndDown`/`cndLeft`/`cndUp`), `PushActivatableLayer` modal focus isolation & `PopActivatableLayer` prior-focus restoration, live `KB/Mouse` (`[Enter]`) -> `Xbox` (`(A)`) -> `DualSense` (`(Cross)`) prompt glyph updates, formatted/scaled `PushViewModelToUi` (`84.0px`, `'HP: 35%'`), two-way `PullUiToViewModel` (`Slider.Value`, `Checkbox.Checked`), and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolhlodstudio.pas`](../tests/code/testcases/testtoolhlodstudio.pas) (`TTestToolHlodStudio` — 2 tests)**: Verifies 4-quadrant `24m` spatial cell partitioning (`16` static props -> `4` cells with `HlodIgnore_HeroBeacon` excluded), near-camera Full Detail (`16` draws) vs. far-camera HLOD proxy collapse (`4` single-draw-call proxies, `-75%` draw calls), `[40..50m]` hysteresis deadband non-thrashing, `hpmClusteredBoxes`/`hpmMergedCellBounds`/`hpmOctagonalPrism` triangle counts, `RestoreAllFullDetailProps`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolribbonstudio.pas`](../tests/code/testcases/testtoolribbonstudio.pas) (`TTestToolRibbonStudio` — 2 tests)**: Verifies `EvaluateCatmullRomVec3` exact endpoint Kronecker interpolation & curved arc midpoint, `CatmullSubdivisions` `1 -> 4` exact `4x` triangle amplification, `LifetimeSec` sample aging/pruning to `0`, `TCastleLightningBeam` exact start/target world endpoint pinning with jagged interior displacement (`16` main segments + `3` forks = `88` tris), seeded determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsettlementstudio.pas`](../tests/code/testcases/testtoolsettlementstudio.pas) (`TTestToolSettlementStudio` — 2 tests)**: Verifies `pspCrossroadsHamlet`, `pspWalledMarketTown`, and `pspLinearHighwayOutpost` road graphs with strict zero pairwise building overlap (`CountOverlappingLotPairs = 0`) & zero road intrusion (`CountRoadIntrudingLots = 0`), seeded determinism, `WorldRay` downward foundation snapping onto an elevated `Y = 4.25m` plateau, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

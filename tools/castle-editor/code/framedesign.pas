@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -834,6 +834,8 @@ type
       MenuTreeViewItemHlodStudio: TMenuItem;
       ButtonRibbonStudio: TSpeedButton;
       MenuTreeViewItemRibbonStudio: TMenuItem;
+      ButtonSettlementStudio: TSpeedButton;
+      MenuTreeViewItemSettlementStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1365,6 +1367,8 @@ type
     procedure MenuTreeViewItemHlodStudioClick(Sender: TObject);
     procedure ButtonRibbonStudioClick(Sender: TObject);
     procedure MenuTreeViewItemRibbonStudioClick(Sender: TObject);
+    procedure ButtonSettlementStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemSettlementStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2850,6 +2854,7 @@ type
     procedure ShowCommonUiStudioDialog;
     procedure ShowHlodStudioDialog;
     procedure ShowRibbonStudioDialog;
+    procedure ShowSettlementStudioDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2871,7 +2876,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7621,6 +7626,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonRibbonStudio,
       PanelMiddleTop.GetControlIndex(ButtonHlodStudio) + 1);
 
+  ButtonSettlementStudio := TSpeedButton.Create(Self);
+  ButtonSettlementStudio.Caption := 'Village';
+  ButtonSettlementStudio.Hint := 'Open PCG Biome Settlement, Road Graph & Building Lot Studio.' + NL +
+    'Generate crossroads hamlets & walled market towns with zero-overlap gabled houses & fences.';
+  ButtonSettlementStudio.ShowHint := true;
+  ButtonSettlementStudio.AutoSize := true;
+  ButtonSettlementStudio.Constraints.MinHeight := 33;
+  ButtonSettlementStudio.Constraints.MinWidth := 62;
+  ButtonSettlementStudio.BorderSpacing.Left := 2;
+  ButtonSettlementStudio.OnClick := @ButtonSettlementStudioClick;
+  ButtonSettlementStudio.Parent := PanelMiddleTop;
+  if ButtonRibbonStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonSettlementStudio,
+      PanelMiddleTop.GetControlIndex(ButtonRibbonStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10715,6 +10735,11 @@ begin
   MenuTreeViewItemRibbonStudio.Caption := 'Niagara Ribbon Slash Trail && Arc Lightning VFX Studio...';
   MenuTreeViewItemRibbonStudio.OnClick := @MenuTreeViewItemRibbonStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemRibbonStudio);
+
+  MenuTreeViewItemSettlementStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemSettlementStudio.Caption := 'PCG Biome Settlement, Road Graph && Building Lot Studio...';
+  MenuTreeViewItemSettlementStudio.OnClick := @MenuTreeViewItemSettlementStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSettlementStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -16043,6 +16068,8 @@ var
         Suffix := Suffix + ' ' + TCastleRibbonTrail(NodeObj).RibbonSummaryBadge
       else if NodeObj is TCastleLightningBeam then
         Suffix := Suffix + ' ' + TCastleLightningBeam(NodeObj).LightningSummaryBadge
+      else if NodeObj is TCastlePcgSettlement then
+        Suffix := Suffix + ' ' + TCastlePcgSettlement(NodeObj).SettlementSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -56291,6 +56318,7 @@ begin
   else if SameText(AStudioId, 'commonui_mvvm') then ShowCommonUiStudioDialog
   else if SameText(AStudioId, 'hlod_studio') then ShowHlodStudioDialog
   else if SameText(AStudioId, 'ribbon_studio') then ShowRibbonStudioDialog
+  else if SameText(AStudioId, 'settlement_studio') then ShowSettlementStudioDialog
   else
     Result := False;
 end;
@@ -56808,6 +56836,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemRibbonStudioClick(Sender: TObject);
 begin
   ShowRibbonStudioDialog;
+end;
+
+procedure TDesignFrame.ShowSettlementStudioDialog;
+var
+  Dlg: TSettlementStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TSettlementStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonSettlementStudioClick(Sender: TObject);
+begin
+  ShowSettlementStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSettlementStudioClick(Sender: TObject);
+begin
+  ShowSettlementStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

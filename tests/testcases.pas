@@ -161,6 +161,7 @@ uses
   TestToolCommonUiStudio,
   TestToolHlodStudio,
   TestToolRibbonStudio,
+  TestToolSettlementStudio,
   TestCastleVulkanRHI;
 
 implementation
