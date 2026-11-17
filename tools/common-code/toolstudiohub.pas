@@ -118,7 +118,10 @@ uses
   CastleUtilityAi, CastleSaveReplay,
   CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical,
   CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound,
-  CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript;
+  CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript,
+  CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain,
+  CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm,
+  CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -350,6 +353,38 @@ begin
   Reg('responsive_sim', 'Responsive UI Safe-Area, Notch & Touch-Target Simulator', 'SafeArea',
     shcPerformanceQaDeploy, 295, 'responsive ui aspect ratio mobile notch safe area touch target',
     '16:9 / 21:9 / Mobile Notch / Tablet safe-area & 44px touch-target layout auditor.');
+
+  { Horizon 7 (Phases 327-336 — UE 6.0+ Next-Gen Runtime & Telemetry Parity, +10 -> 56 studios) }
+  Reg('motion_matching', 'Motion Matching, Pose Search Trajectory & Inertialization Studio', 'MotMatch',
+    shcCharactersAiGas, 327, 'motion matching pose search trajectory inertialization stride warp locomotion',
+    'Closed-form spring trajectory k-NN Pose Search, Holden Inertialization, and Stride Warping.');
+  Reg('mass_entity', 'MassEntity Data-Oriented SoA Crowd, Spatial Hash & Flow-Field Studio', 'MassECS',
+    shcCharactersAiGas, 328, 'masseCS massentity soa crowd boids dijkstra flowfield spatialhash',
+    '1,000+ entity SoA crowds with O(1) spatial hash separation, Dijkstra flow fields & 4-tier LODs.');
+  Reg('voxel_studio', '3D Voxel SDF Cave, Overhang & Marching-Tetrahedra Studio', 'Voxel3D',
+    shcWorldEnvironment, 329, 'voxel sdf marching tetrahedra cubes cave overhang arch sky island',
+    'Non-destructive 3D SDF brush stacks extracting watertight Marching-Tetrahedra cave meshes.');
+  Reg('fluid_studio', '2.5D Shallow-Water Pipe-Model Fluid, Waterfall & Foam Studio', 'Fluid2D',
+    shcWorldEnvironment, 330, 'shallowfluid pipe hydrostatic waterfall dam break foam wetness spring',
+    'Mass-conserving Virtual-Pipe shallow water solver with springs, WorldRay bed bake & foam.');
+  Reg('ragdoll_studio', 'Physical Animation Hit-Reaction & Articulated Ragdoll Studio', 'PhysAnim',
+    shcCharactersAiGas, 331, 'physanim hit reaction impulse pd motor ragdoll collapse recovery',
+    '11-bone humanoid hit-reaction impulses, critically-damped PD motors & PBD ragdoll recovery.');
+  Reg('commonui_mvvm', 'CommonUI Gamepad Focus Router, Prompt Glyphs & MVVM Studio', 'CommonUI',
+    shcCinematicsAudioInput, 332, 'commonui gamepad dpad spatial focus modal glyph mvvm viewmodel',
+    '2D D-Pad cone navigation, modal focus stacks, 5-device glyph swap & two-way MVVM bindings.');
+  Reg('hlod_studio', 'World Partition HLOD Spatial Cluster & Draw-Call Merger Studio', 'HLOD',
+    shcWorldEnvironment, 333, 'hlod hierarchical lod spatial cluster cell proxy draw call hysteresis',
+    'Spatial XZ grid prop clustering, single-draw-call merged cell proxies & camera hysteresis.');
+  Reg('ribbon_studio', 'Niagara Sword-Slash Ribbon Trail & Arc Lightning VFX Studio', 'RibbonVFX',
+    shcMaterialsVfxLighting, 334, 'niagara ribbon sword slash blade trail catmull lightning bolt beam',
+    'Dual-socket weapon slash arcs, Catmull-Rom subdivided ribbons & midpoint-displaced lightning.');
+  Reg('settlement_studio', 'PCG Biome Settlement, Road Graph & Building Lot Studio', 'Village',
+    shcArchitecturePcg, 335, 'settlement village crossroads town building parcel lot gabled fence',
+    'Road-intersection graphs, zero-overlap setback building lots, gabled houses & palisade fences.');
+  Reg('telemetry_insights', 'Unreal Insights Live Telemetry Ring-Buffer & Flame-Graph Studio', 'Insights',
+    shcPerformanceQaDeploy, 336, 'unreal insights telemetry ringbuffer flamegraph p50 p95 p99 chrometrace perfetto',
+    '120-frame ring-buffer flame-graph profiler, P50/P95/P99 hitch detector & Perfetto JSON export.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -482,7 +517,9 @@ var
       BumpSub(shcWorldEnvironment);
     end;
     if (C is TCastleVolumetricAtmosphere) or (C is TCastleReflectionProbe) or
-       (C is TCastleAutoTilemap) or (C is TCastleFlipbook2D) then
+       (C is TCastleAutoTilemap) or (C is TCastleFlipbook2D) or
+       (C is TCastleVoxelVolume) or (C is TCastleShallowFluidSurface) or
+       (C is TCastleHlodClusterManager) then
       BumpSub(shcWorldEnvironment);
 
     { Materials, Shaders, VFX & PostFX }
@@ -494,6 +531,13 @@ var
       BumpSub(shcMaterialsVfxLighting);
     if C is TCastleDecalProjector then BumpSub(shcMaterialsVfxLighting);
     if C is TCastleVariantSetManager then BumpSub(shcMaterialsVfxLighting);
+    if (C is TCastleRibbonTrail) or (C is TCastleLightningBeam) then BumpSub(shcMaterialsVfxLighting);
+    if C is TCastlePcgSettlement then BumpSub(shcArchitecturePcg);
+    if (C is TCastlePoseSearchDatabase) or (C is TCastleMotionMatchingBehavior) or
+       (C is TCastleMassEntityManager) or (C is TCastlePhysicalHitRagdollBehavior) then
+      BumpSub(shcCharactersAiGas);
+    if (C is TCastleCommonUiRouter) or (C is TCastleMvvmBinder) then
+      BumpSub(shcCinematicsAudioInput);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

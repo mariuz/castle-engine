@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -983,12 +983,19 @@ begin
   P.Add('query', MakePropSchema('string', 'Optional multi-token case-insensitive keyword filter (e.g. "ackermann", "gauntlet", "phase 325").'));
   P.Add('category', MakePropSchema('integer', 'Optional studio domain index (-1 = all 6 domains, 0..5 = specific TStudioHubCategory).'));
   AddToolDef('cge_list_studios',
-    'Search and list all 46 specialized Castle Game Engine Horizon 2-6 editor studios across 6 domains.',
+    'Search and list all 56 specialized Castle Game Engine Horizon 2-7 editor studios across 6 domains.',
     P, []);
 
   AddToolDef('cge_audit_world_readiness',
     'Run a holistic cross-studio World Readiness QA audit across the currently open design, returning the 0..100 score, grade, subsystem counts, and actionable integration warnings.',
     nil, []);
+
+  P := TJSONObject.Create;
+  P.Add('frames', MakePropSchema('integer', 'Number of frames to capture in the telemetry ring buffer (default 30, range 1..120).'));
+  P.Add('includeChromeTrace', MakePropSchema('boolean', 'When true, embeds Chrome about://tracing / Perfetto traceEvents JSON spans in the response.'));
+  AddToolDef('cge_capture_telemetry_trace',
+    'Capture a multi-frame Unreal Insights-style subsystem flame-graph profile of the open design, returning P50/P95/P99 frame times, hitch spikes, top hotspot subsystem, and optional Chrome/Perfetto traceEvents.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1096,6 +1103,9 @@ var
   StudioMatches: TStudioCatalogEntryArray;
   HealthReport: TStudioWorldHealthReport;
   CatFilter: Integer;
+  TelemetryProf: TTelemetryInsightsProfiler;
+  TelemetryStats: TTelemetryAggregateStats;
+  IncludeChromeTrace: Boolean;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -1683,6 +1693,47 @@ begin
       FreeAndNil(LinesArr);
       FreeAndNil(OutPayload);
       FreeAndNil(HealthReport);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_capture_telemetry_trace' then
+  begin
+    if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+    MaxLines := 30;
+    IncludeChromeTrace := False;
+    if ArgsObj <> nil then
+    begin
+      MaxLines := EnsureRange(ArgsObj.Get('frames', 30), 1, 120);
+      IncludeChromeTrace := ArgsObj.Get('includeChromeTrace', False);
+    end;
+    TelemetryProf := TTelemetryInsightsProfiler.Create(120);
+    OutPayload := TJSONObject.Create;
+    try
+      TelemetryProf.CaptureLiveHierarchyProfileRun(DesignRoot, DesignOwner, MaxLines);
+      TelemetryStats := TelemetryProf.ComputeAggregateStats(16.67);
+      OutPayload.Add('capturedFrames', TelemetryStats.CapturedFrames);
+      OutPayload.Add('totalSpansRecorded', TelemetryStats.TotalSpansRecorded);
+      OutPayload.Add('meanFrameMs', TelemetryStats.MeanFrameMs);
+      OutPayload.Add('minFrameMs', TelemetryStats.MinFrameMs);
+      OutPayload.Add('maxFrameMs', TelemetryStats.MaxFrameMs);
+      OutPayload.Add('p50FrameMs', TelemetryStats.P50FrameMs);
+      OutPayload.Add('p95FrameMs', TelemetryStats.P95FrameMs);
+      OutPayload.Add('p99FrameMs', TelemetryStats.P99FrameMs);
+      OutPayload.Add('hitchSpikeCount', TelemetryStats.HitchSpikeCount);
+      OutPayload.Add('topHotspotCategory', TelemetryStats.TopHotspotCategory);
+      if IncludeChromeTrace then
+        OutPayload.Add('traceEvents', TelemetryProf.ExportChromeTraceEventsArray);
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+      FreeAndNil(TelemetryProf);
     end;
     Exit;
   end;

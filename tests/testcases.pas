@@ -162,6 +162,7 @@ uses
   TestToolHlodStudio,
   TestToolRibbonStudio,
   TestToolSettlementStudio,
+  TestToolTelemetryInsights,
   TestCastleVulkanRHI;
 
 implementation
