@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–340** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–341** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3928,6 +3928,30 @@ SplatImg := Baker.ExportSplatmapRgbaImage;
 
 ---
 
+## 66BN. MegaLights Clustered Light-Grid Culler, Gobo Cookie & Flicker Studio (Phase 341)
+
+Castle Game Engine provides 3D clustered tile light-grid binning, camera-distance culling, tile-overlap hotspot auditing, procedural Light-Function Gobo cookies, and deterministic torch/neon/siren flicker behaviors matching Unreal Engine 6.0+'s MegaLights and Light Function workflows:
+
+1. **MegaLights & Light Functions Runtime (`src/scene/castlemegalights.pas`)**:
+   - `TCastleMegaLightsManager` bins punctual lights across `TilesX x TilesY x TilesZ` 3D clusters (`SphereIntersectsBox`), culls lights beyond `DistanceCullMeters + Radius`, and tracks `HotspotMaxLightsInAnyTile` & `OverflowTileCount`.
+   - `TCastleLightFunctionBehavior` drives temporal flicker curves (`lfpTorchCampfirePerlin`, `lfpBrokenFluorescentStrobe`, `lfpSirenPulseBeacon`) and procedural gobo masks (`EvaluateGoboCookieMask`).
+2. **MegaLights Studio (`TMegaLightsForm` & `TMegaLightsHelper`)**:
+   - Open via the top-bar **`MegaLight`** button, Hierarchy context menu, or **`Design -> MegaLights Clustered Light-Grid, Gobo & Flicker Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TMegaLightsHelper.SpawnCyberpunkAlleyMegaLightsDemo(Viewport, DesignOwner, Mgr);
+Mgr.RebuildLightClusters(Viewport.Items, Vector3(0, 2, 0));
+TMegaLightsHelper.StepAllLightFunctions(Viewport, 0.10);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Lighting](https://castle-engine.io/x3d_implementation_lighting.php) · [UE MegaLights](https://dev.epicgames.com/documentation/en-us/unreal-engine/megalights-in-unreal-engine) · [UE Light Functions](https://dev.epicgames.com/documentation/en-us/unreal-engine/using-light-functions-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Dynamic Lighting & Shaders (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Shader Showcase](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4056,4 +4080,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolcontrolrig.pas`](../tests/code/testcases/testtoolcontrolrig.pas) (`TTestToolControlRig` — 2 tests)**: Verifies 6-joint (`4.00m`) `FABRIK` reachable tip convergence (`< 0.005m`) and out-of-reach straight-line extension (`(0, 0, 4.0)`) with exact `0.80m` segment length preservation (`MaxSegmentLengthDrift < 0.0005m`), progressive `0°..90°` forearm/spine twist distribution, 8-joint sinusoidal tail waves, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolspringarm.pas`](../tests/code/testcases/testtoolspringarm.pas) (`TTestToolSpringArm` — 2 tests)**: Verifies 5-whisker `WorldRay` instant corridor-wall pull-in (`4.50m -> 1.75m` at `Z = 2.0m`), asymmetric smooth exponential ease-out recovery when cleared, off-center grazing pillar corner catch (`Center` clear while `+X` whisker hits), `PositionLagSpeed` chase smoothing, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolerosionstudio.pas`](../tests/code/testcases/testtoolerosionstudio.pas) (`TTestToolErosionStudio` — 2 tests)**: Verifies exact terrain volume conservation across `25` Olsen thermal talus passes on `etpMesaPlateauEscarpment` alongside `> 12°` cliff slope relaxation, verifies `1,200`-droplet Beyer hydraulic gully carving & alluvial deposition, exact `R + G + B + A = 255` RGBA splatmap partition of unity across every texel, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmegalights.pas`](../tests/code/testcases/testtoolmegalights.pas) (`TTestToolMegaLights` — 2 tests)**: Verifies `16x8x16` 3D clustered light-grid binning across `32` cyberpunk alley point lights (`HotspotMaxLightsInAnyTile >= 2`, empty far-corner tiles), automatic `DistanceCullMeters` culling at `Z = 220m` & full restoration at `Z = 0m`, `lfpTorchCampfirePerlin` intensity modulation, `lgpWindowVenetianBlinds` / `lgpUnderwaterCaustics` gobo cookies, and JSON roundtrips (`0 unfreed memory blocks`).
 

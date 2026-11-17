@@ -167,6 +167,7 @@ uses
   TestToolControlRig,
   TestToolSpringArm,
   TestToolErosionStudio,
+  TestToolMegaLights,
   TestCastleVulkanRHI;
 
 implementation

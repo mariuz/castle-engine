@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="153">
+    <Units Count="155">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -847,6 +847,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormErosionStudio"/>
       </Unit152>
+      <Unit153>
+        <Filename Value="../common-code/toolmegalights.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMegaLights"/>
+      </Unit153>
+      <Unit154>
+        <Filename Value="code/formmegalights.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMegaLights"/>
+      </Unit154>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

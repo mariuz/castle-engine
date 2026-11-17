@@ -654,6 +654,7 @@ type
       MenuItemControlRig: TMenuItem;
       MenuItemSpringArm: TMenuItem;
       MenuItemErosionStudio: TMenuItem;
+      MenuItemMegaLights: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -728,6 +729,7 @@ type
     procedure MenuItemControlRigClick(Sender: TObject);
     procedure MenuItemSpringArmClick(Sender: TObject);
     procedure MenuItemErosionStudioClick(Sender: TObject);
+    procedure MenuItemMegaLightsClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2622,6 +2624,11 @@ begin
   MenuItemErosionStudio.Caption := 'Landscape Thermal & Hydraulic Erosion Baker Studio...';
   MenuItemErosionStudio.OnClick := @MenuItemErosionStudioClick;
   MenuItemDesign.Add(MenuItemErosionStudio);
+
+  MenuItemMegaLights := TMenuItem.Create(MenuItemDesign);
+  MenuItemMegaLights.Caption := 'MegaLights Clustered Light-Grid, Gobo & Flicker Studio...';
+  MenuItemMegaLights.OnClick := @MenuItemMegaLightsClick;
+  MenuItemDesign.Add(MenuItemMegaLights);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5922,6 +5929,12 @@ procedure TProjectForm.MenuItemErosionStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowErosionStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemMegaLightsClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMegaLightsDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
