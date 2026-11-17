@@ -47,13 +47,6 @@ type
     type
       { Pointer to the list contents. }
       PtrT = ^T;
-      { Fake infinite array of items, to access them like
-        @code(PTypeList(MyList.L)^[I]) or pass them as an open array
-        with @code(Slice(PTypeList(MyList.L)^, MyList.Count)).
-        Like with TStructList, we assume that T has max size 16 * 16 on Delphi. }
-      TTypeList = array [0 .. MaxInt div {$ifdef FPC}SizeOf(T){$else}(16 * 16){$endif} - 1] of T;
-      PTypeList = ^TTypeList;
-
   strict private
     type
       TEnumerator = record
@@ -125,13 +118,17 @@ type
       to set their fields.  }
     property L: PtrT read FItems;
 
-    { Access the list contents through a pointer to an array of items.
-      This is exactly the same pointer as @link(L), but the type is different.
-      @seealso L }
-    function List: PTypeList; deprecated 'use L, like MyList.L[123] instead of MyList.List^[123]';
-
     { Pointer to the I-th item. }
     function Ptr(const I: TListSize): PtrT;
+
+    {$ifndef FPC}
+    { Get and set items, for generic code in Delphi
+      (where the class is a generic constraint, like TX3DSimpleMultField).
+      @exclude }
+    function InternalGetItem(const Index: TListSize): T;
+    { @exclude }
+    procedure InternalSetItem(const Index: TListSize; const Value: T);
+    {$endif}
 
     { Size of one item, in bytes. }
     function ItemSize: TListSize;
@@ -272,10 +269,17 @@ begin
   Result := PtrT(PtrUInt(FItems) + PtrUInt(SizeOf(T)) * PtrUInt(I));
 end;
 
-function TCastleFastList{$ifndef FPC}<T>{$endif}.List: PTypeList;
+{$ifndef FPC}
+function TCastleFastList<T>.InternalGetItem(const Index: TListSize): T;
 begin
-  Result := PTypeList(FItems);
+  Result := Ptr(Index)^;
 end;
+
+procedure TCastleFastList<T>.InternalSetItem(const Index: TListSize; const Value: T);
+begin
+  Ptr(Index)^ := Value;
+end;
+{$endif}
 
 function TCastleFastList{$ifndef FPC}<T>{$endif}.ItemSize: TListSize;
 begin
