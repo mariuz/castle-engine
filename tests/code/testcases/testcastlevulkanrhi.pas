@@ -20,6 +20,7 @@ interface
 
 uses
   Classes, SysUtils, Math,
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)} X, Xlib, {$endif}
   CastleTester, CastleUtils, CastleVectors, CastleColors, CastleRectangles,
   CastleBoxes, CastleFrustum, CastleTimeUtils,
   CastleApplicationProperties, CastleImages, CastleGLImages, CastleFonts,
@@ -412,6 +413,9 @@ type
     procedure TestRealLavapipeIBLComputeBrdfLutPrefilterAndIrradianceCubemapRHI;
     procedure TestRealLavapipeSkyboxBackgroundCubemap3DTextureAndMultiTextureRHI;
     procedure TestRealLavapipeEnvironmentLightSplitSumIBL3DViewportRHI;
+    procedure TestSharedDeviceMultiControlSwapchainSurfacesHeadlessAndSimulatedRHI;
+    procedure TestRealVulkanMultiControlHeadlessSurfacesSharedDevice3DAnd2DRHI;
+    procedure TestRealX11MultiChildWidgetSurfacesSharedVulkanDevicePresentAndResizeRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -33377,6 +33381,606 @@ begin
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(RealDev);
   end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSharedDeviceMultiControlSwapchainSurfacesHeadlessAndSimulatedRHI;
+var
+  HeadlessDev: TVulkanRHIDevice;
+  Surf1, Surf2, Surf3: TCastleVulkanSwapchainSurface;
+  Cmd: TRHICommandList;
+  PassInfo: TRHIRenderingInfo;
+  Tick: Integer;
+begin
+  HeadlessDev := TVulkanRHIDevice.CreateHeadless(nil);
+  Surf1 := nil;
+  Surf2 := nil;
+  Surf3 := nil;
+  try
+    AssertEquals('Initial SwapchainSurfaceCount = 0', Cardinal(0), HeadlessDev.SwapchainSurfaceCount);
+
+    Surf1 := HeadlessDev.CreateSimulatedSwapchainSurface(
+      160, 120, 2, pfBGRA8_UNorm, pfD24_UNorm_S8_UInt, 'EditorLeftControl');
+    Surf2 := HeadlessDev.CreateSimulatedSwapchainSurface(
+      200, 100, 3, pfRGBA8_UNorm, pfD32_Float, 'EditorCenterControl');
+    Surf2.AntiAliasing := aa4SamplesFaster;
+    Surf3 := HeadlessDev.CreateSimulatedSwapchainSurface(
+      80, 80, 2, pfBGRA8_UNorm, pfD24_UNorm_S8_UInt, 'EditorInspectorPreview');
+
+    AssertEquals('SwapchainSurfaceCount = 3', Cardinal(3), HeadlessDev.SwapchainSurfaceCount);
+    AssertTrue('GetSwapchainSurface(0) = Surf1', HeadlessDev.GetSwapchainSurface(0) = Surf1);
+    AssertTrue('GetSwapchainSurface(1) = Surf2', HeadlessDev.GetSwapchainSurface(1) = Surf2);
+    AssertTrue('GetSwapchainSurface(2) = Surf3', HeadlessDev.GetSwapchainSurface(2) = Surf3);
+    AssertEquals('Surf1 extent width = 160', Cardinal(160), Surf1.SwapchainExtent.width);
+    AssertEquals('Surf1 extent height = 120', Cardinal(120), Surf1.SwapchainExtent.height);
+    AssertEquals('Surf1 SampleCount = 1', Cardinal(1), Surf1.SampleCount);
+    AssertTrue('Surf1 MSAAColorTexture must be nil when SampleCount = 1', Surf1.MSAAColorTexture = nil);
+    AssertEquals('Surf2 extent width = 200', Cardinal(200), Surf2.SwapchainExtent.width);
+    AssertEquals('Surf2 image count = 3', Cardinal(3), Surf2.SwapchainImageCount);
+    AssertEquals('Surf2 SampleCount = 4', Cardinal(4), Surf2.SampleCount);
+    AssertTrue('Surf2 MSAAColorTexture must be allocated for 4x MSAA', Surf2.MSAAColorTexture <> nil);
+    AssertTrue('Surf2 MSAADepthTexture must be allocated for 4x MSAA', Surf2.MSAADepthTexture <> nil);
+
+    { Render 3 interleaved UI ticks across all 3 simulated control swapchains (> MaxFramesInFlight = 2) }
+    for Tick := 0 to 2 do
+    begin
+      Cmd := HeadlessDev.BeginSurfaceFrame(Surf1);
+      AssertTrue('BeginSurfaceFrame(Surf1) must return active command list', Cmd <> nil);
+      AssertTrue('ActiveSwapchainSurface must route to Surf1', HeadlessDev.ActiveSwapchainSurface = Surf1);
+      AssertTrue('GetSwapchainColorTexture must route to Surf1 color target',
+        HeadlessDev.GetSwapchainColorTexture = Surf1.GetCurrentColorTexture);
+      PassInfo := Surf1.BuildRenderingInfo(Rectangle(0, 0, 160, 120), Vector4(0.1, 0.2, 0.4, 1.0));
+      Cmd.BeginRendering(PassInfo);
+      Cmd.EndRendering;
+      HeadlessDev.EndSurfaceFrameAndPresent(Surf1);
+
+      Cmd := HeadlessDev.BeginSurfaceFrame(Surf2);
+      AssertTrue('BeginSurfaceFrame(Surf2) must return active command list', Cmd <> nil);
+      AssertTrue('ActiveSwapchainSurface must route to Surf2', HeadlessDev.ActiveSwapchainSurface = Surf2);
+      PassInfo := Surf2.BuildRenderingInfo(Rectangle(0, 0, 200, 100), Vector4(0.4, 0.1, 0.2, 1.0));
+      AssertTrue('Surf2 4x MSAA BuildRenderingInfo must attach ResolveTexture',
+        PassInfo.ColorAttachments[0].ResolveTexture = Surf2.GetCurrentColorTexture);
+      Cmd.BeginRendering(PassInfo);
+      AssertTrue('During active MSAA pass GetSwapchainColorTexture resolves to Surf2 swapchain image',
+        HeadlessDev.GetSwapchainColorTexture = Surf2.GetCurrentColorTexture);
+      Cmd.EndRendering;
+      HeadlessDev.EndSurfaceFrameAndPresent(Surf2);
+
+      Cmd := HeadlessDev.BeginSurfaceFrame(Surf3);
+      AssertTrue('BeginSurfaceFrame(Surf3) must return active command list', Cmd <> nil);
+      PassInfo := Surf3.BuildRenderingInfo(Rectangle(0, 0, 80, 80), Vector4(0.2, 0.4, 0.1, 1.0));
+      Cmd.BeginRendering(PassInfo);
+      Cmd.EndRendering;
+      HeadlessDev.EndSurfaceFrameAndPresent(Surf3);
+    end;
+
+    AssertEquals('Surf1 FramesPresentedCount = 3', Cardinal(3), Surf1.FramesPresentedCount);
+    AssertEquals('Surf2 FramesPresentedCount = 3', Cardinal(3), Surf2.FramesPresentedCount);
+    AssertEquals('Surf3 FramesPresentedCount = 3', Cardinal(3), Surf3.FramesPresentedCount);
+    AssertEquals('TotalFramesPresented = 9', Cardinal(9), HeadlessDev.TotalFramesPresented);
+
+    { Test 0x0 minimize pause & live resize recovery on Surf1 }
+    Surf1.Resize(0, 0);
+    AssertTrue('Surf1 must mark SwapchainMinimized on 0x0 resize', Surf1.SwapchainMinimized);
+    AssertTrue('BeginSurfaceFrame on minimized Surf1 must return nil without error',
+      HeadlessDev.BeginSurfaceFrame(Surf1) = nil);
+    Surf1.Resize(240, 160);
+    AssertFalse('Surf1 SwapchainMinimized must clear on non-zero resize', Surf1.SwapchainMinimized);
+    AssertEquals('Surf1 resized width = 240', Cardinal(240), Surf1.SwapchainExtent.width);
+    AssertEquals('Surf1 resized height = 160', Cardinal(160), Surf1.SwapchainExtent.height);
+
+    { Destroy active Surf2 mid-session while keeping Surf1 and Surf3 active on the shared device }
+    HeadlessDev.ActiveSwapchainSurface := Surf2;
+    HeadlessDev.DestroySwapchainSurface(Surf2);
+    AssertTrue('DestroySwapchainSurface must nil Surf2 reference', Surf2 = nil);
+    AssertEquals('SwapchainSurfaceCount must drop to 2', Cardinal(2), HeadlessDev.SwapchainSurfaceCount);
+    AssertTrue('ActiveSwapchainSurface must remain valid after destroying Surf2',
+      HeadlessDev.ActiveSwapchainSurface = Surf3);
+
+    Cmd := HeadlessDev.BeginSurfaceFrame(Surf1);
+    AssertTrue('Surf1 must continue rendering after sibling Surf2 is destroyed', Cmd <> nil);
+    PassInfo := Surf1.BuildRenderingInfo(Rectangle(0, 0, 240, 160), Vector4(0.1, 0.2, 0.4, 1.0));
+    Cmd.BeginRendering(PassInfo);
+    Cmd.EndRendering;
+    HeadlessDev.EndSurfaceFrameAndPresent(Surf1);
+    AssertEquals('Surf1 FramesPresentedCount = 4', Cardinal(4), Surf1.FramesPresentedCount);
+  finally
+    HeadlessDev.DestroySwapchainSurface(Surf3);
+    HeadlessDev.DestroySwapchainSurface(Surf2);
+    HeadlessDev.DestroySwapchainSurface(Surf1);
+    FreeAndNil(HeadlessDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealVulkanMultiControlHeadlessSurfacesSharedDevice3DAnd2DRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  Surf1, Surf2, Surf3: TCastleVulkanSwapchainSurface;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Cont1, Cont2, Cont3: TTestSizedVulkanContainer;
+  VP1, VP2, VP3: TCastleViewport;
+  SharedScene: TCastleScene;
+  Root: TX3DRootNode;
+  DirLight: TDirectionalLightNode;
+  Shape: TShapeNode;
+  Sphere: TSphereNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  BadgeCpu: TRGBAlphaImage;
+  SharedBadge: TDrawableImage;
+  RealCmd: TVulkanRHICommandList;
+  PassInfo: TRHIRenderingInfo;
+  Shot1, Shot2, Shot3, Shot1Resized: TRGBAlphaImage;
+  Tick: Integer;
+
+  procedure RenderControlSurface(const ASurf: TCastleVulkanSwapchainSurface;
+    const ACont: TTestSizedVulkanContainer; const AVP: TCastleViewport;
+    const ADrawBadge: Boolean);
+  var
+    W, H: Integer;
+    Area: TRectangle;
+  begin
+    W := Integer(ASurf.SwapchainExtent.width);
+    H := Integer(ASurf.SwapchainExtent.height);
+    ACont.TestWidth := W;
+    ACont.TestHeight := H;
+    RenderContext := ACont.Context;
+
+    RealCmd := RealDev.BeginSurfaceFrame(ASurf) as TVulkanRHICommandList;
+    AssertTrue('BeginSurfaceFrame must acquire swapchain image on ' + ASurf.DebugName, RealCmd <> nil);
+    SetActiveCommandList(RealCmd);
+
+    ACont.EventUpdate;
+    AVP.BeforeRender;
+
+    Area := Rectangle(0, 0, W, H);
+    RenderContext.Viewport := Area;
+    PassInfo := ASurf.BuildRenderingInfo(Area, AVP.BackgroundColor, loClear, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    RealCmd.SetViewport(FloatRectangle(Area), 0.0, 1.0);
+    RealCmd.SetScissor(Area);
+
+    AVP.Render;
+    if ADrawBadge and (SharedBadge <> nil) then
+    begin
+      SharedBadge.Draw(FloatRectangle(6, 6, 24, 24));
+      TDrawableImage.BatchingFlush;
+    end;
+    AVP.RenderOverChildren;
+    RealCmd.EndRendering;
+    RealDev.EndSurfaceFrameAndPresent(ASurf);
+  end;
+
+begin
+  if not IsVulkanInstanceExtensionSupported(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME) then
+    Exit;
+
+  RealDev := nil;
+  if not TVulkanRHIDevice.TryCreateSharedWithWSI(RealDev, True, @CreateHeadlessSurfaceForTest) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  Surf1 := nil;
+  Surf2 := nil;
+  Surf3 := nil;
+  Cont1 := nil;
+  Cont2 := nil;
+  Cont3 := nil;
+  VP1 := nil;
+  VP2 := nil;
+  VP3 := nil;
+  SharedScene := nil;
+  SharedBadge := nil;
+  Shot1 := nil;
+  Shot2 := nil;
+  Shot3 := nil;
+  Shot1Resized := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+
+    { Attach 3 independent live VkSurfaceKHR + VkSwapchainKHR control surfaces to 1 shared TVulkanRHIDevice }
+    Surf1 := RealDev.CreateSwapchainSurface(
+      TVulkanNativeSurfaceDesc.CreateHeadless, 160, 120, 'ControlPane1_Front');
+    Surf2 := RealDev.CreateSwapchainSurface(
+      TVulkanNativeSurfaceDesc.CreateHeadless, 128, 128, 'ControlPane2_SideHUD');
+    Surf3 := RealDev.CreateSwapchainSurface(
+      TVulkanNativeSurfaceDesc.CreateHeadless, 96, 96, 'ControlPane3_Preview');
+
+    AssertEquals('RealDev.SwapchainSurfaceCount = 3', Cardinal(3), RealDev.SwapchainSurfaceCount);
+    AssertTrue('Surf1 SwapchainHandle valid', Surf1.SwapchainHandle <> VK_NULL_HANDLE);
+    AssertTrue('Surf2 SwapchainHandle valid', Surf2.SwapchainHandle <> VK_NULL_HANDLE);
+    AssertTrue('Surf3 SwapchainHandle valid', Surf3.SwapchainHandle <> VK_NULL_HANDLE);
+    AssertTrue('All 3 VkSwapchainKHR handles are distinct',
+      (Surf1.SwapchainHandle <> Surf2.SwapchainHandle) and
+      (Surf2.SwapchainHandle <> Surf3.SwapchainHandle) and
+      (Surf1.SwapchainHandle <> Surf3.SwapchainHandle));
+
+    { Build one shared 3D PBR scene + one shared 2D TDrawableImage rendered across multiple controls }
+    Root := TX3DRootNode.Create;
+    DirLight := TDirectionalLightNode.Create;
+    DirLight.Direction := Vector3(0.0, 0.0, -1.0);
+    DirLight.Intensity := 2.4;
+    Root.AddChildren(DirLight);
+
+    Shape := TShapeNode.Create;
+    Sphere := TSphereNode.Create;
+    Sphere.Radius := 1.25;
+    Sphere.Slices := 24;
+    Sphere.Stacks := 24;
+    Shape.Geometry := Sphere;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Mat.BaseColor := Vector3(0.10, 0.95, 0.25); { Vivid Emerald Green }
+    Mat.Roughness := 0.35;
+    Mat.Metallic := 0.0;
+    App.Material := Mat;
+    Shape.Appearance := App;
+    Root.AddChildren(Shape);
+
+    SharedScene := TCastleScene.Create(nil);
+    SharedScene.Load(Root, True);
+
+    BadgeCpu := TRGBAlphaImage.Create(16, 16);
+    BadgeCpu.Clear(Vector4Byte(255, 230, 20, 255)); { Bright Gold HUD Badge }
+    SharedBadge := TDrawableImage.Create(BadgeCpu, True, True);
+
+    Cont1 := TTestSizedVulkanContainer.Create(nil);
+    VP1 := TCastleViewport.Create(nil);
+    VP1.FullSize := True;
+    VP1.BackgroundColor := Vector4(0.02, 0.05, 0.45, 1.0); { Deep Navy }
+    Cont1.Controls.InsertFront(VP1);
+    VP1.Items.Add(SharedScene);
+    VP1.Camera.SetWorldView(Vector3(0, 0, 3.8), Vector3(0, 0, -1), Vector3(0, 1, 0));
+
+    Cont2 := TTestSizedVulkanContainer.Create(nil);
+    VP2 := TCastleViewport.Create(nil);
+    VP2.FullSize := True;
+    VP2.BackgroundColor := Vector4(0.45, 0.03, 0.05, 1.0); { Deep Crimson }
+    Cont2.Controls.InsertFront(VP2);
+    VP2.Items.Remove(VP2.Camera);
+    VP2.Items := VP1.Items;
+    VP1.Items.Add(VP2.Camera);
+    VP2.Camera.SetWorldView(Vector3(0, 0, 3.8), Vector3(0, 0, -1), Vector3(0, 1, 0));
+
+    Cont3 := TTestSizedVulkanContainer.Create(nil);
+    VP3 := TCastleViewport.Create(nil);
+    VP3.FullSize := True;
+    VP3.BackgroundColor := Vector4(0.38, 0.28, 0.02, 1.0); { Warm Bronze }
+    Cont3.Controls.InsertFront(VP3);
+    VP3.Items.Remove(VP3.Camera);
+    VP3.Items := VP1.Items;
+    VP1.Items.Add(VP3.Camera);
+    VP3.Camera.SetWorldView(Vector3(0, 0, 3.8), Vector3(0, 0, -1), Vector3(0, 1, 0));
+
+    { Render 2 full ticks across all 3 live swapchains (6 submissions across 2 frame-in-flight slots) }
+    for Tick := 0 to 1 do
+    begin
+      RenderControlSurface(Surf1, Cont1, VP1, False);
+      if Tick = 1 then
+        Shot1 := RealDev.GrabTextureImage(Surf1.GetCurrentColorTexture, Rectangle(0, 0, 160, 120));
+
+      RenderControlSurface(Surf2, Cont2, VP2, True);
+      if Tick = 1 then
+        Shot2 := RealDev.GrabTextureImage(Surf2.GetCurrentColorTexture, Rectangle(0, 0, 128, 128));
+
+      RenderControlSurface(Surf3, Cont3, VP3, False);
+      if Tick = 1 then
+        Shot3 := RealDev.GrabTextureImage(Surf3.GetCurrentColorTexture, Rectangle(0, 0, 96, 96));
+    end;
+
+    AssertEquals('Shot1 dimensions 160x120', 160, Shot1.Width);
+    AssertEquals('Shot2 dimensions 128x128', 128, Shot2.Width);
+    AssertEquals('Shot3 dimensions 96x96', 96, Shot3.Width);
+
+    { Verify each control swapchain rendered its own background + the shared 3D PBR emerald sphere }
+    AssertTrue('Control 1 center (80,60) emerald sphere G > 140', Shot1.PixelPtr(80, 60)^.Y > 140);
+    AssertTrue('Control 1 corner (4,4) navy background B > R + 60',
+      Shot1.PixelPtr(4, 4)^.Z > Shot1.PixelPtr(4, 4)^.X + 60);
+
+    AssertTrue('Control 2 center (64,64) emerald sphere G > 140', Shot2.PixelPtr(64, 64)^.Y > 140);
+    AssertTrue('Control 2 top-right corner (120,120) crimson background R > B + 60',
+      Shot2.PixelPtr(120, 120)^.X > Shot2.PixelPtr(120, 120)^.Z + 60);
+    AssertTrue('Control 2 bottom-left (14,14) 2D gold HUD badge R > 200 and G > 180',
+      (Shot2.PixelPtr(14, 14)^.X > 200) and (Shot2.PixelPtr(14, 14)^.Y > 180));
+
+    AssertTrue('Control 3 center (48,48) emerald sphere G > 140', Shot3.PixelPtr(48, 48)^.Y > 140);
+    AssertTrue('Control 3 corner (4,4) bronze background R > B + 40',
+      Shot3.PixelPtr(4, 4)^.X > Shot3.PixelPtr(4, 4)^.Z + 40);
+
+    { Resize Control 1 live (160x120 -> 208x144) AND close Control 2 mid-session }
+    Surf1.Resize(208, 144);
+    RealDev.DestroySwapchainSurface(Surf2);
+    AssertTrue('Surf2 destroyed cleanly', Surf2 = nil);
+    AssertEquals('Remaining SwapchainSurfaceCount = 2', Cardinal(2), RealDev.SwapchainSurfaceCount);
+
+    { Continue rendering remaining Controls 1 & 3 using shared GPU scene }
+    RenderControlSurface(Surf1, Cont1, VP1, False);
+    Shot1Resized := RealDev.GrabTextureImage(Surf1.GetCurrentColorTexture, Rectangle(0, 0, 208, 144));
+    RenderControlSurface(Surf3, Cont3, VP3, False);
+
+    AssertEquals('Resized Shot1 width = 208', 208, Shot1Resized.Width);
+    AssertEquals('Resized Shot1 height = 144', 144, Shot1Resized.Height);
+    AssertTrue('Resized Control 1 center (104,72) shared emerald sphere still renders G > 140',
+      Shot1Resized.PixelPtr(104, 72)^.Y > 140);
+
+    RealDev.AssertZeroValidationErrors('Phase115.MultiControlHeadlessSurfacesSharedDevice');
+  finally
+    FreeAndNil(Shot1Resized);
+    FreeAndNil(Shot3);
+    FreeAndNil(Shot2);
+    FreeAndNil(Shot1);
+    FreeAndNil(VP3);
+    FreeAndNil(VP2);
+    if VP1 <> nil then VP1.Items.Remove(SharedScene);
+    FreeAndNil(SharedBadge);
+    FreeAndNil(SharedScene);
+    FreeAndNil(VP1);
+    FreeAndNil(Cont3);
+    FreeAndNil(Cont2);
+    FreeAndNil(Cont1);
+    FreeGlobalBatch2DRenderer;
+    RealDev.DestroySwapchainSurface(Surf3);
+    RealDev.DestroySwapchainSurface(Surf2);
+    RealDev.DestroySwapchainSurface(Surf1);
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealX11MultiChildWidgetSurfacesSharedVulkanDevicePresentAndResizeRHI;
+{$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+var
+  XDisp: PDisplay;
+  ScreenNum: Integer;
+  RootWin, ParentFormWin, LeftChildWin, RightChildWin: TWindow;
+  RealDev: TVulkanRHIDevice;
+  LeftSurf, RightSurf: TCastleVulkanSwapchainSurface;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  LeftCont, RightCont: TTestSizedVulkanContainer;
+  LeftVP, RightVP: TCastleViewport;
+  LeftScene, RightScene: TCastleScene;
+  ShotLeft, ShotRight, ShotLeftResized: TRGBAlphaImage;
+  Tick: Integer;
+
+  function BuildColoredBoxScene(const ABaseColor: TVector3): TCastleScene;
+  var
+    Root: TX3DRootNode;
+    DirLight: TDirectionalLightNode;
+    Shape: TShapeNode;
+    Box: TBoxNode;
+    App: TAppearanceNode;
+    Mat: TPhysicalMaterialNode;
+  begin
+    Root := TX3DRootNode.Create;
+    DirLight := TDirectionalLightNode.Create;
+    DirLight.Direction := Vector3(0.0, 0.0, -1.0);
+    DirLight.Intensity := 2.2;
+    Root.AddChildren(DirLight);
+
+    Shape := TShapeNode.Create;
+    Box := TBoxNode.Create;
+    Box.Size := Vector3(2.2, 2.2, 0.6);
+    Shape.Geometry := Box;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Mat.BaseColor := ABaseColor;
+    Mat.Roughness := 0.4;
+    Mat.Metallic := 0.0;
+    App.Material := Mat;
+    Shape.Appearance := App;
+    Root.AddChildren(Shape);
+
+    Result := TCastleScene.Create(nil);
+    Result.Load(Root, True);
+  end;
+
+  procedure RenderChildPane(const ASurf: TCastleVulkanSwapchainSurface;
+    const ACont: TTestSizedVulkanContainer; const AVP: TCastleViewport);
+  var
+    W, H: Integer;
+    Area: TRectangle;
+    Cmd: TVulkanRHICommandList;
+    PassInfo: TRHIRenderingInfo;
+  begin
+    W := Integer(ASurf.SwapchainExtent.width);
+    H := Integer(ASurf.SwapchainExtent.height);
+    ACont.TestWidth := W;
+    ACont.TestHeight := H;
+    RenderContext := ACont.Context;
+
+    Cmd := RealDev.BeginSurfaceFrame(ASurf) as TVulkanRHICommandList;
+    AssertTrue('BeginSurfaceFrame must succeed on X11 child window ' + ASurf.DebugName, Cmd <> nil);
+    SetActiveCommandList(Cmd);
+
+    ACont.EventUpdate;
+    AVP.BeforeRender;
+
+    Area := Rectangle(0, 0, W, H);
+    RenderContext.Viewport := Area;
+    PassInfo := ASurf.BuildRenderingInfo(Area, AVP.BackgroundColor, loClear, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+    Cmd.SetViewport(FloatRectangle(Area), 0.0, 1.0);
+    Cmd.SetScissor(Area);
+    AVP.Render;
+    AVP.RenderOverChildren;
+    Cmd.EndRendering;
+    RealDev.EndSurfaceFrameAndPresent(ASurf);
+  end;
+
+begin
+  if GetEnvironmentVariable('DISPLAY') = '' then
+    Exit;
+  if not IsVulkanInstanceExtensionSupported(VK_KHR_XLIB_SURFACE_EXTENSION_NAME) then
+    Exit;
+
+  XDisp := XOpenDisplay(nil);
+  if XDisp = nil then
+    Exit;
+
+  ParentFormWin := 0;
+  LeftChildWin := 0;
+  RightChildWin := 0;
+  RealDev := nil;
+  LeftSurf := nil;
+  RightSurf := nil;
+  LeftCont := nil;
+  RightCont := nil;
+  LeftVP := nil;
+  RightVP := nil;
+  LeftScene := nil;
+  RightScene := nil;
+  ShotLeft := nil;
+  ShotRight := nil;
+  ShotLeftResized := nil;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  try
+    ScreenNum := DefaultScreen(XDisp);
+    RootWin := RootWindow(XDisp, ScreenNum);
+
+    { Create top-level parent form XWindow + 2 native child widget sub-windows (like 2 TCastleControls on a form) }
+    ParentFormWin := XCreateSimpleWindow(XDisp, RootWin, 0, 0, 320, 160, 0,
+      BlackPixel(XDisp, ScreenNum), BlackPixel(XDisp, ScreenNum));
+    LeftChildWin := XCreateSimpleWindow(XDisp, ParentFormWin, 4, 8, 144, 120, 0,
+      BlackPixel(XDisp, ScreenNum), BlackPixel(XDisp, ScreenNum));
+    RightChildWin := XCreateSimpleWindow(XDisp, ParentFormWin, 164, 8, 144, 120, 0,
+      BlackPixel(XDisp, ScreenNum), BlackPixel(XDisp, ScreenNum));
+    XMapWindow(XDisp, LeftChildWin);
+    XMapWindow(XDisp, RightChildWin);
+    XMapWindow(XDisp, ParentFormWin);
+    XSync(XDisp, False);
+
+    if not TVulkanRHIDevice.TryCreateSharedWithWSI(RealDev, True) then
+      Exit;
+
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+
+    LeftSurf := RealDev.CreateSwapchainSurface(
+      TVulkanNativeSurfaceDesc.CreateXlib(PVkXlibDisplay(XDisp), VkXlibWindow(LeftChildWin)),
+      144, 120, 'X11LeftChildControl');
+    RightSurf := RealDev.CreateSwapchainSurface(
+      TVulkanNativeSurfaceDesc.CreateXlib(PVkXlibDisplay(XDisp), VkXlibWindow(RightChildWin)),
+      144, 120, 'X11RightChildControl');
+
+    AssertEquals('Shared X11 SwapchainSurfaceCount = 2', Cardinal(2), RealDev.SwapchainSurfaceCount);
+    AssertEquals('LeftSurf extent 144x120', Cardinal(144), LeftSurf.SwapchainExtent.width);
+    AssertEquals('RightSurf extent 144x120', Cardinal(144), RightSurf.SwapchainExtent.width);
+
+    LeftScene := BuildColoredBoxScene(Vector3(1.0, 0.20, 0.05)); { Orange-Red box }
+    RightScene := BuildColoredBoxScene(Vector3(0.10, 0.75, 1.0)); { Cyan-Blue box }
+
+    LeftCont := TTestSizedVulkanContainer.Create(nil);
+    LeftVP := TCastleViewport.Create(nil);
+    LeftVP.FullSize := True;
+    LeftVP.BackgroundColor := Vector4(0.02, 0.04, 0.25, 1.0);
+    LeftCont.Controls.InsertFront(LeftVP);
+    LeftVP.Items.Add(LeftScene);
+    LeftVP.Camera.SetWorldView(Vector3(0, 0, 4.2), Vector3(0, 0, -1), Vector3(0, 1, 0));
+
+    RightCont := TTestSizedVulkanContainer.Create(nil);
+    RightVP := TCastleViewport.Create(nil);
+    RightVP.FullSize := True;
+    RightVP.BackgroundColor := Vector4(0.18, 0.04, 0.22, 1.0);
+    RightCont.Controls.InsertFront(RightVP);
+    RightVP.Items.Add(RightScene);
+    RightVP.Camera.SetWorldView(Vector3(0, 0, 4.2), Vector3(0, 0, -1), Vector3(0, 1, 0));
+
+    for Tick := 0 to 2 do
+    begin
+      RenderChildPane(LeftSurf, LeftCont, LeftVP);
+      if Tick = 2 then
+        ShotLeft := RealDev.GrabTextureImage(LeftSurf.GetCurrentColorTexture, Rectangle(0, 0, 144, 120));
+
+      RenderChildPane(RightSurf, RightCont, RightVP);
+      if Tick = 2 then
+        ShotRight := RealDev.GrabTextureImage(RightSurf.GetCurrentColorTexture, Rectangle(0, 0, 144, 120));
+    end;
+    XSync(XDisp, False);
+
+    AssertTrue('Left X11 child pane center (72,60) orange-red box R > B + 80',
+      ShotLeft.PixelPtr(72, 60)^.X > ShotLeft.PixelPtr(72, 60)^.Z + 80);
+    AssertTrue('Right X11 child pane center (72,60) cyan-blue box B > R + 80',
+      ShotRight.PixelPtr(72, 60)^.Z > ShotRight.PixelPtr(72, 60)^.X + 80);
+
+    { Live XResizeWindow on LeftChildWin (144x120 -> 176x136) + swapchain recreation }
+    XResizeWindow(XDisp, LeftChildWin, 176, 136);
+    XSync(XDisp, False);
+    LeftSurf.Resize(176, 136);
+    AssertEquals('Resized LeftSurf X11 swapchain width = 176', Cardinal(176), LeftSurf.SwapchainExtent.width);
+    AssertEquals('Resized LeftSurf X11 swapchain height = 136', Cardinal(136), LeftSurf.SwapchainExtent.height);
+
+    for Tick := 0 to 1 do
+    begin
+      RenderChildPane(LeftSurf, LeftCont, LeftVP);
+      RenderChildPane(RightSurf, RightCont, RightVP);
+    end;
+    ShotLeftResized := RealDev.GrabTextureImage(LeftSurf.GetCurrentColorTexture, Rectangle(0, 0, 176, 136));
+    AssertTrue('Resized Left X11 child pane center (88,68) orange-red box R > B + 80',
+      ShotLeftResized.PixelPtr(88, 68)^.X > ShotLeftResized.PixelPtr(88, 68)^.Z + 80);
+
+    { Close RightSurf child control first while LeftSurf continues presenting }
+    RealDev.DestroySwapchainSurface(RightSurf);
+    RenderChildPane(LeftSurf, LeftCont, LeftVP);
+    XSync(XDisp, False);
+
+    RealDev.AssertZeroValidationErrors('Phase115.X11MultiChildWidgetSurfaces');
+  finally
+    FreeAndNil(ShotLeftResized);
+    FreeAndNil(ShotRight);
+    FreeAndNil(ShotLeft);
+    FreeAndNil(RightScene);
+    FreeAndNil(LeftScene);
+    FreeAndNil(RightVP);
+    FreeAndNil(LeftVP);
+    FreeAndNil(RightCont);
+    FreeAndNil(LeftCont);
+    FreeGlobalBatch2DRenderer;
+    if RealDev <> nil then
+    begin
+      RealDev.DestroySwapchainSurface(RightSurf);
+      RealDev.DestroySwapchainSurface(LeftSurf);
+    end;
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+    if RightChildWin <> 0 then
+      XDestroyWindow(XDisp, RightChildWin);
+    if LeftChildWin <> 0 then
+      XDestroyWindow(XDisp, LeftChildWin);
+    if ParentFormWin <> 0 then
+      XDestroyWindow(XDisp, ParentFormWin);
+    XSync(XDisp, False);
+    XCloseDisplay(XDisp);
+  end;
+{$else}
+begin
+  { Non-X11 target OS }
+{$endif}
 end;
 
 initialization

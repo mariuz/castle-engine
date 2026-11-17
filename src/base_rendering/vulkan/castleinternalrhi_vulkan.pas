@@ -33,6 +33,7 @@ type
   TVulkanRHIDevice = class;
   TCastleVulkanTimelineSemaphore = class;
   TCastleVulkanWorkerCommandPoolManager = class;
+  TCastleVulkanSwapchainSurface = class;
 
   { Callback provided by TCastleWindow to create the platform-specific VkSurfaceKHR }
   TVulkanCreateSurfaceEvent = function(const Instance: VkInstance): VkSurfaceKHR of object;
@@ -4068,11 +4069,110 @@ type
   TVulkanRenderPassMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkRenderPass>;
   TVulkanFramebufferMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkFramebuffer>;
 
+  { Independent per-control / per-widget Vulkan WSI surface + swapchain bound to a shared
+    TVulkanRHIDevice (Phase 115: TCastleControl multi-pane / castle-editor / VCL / FMX). }
+  TCastleVulkanSwapchainSurface = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FSurface: VkSurfaceKHR;
+    FOwnsSurface: Boolean;
+    FSwapchain: VkSwapchainKHR;
+    FSwapchainFormat: TRHIPixelFormat;
+    FSwapchainDepthFormat: TRHIPixelFormat;
+    FSwapchainColorSpace: VkColorSpaceKHR;
+    FSwapchainPresentMode: VkPresentModeKHR;
+    FSwapchainCompositeAlpha: Integer;
+    FSwapchainRecreateCount: Cardinal;
+    FSwapchainExtent: VkExtent2D;
+    FRequestedWidth: Cardinal;
+    FRequestedHeight: Cardinal;
+    FSwapchainMinimized: Boolean;
+    FSwapchainSuboptimal: Boolean;
+    FColorTextures: array of TVulkanRHITexture;
+    FImageAvailableSemaphores: array[0 .. MaxFramesInFlight - 1] of VkSemaphore;
+    FRenderFinishedSemaphores: array of VkSemaphore;
+    FImageInFlightFences: array of VkFence;
+    FDepthTexture: TVulkanRHITexture;
+    FMSAAColorTexture: TVulkanRHITexture;
+    FMSAADepthTexture: TVulkanRHITexture;
+    FCurrentImageIndex: Cardinal;
+    FAntiAliasing: TAntiAliasing;
+    FSampleCount: Cardinal;
+    FFramesPresentedCount: Cardinal;
+    FDebugName: String;
+    procedure CreateSyncObjects;
+    procedure DestroySyncObjects;
+    procedure CreateSwapchain(const AWidth, AHeight: Cardinal);
+    procedure DestroySwapchainResources(const ADestroySwapchainHandle: Boolean = True);
+    procedure EnsureMSAATargets(const AWidth, AHeight: Cardinal;
+      const AColorFormat, ADepthFormat: TRHIPixelFormat);
+    function GetSwapchainImageCount: Cardinal;
+    procedure SetAntiAliasing(const AValue: TAntiAliasing);
+    procedure SetSampleCount(const AValue: Cardinal);
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
+      const InitialWidth, InitialHeight: Cardinal;
+      const ADebugName: String = ''); overload;
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const ANativeDesc: TVulkanNativeSurfaceDesc;
+      const InitialWidth, InitialHeight: Cardinal;
+      const ADebugName: String = ''); overload;
+    constructor CreateSimulatedForTesting(const ADevice: TVulkanRHIDevice;
+      const AWidth, AHeight: Cardinal;
+      const AImageCount: Cardinal = 2;
+      const AColorFormat: TRHIPixelFormat = pfBGRA8_UNorm;
+      const ADepthFormat: TRHIPixelFormat = pfD24_UNorm_S8_UInt;
+      const ADebugName: String = '');
+    destructor Destroy; override;
+
+    procedure Resize(const NewWidth, NewHeight: Cardinal);
+    procedure SimulateForTesting(const AWidth, AHeight: Cardinal;
+      const AImageCount: Cardinal = 2;
+      const AColorFormat: TRHIPixelFormat = pfBGRA8_UNorm;
+      const ADepthFormat: TRHIPixelFormat = pfD24_UNorm_S8_UInt);
+    function GetCurrentColorTexture: TVulkanRHITexture;
+    function GetDepthTexture: TVulkanRHITexture;
+    function BuildRenderingInfo(const ARenderArea: TRectangle;
+      const AClearColor: TCastleColor;
+      const AColorLoadOp: TRHIAttachmentLoadOp = loClear;
+      const ADepthLoadOp: TRHIAttachmentLoadOp = loClear;
+      const AClearDepth: Single = 1.0): TRHIRenderingInfo;
+
+    property Device: TVulkanRHIDevice read FDevice;
+    property SurfaceHandle: VkSurfaceKHR read FSurface;
+    property SwapchainHandle: VkSwapchainKHR read FSwapchain;
+    property SwapchainImageCount: Cardinal read GetSwapchainImageCount;
+    property SwapchainExtent: VkExtent2D read FSwapchainExtent;
+    property RequestedWidth: Cardinal read FRequestedWidth;
+    property RequestedHeight: Cardinal read FRequestedHeight;
+    property SwapchainFormat: TRHIPixelFormat read FSwapchainFormat;
+    property SwapchainDepthFormat: TRHIPixelFormat read FSwapchainDepthFormat;
+    property SwapchainColorSpace: VkColorSpaceKHR read FSwapchainColorSpace;
+    property SwapchainPresentMode: VkPresentModeKHR read FSwapchainPresentMode;
+    property SwapchainCompositeAlpha: Integer read FSwapchainCompositeAlpha;
+    property SwapchainMinimized: Boolean read FSwapchainMinimized;
+    property SwapchainSuboptimal: Boolean read FSwapchainSuboptimal;
+    property SwapchainRecreateCount: Cardinal read FSwapchainRecreateCount;
+    property CurrentImageIndex: Cardinal read FCurrentImageIndex;
+    property MSAAColorTexture: TVulkanRHITexture read FMSAAColorTexture;
+    property MSAADepthTexture: TVulkanRHITexture read FMSAADepthTexture;
+    property AntiAliasing: TAntiAliasing read FAntiAliasing write SetAntiAliasing;
+    property SampleCount: Cardinal read FSampleCount write SetSampleCount;
+    property FramesPresentedCount: Cardinal read FFramesPresentedCount;
+    property DebugName: String read FDebugName write FDebugName;
+  end;
+
+  TVulkanSwapchainSurfaceList = {$ifdef FPC}specialize{$endif} TObjectList<TCastleVulkanSwapchainSurface>;
+
   TVulkanRHIDevice = class(TRHIDevice)
   private
     FInstance: VkInstance;
     FDebugMessenger: VkDebugUtilsMessengerEXT;
     FSurface: VkSurfaceKHR;
+    FRequireWSISwapchain: Boolean;
+    FSwapchainSurfaces: TVulkanSwapchainSurfaceList;
+    FActiveSwapchainSurface: TCastleVulkanSwapchainSurface;
     FPhysicalDevice: VkPhysicalDevice;
     FDevice: VkDevice;
     FDeviceId: Cardinal;
@@ -4335,10 +4435,19 @@ type
     function GetPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
     function GetWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
     function GetBindlessIndirectBatch: TCastleVulkanBindlessIndirectBatch;
+    function GetSwapchainSurfaceCount: Cardinal;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
       const EnableValidation: Boolean = True); reintroduce; overload;
+    { Creates a shared WSI-capable Vulkan RHI device (with all supported OS surface
+      instance extensions + VK_KHR_swapchain enabled) that can host 0..N independent
+      TCastleVulkanSwapchainSurface child-widget swapchains (Phase 115: TCastleControl). }
+    constructor CreateSharedWithWSI(const EnableValidation: Boolean = False;
+      const AProbeSurfaceCallback: TVulkanCreateSurfaceEvent = nil); overload;
+    class function TryCreateSharedWithWSI(out ADevice: TVulkanRHIDevice;
+      const EnableValidation: Boolean = False;
+      const AProbeSurfaceCallback: TVulkanCreateSurfaceEvent = nil): Boolean;
     { Creates a real offscreen Vulkan RHI device backed by a physical GPU or
       software rasterizer (e.g. Mesa Lavapipe) without requiring a window surface. }
     constructor CreateOffscreen(const EnableValidation: Boolean = False); overload;
@@ -4461,6 +4570,22 @@ type
       const AImageCount: Cardinal = 2;
       const AColorFormat: TRHIPixelFormat = pfBGRA8_UNorm;
       const ADepthFormat: TRHIPixelFormat = pfD24_UNorm_S8_UInt);
+    { Multi-surface / multi-control WSI swapchain management (Phase 115: TCastleControl) }
+    function CreateSwapchainSurface(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
+      const InitialWidth, InitialHeight: Cardinal;
+      const ADebugName: String = ''): TCastleVulkanSwapchainSurface; overload;
+    function CreateSwapchainSurface(const ANativeDesc: TVulkanNativeSurfaceDesc;
+      const InitialWidth, InitialHeight: Cardinal;
+      const ADebugName: String = ''): TCastleVulkanSwapchainSurface; overload;
+    function CreateSimulatedSwapchainSurface(const AWidth, AHeight: Cardinal;
+      const AImageCount: Cardinal = 2;
+      const AColorFormat: TRHIPixelFormat = pfBGRA8_UNorm;
+      const ADepthFormat: TRHIPixelFormat = pfD24_UNorm_S8_UInt;
+      const ADebugName: String = ''): TCastleVulkanSwapchainSurface;
+    procedure DestroySwapchainSurface(var ASurface: TCastleVulkanSwapchainSurface);
+    function GetSwapchainSurface(const AIndex: Integer): TCastleVulkanSwapchainSurface;
+    function BeginSurfaceFrame(const ASurface: TCastleVulkanSwapchainSurface): TRHICommandList;
+    procedure EndSurfaceFrameAndPresent(const ASurface: TCastleVulkanSwapchainSurface);
     procedure WaitIdle; override;
     function CreateSecondaryCommandList: TRHICommandList; override;
 
@@ -4541,10 +4666,14 @@ type
       const AEntryData; const AEntrySizeInBytes: Cardinal): Cardinal; override;
     function GetBindlessDescriptorSet: TRHIDescriptorSet; override;
 
+    property InstanceHandle: VkInstance read FInstance;
     property Handle: VkDevice read FDevice;
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
     property SurfaceHandle: VkSurfaceKHR read FSurface;
     property SwapchainHandle: VkSwapchainKHR read FSwapchain;
+    property ActiveSwapchainSurface: TCastleVulkanSwapchainSurface
+      read FActiveSwapchainSurface write FActiveSwapchainSurface;
+    property SwapchainSurfaceCount: Cardinal read GetSwapchainSurfaceCount;
     property SwapchainImageCount: Cardinal read GetSwapchainImageCount;
     property SwapchainExtent: VkExtent2D read FSwapchainExtent;
     property InstanceApiVersion: Cardinal read FInstanceApiVersion;
@@ -11083,13 +11212,20 @@ begin
   Slot := AFrameSlot mod MaxFramesInFlight;
   if (FPendingGraphicsWaitTimelineValue > 0) and (FTransferTimelineSemaphore <> nil) then
     FTransferTimelineSemaphore.Wait(FPendingGraphicsWaitTimelineValue, High(UInt64));
-  FRingWriteOffsets[Slot] := 0;
   FTransferPoolUsedCounts[Slot] := 0;
   if (FDevice <> nil) and (FDevice.Handle <> nil) and
      (FTransferPools[Slot] <> VK_NULL_HANDLE) and Assigned(vkResetCommandPool) then
     CheckVk(vkResetCommandPool(FDevice.Handle, FTransferPools[Slot], 0),
       'vkResetCommandPool(AsyncTransfer)');
 
+  { Preserve FRingWriteOffsets[Slot] and FOverflowChunks[Slot] when pre-frame uploads
+    were staged into this slot prior to BeginFrame / BeginSurfaceFrame and are still
+    awaiting FlushPendingUploads; otherwise subsequent in-frame staging allocations
+    would overwrite offset 0 before vkQueueSubmit executes the copy commands. }
+  if (Length(FPendingBufferCopies) > 0) or (Length(FPendingImageCopies) > 0) then
+    Exit;
+
+  FRingWriteOffsets[Slot] := 0;
   for I := 0 to High(FOverflowChunks[Slot]) do
   begin
     if (FDevice <> nil) and (FDevice.Handle <> nil) and
@@ -22720,6 +22856,668 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanSwapchainSurface                                                }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanSwapchainSurface.Create(const ADevice: TVulkanRHIDevice;
+  const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
+  const InitialWidth, InitialHeight: Cardinal;
+  const ADebugName: String);
+var
+  PresentSupport: VkBool32;
+begin
+  inherited Create;
+  if ADevice = nil then
+    raise ERHIError.Create('TCastleVulkanSwapchainSurface requires a non-nil TVulkanRHIDevice');
+  FDevice := ADevice;
+  FDebugName := ADebugName;
+  FAntiAliasing := aaNone;
+  FSampleCount := 1;
+  FSwapchainFormat := pfBGRA8_UNorm;
+  FSwapchainDepthFormat := pfD24_UNorm_S8_UInt;
+  FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
+  FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FRequestedWidth := InitialWidth;
+  FRequestedHeight := InitialHeight;
+
+  CreateSyncObjects;
+
+  if Assigned(ACreateSurfaceCallback) then
+  begin
+    FSurface := ACreateSurfaceCallback(FDevice.InstanceHandle);
+    FOwnsSurface := True;
+  end;
+  if (FDevice.Handle <> nil) and (FSurface = VK_NULL_HANDLE) then
+    raise ERHIError.Create('Failed to create Vulkan control surface (VkSurfaceKHR)');
+
+  { Query presentation support on this specific VkSurfaceKHR handle per
+    VUID-vkCreateSwapchainKHR-surface-01270 before creating its VkSwapchainKHR. }
+  if (FDevice.Handle <> nil) and (FSurface <> VK_NULL_HANDLE) and
+     Assigned(vkGetPhysicalDeviceSurfaceSupportKHR) then
+  begin
+    PresentSupport := VK_FALSE;
+    CheckVk(vkGetPhysicalDeviceSurfaceSupportKHR(
+      FDevice.PhysicalDevice, FDevice.PresentQueueFamily, FSurface, @PresentSupport),
+      'vkGetPhysicalDeviceSurfaceSupportKHR(ControlSurface)');
+    if PresentSupport <> VK_TRUE then
+      raise ERHIError.CreateFmt(
+        'Vulkan queue family %d on physical device "%s" does not support presenting to control surface "%s"',
+        [FDevice.PresentQueueFamily, FDevice.Capabilities.DeviceName, FDebugName]);
+    if FDevice.GraphicsQueueFamily <> FDevice.PresentQueueFamily then
+    begin
+      PresentSupport := VK_FALSE;
+      vkGetPhysicalDeviceSurfaceSupportKHR(
+        FDevice.PhysicalDevice, FDevice.GraphicsQueueFamily, FSurface, @PresentSupport);
+    end;
+  end;
+
+  if (FDevice.Handle <> nil) and (FSurface <> VK_NULL_HANDLE) then
+    CreateSwapchain(InitialWidth, InitialHeight)
+  else if FDevice.Handle = nil then
+    SimulateForTesting(Max(Cardinal(1), InitialWidth), Max(Cardinal(1), InitialHeight), 2);
+end;
+
+constructor TCastleVulkanSwapchainSurface.Create(const ADevice: TVulkanRHIDevice;
+  const ANativeDesc: TVulkanNativeSurfaceDesc;
+  const InitialWidth, InitialHeight: Cardinal;
+  const ADebugName: String);
+var
+  PresentSupport: VkBool32;
+begin
+  inherited Create;
+  if ADevice = nil then
+    raise ERHIError.Create('TCastleVulkanSwapchainSurface requires a non-nil TVulkanRHIDevice');
+  FDevice := ADevice;
+  FDebugName := ADebugName;
+  FAntiAliasing := aaNone;
+  FSampleCount := 1;
+  FSwapchainFormat := pfBGRA8_UNorm;
+  FSwapchainDepthFormat := pfD24_UNorm_S8_UInt;
+  FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
+  FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FRequestedWidth := InitialWidth;
+  FRequestedHeight := InitialHeight;
+
+  CreateSyncObjects;
+
+  if FDevice.Handle <> nil then
+  begin
+    FSurface := CreateVulkanSurfaceFromNativeDesc(FDevice.InstanceHandle, ANativeDesc);
+    FOwnsSurface := True;
+    if FSurface = VK_NULL_HANDLE then
+      raise ERHIError.Create('Failed to create Vulkan control surface (VkSurfaceKHR) from native descriptor');
+
+    if Assigned(vkGetPhysicalDeviceSurfaceSupportKHR) then
+    begin
+      PresentSupport := VK_FALSE;
+      CheckVk(vkGetPhysicalDeviceSurfaceSupportKHR(
+        FDevice.PhysicalDevice, FDevice.PresentQueueFamily, FSurface, @PresentSupport),
+        'vkGetPhysicalDeviceSurfaceSupportKHR(ControlSurface)');
+      if PresentSupport <> VK_TRUE then
+        raise ERHIError.CreateFmt(
+          'Vulkan queue family %d on physical device "%s" does not support presenting to control surface "%s"',
+          [FDevice.PresentQueueFamily, FDevice.Capabilities.DeviceName, FDebugName]);
+      if FDevice.GraphicsQueueFamily <> FDevice.PresentQueueFamily then
+      begin
+        PresentSupport := VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(
+          FDevice.PhysicalDevice, FDevice.GraphicsQueueFamily, FSurface, @PresentSupport);
+      end;
+    end;
+
+    CreateSwapchain(InitialWidth, InitialHeight);
+  end else
+    SimulateForTesting(Max(Cardinal(1), InitialWidth), Max(Cardinal(1), InitialHeight), 2);
+end;
+
+constructor TCastleVulkanSwapchainSurface.CreateSimulatedForTesting(
+  const ADevice: TVulkanRHIDevice;
+  const AWidth, AHeight: Cardinal;
+  const AImageCount: Cardinal;
+  const AColorFormat, ADepthFormat: TRHIPixelFormat;
+  const ADebugName: String);
+begin
+  inherited Create;
+  if ADevice = nil then
+    raise ERHIError.Create('TCastleVulkanSwapchainSurface requires a non-nil TVulkanRHIDevice');
+  FDevice := ADevice;
+  FDebugName := ADebugName;
+  FAntiAliasing := aaNone;
+  FSampleCount := 1;
+  FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
+  FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  SimulateForTesting(AWidth, AHeight, AImageCount, AColorFormat, ADepthFormat);
+end;
+
+destructor TCastleVulkanSwapchainSurface.Destroy;
+begin
+  DestroySwapchainResources(True);
+  DestroySyncObjects;
+  if FOwnsSurface and (FSurface <> VK_NULL_HANDLE) and
+     (FDevice <> nil) and (FDevice.InstanceHandle <> nil) and
+     Assigned(vkDestroySurfaceKHR) then
+  begin
+    vkDestroySurfaceKHR(FDevice.InstanceHandle, FSurface, nil);
+    FSurface := VK_NULL_HANDLE;
+  end;
+  inherited;
+end;
+
+procedure TCastleVulkanSwapchainSurface.CreateSyncObjects;
+var
+  I: Integer;
+  SemInfo: VkSemaphoreCreateInfo;
+begin
+  for I := 0 to MaxFramesInFlight - 1 do
+    FImageAvailableSemaphores[I] := VK_NULL_HANDLE;
+  if (FDevice = nil) or (FDevice.Handle = nil) or (not Assigned(vkCreateSemaphore)) then
+    Exit;
+
+  FillChar(SemInfo, SizeOf(SemInfo), 0);
+  SemInfo.sType := VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  for I := 0 to MaxFramesInFlight - 1 do
+  begin
+    CheckVk(vkCreateSemaphore(FDevice.Handle, @SemInfo, nil, @FImageAvailableSemaphores[I]),
+      'vkCreateSemaphore(SurfaceImageAvailable)');
+    if FDebugName <> '' then
+      FDevice.SetDebugObjectName(VK_OBJECT_TYPE_SEMAPHORE, FImageAvailableSemaphores[I],
+        Format('%s_ImageAvailable_%d', [FDebugName, I]));
+  end;
+end;
+
+procedure TCastleVulkanSwapchainSurface.DestroySyncObjects;
+var
+  I: Integer;
+begin
+  for I := 0 to MaxFramesInFlight - 1 do
+  begin
+    if (FImageAvailableSemaphores[I] <> VK_NULL_HANDLE) and
+       (FDevice <> nil) and (FDevice.Handle <> nil) and Assigned(vkDestroySemaphore) then
+      vkDestroySemaphore(FDevice.Handle, FImageAvailableSemaphores[I], nil);
+    FImageAvailableSemaphores[I] := VK_NULL_HANDLE;
+  end;
+end;
+
+procedure TCastleVulkanSwapchainSurface.EnsureMSAATargets(
+  const AWidth, AHeight: Cardinal;
+  const AColorFormat, ADepthFormat: TRHIPixelFormat);
+var
+  EffSamples: Cardinal;
+  MSAAColorDesc, MSAADepthDesc: TRHITextureDesc;
+  NamePrefix: String;
+begin
+  EffSamples := Max(Cardinal(1), FSampleCount);
+  if (FDevice <> nil) and (FDevice.Capabilities.MaxFramebufferSampleCount > 0) then
+    EffSamples := Min(EffSamples, FDevice.Capabilities.MaxFramebufferSampleCount);
+
+  if (EffSamples <= 1) or (AWidth = 0) or (AHeight = 0) or (FDevice = nil) then
+  begin
+    FreeAndNil(FMSAAColorTexture);
+    FreeAndNil(FMSAADepthTexture);
+    Exit;
+  end;
+
+  if FDebugName <> '' then
+    NamePrefix := FDebugName + '_'
+  else
+    NamePrefix := 'ControlSurface_';
+
+  if (FMSAAColorTexture = nil) or
+     (FMSAAColorTexture.Desc.Width <> AWidth) or
+     (FMSAAColorTexture.Desc.Height <> AHeight) or
+     (FMSAAColorTexture.Desc.Format <> AColorFormat) or
+     (FMSAAColorTexture.Desc.SampleCount <> EffSamples) then
+  begin
+    FreeAndNil(FMSAAColorTexture);
+    if AColorFormat <> pfUndefined then
+    begin
+      MSAAColorDesc := TRHITextureDesc.Create2D(AWidth, AHeight, AColorFormat,
+        [tuColorAttachment], 1, EffSamples);
+      MSAAColorDesc.DebugName := NamePrefix + 'MSAAColor';
+      FMSAAColorTexture := TVulkanRHITexture.Create(FDevice, MSAAColorDesc);
+    end;
+  end;
+
+  if (FMSAADepthTexture = nil) or
+     (FMSAADepthTexture.Desc.Width <> AWidth) or
+     (FMSAADepthTexture.Desc.Height <> AHeight) or
+     (FMSAADepthTexture.Desc.Format <> ADepthFormat) or
+     (FMSAADepthTexture.Desc.SampleCount <> EffSamples) then
+  begin
+    FreeAndNil(FMSAADepthTexture);
+    if ADepthFormat <> pfUndefined then
+    begin
+      MSAADepthDesc := TRHITextureDesc.Create2D(AWidth, AHeight, ADepthFormat,
+        [tuDepthStencil], 1, EffSamples);
+      MSAADepthDesc.DebugName := NamePrefix + 'MSAADepth';
+      FMSAADepthTexture := TVulkanRHITexture.Create(FDevice, MSAADepthDesc);
+    end;
+  end;
+end;
+
+procedure TCastleVulkanSwapchainSurface.SetAntiAliasing(const AValue: TAntiAliasing);
+begin
+  FAntiAliasing := AValue;
+  SetSampleCount(Max(Cardinal(1), AntiAliasingToSampleCount(AValue)));
+end;
+
+procedure TCastleVulkanSwapchainSurface.SetSampleCount(const AValue: Cardinal);
+var
+  MaxSamples: Cardinal;
+begin
+  if FDevice <> nil then
+    MaxSamples := FDevice.Capabilities.MaxFramebufferSampleCount
+  else
+    MaxSamples := 8;
+  if MaxSamples = 0 then
+    MaxSamples := 8;
+  FSampleCount := ClampSampleCountToMask(AValue, (MaxSamples shl 1) - 1);
+  if FSampleCount <= 1 then
+  begin
+    FreeAndNil(FMSAAColorTexture);
+    FreeAndNil(FMSAADepthTexture);
+  end else
+  if (FSwapchainExtent.width > 0) and (FSwapchainExtent.height > 0) then
+  begin
+    if FSwapchainDepthFormat <> pfUndefined then
+      EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, FSwapchainDepthFormat)
+    else
+      EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, pfD24_UNorm_S8_UInt);
+  end;
+end;
+
+procedure TCastleVulkanSwapchainSurface.CreateSwapchain(const AWidth, AHeight: Cardinal);
+var
+  Caps: VkSurfaceCapabilitiesKHR;
+  SurfaceFormatCount, PresentModeCount, ImageCount, I: Cardinal;
+  SurfaceFormats: array of VkSurfaceFormatKHR;
+  PresentModes: array of VkPresentModeKHR;
+  SurfFmt: VkSurfaceFormatKHR;
+  CreateInfo: VkSwapchainCreateInfoKHR;
+  QueueFamilyIndices: array[0..1] of Cardinal;
+  ImageUsage: VkImageUsageFlags;
+  ColorUsage: TRHITextureUsageFlags;
+  OldSwapchain: VkSwapchainKHR;
+  Images: array of VkImage;
+  ViewInfo: VkImageViewCreateInfo;
+  SemInfo: VkSemaphoreCreateInfo;
+  ImgView: VkImageView;
+  ColorDesc, DepthDesc: TRHITextureDesc;
+  NamePrefix: String;
+begin
+  if (AWidth > 0) and (AHeight > 0) then
+  begin
+    FRequestedWidth := AWidth;
+    FRequestedHeight := AHeight;
+  end;
+  if (FDevice = nil) or (FDevice.Handle = nil) or (FSurface = VK_NULL_HANDLE) then
+    Exit;
+
+  FillChar(Caps, SizeOf(Caps), 0);
+  CheckVk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(FDevice.PhysicalDevice, FSurface, @Caps),
+    'vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ControlSurface)');
+
+  if ((Caps.currentExtent.width = 0) and (Caps.currentExtent.height = 0)) or
+     (((AWidth = 0) or (AHeight = 0)) and (Caps.currentExtent.width = High(Cardinal))) then
+  begin
+    DestroySwapchainResources(True);
+    FSwapchainExtent.width := 0;
+    FSwapchainExtent.height := 0;
+    FSwapchainMinimized := True;
+    FSwapchainSuboptimal := False;
+    Exit;
+  end;
+
+  OldSwapchain := FSwapchain;
+  FSwapchain := VK_NULL_HANDLE;
+  DestroySwapchainResources(False);
+  FSwapchainMinimized := False;
+  FSwapchainSuboptimal := False;
+  FCurrentImageIndex := 0;
+
+  if FDebugName <> '' then
+    NamePrefix := FDebugName
+  else
+    NamePrefix := 'ControlSwapchain';
+
+  try
+    SurfaceFormatCount := 0;
+    SurfaceFormats := nil;
+    if Assigned(vkGetPhysicalDeviceSurfaceFormatsKHR) and
+       (vkGetPhysicalDeviceSurfaceFormatsKHR(FDevice.PhysicalDevice, FSurface, @SurfaceFormatCount, nil) = VK_SUCCESS) and
+       (SurfaceFormatCount > 0) then
+    begin
+      SetLength(SurfaceFormats, SurfaceFormatCount);
+      vkGetPhysicalDeviceSurfaceFormatsKHR(FDevice.PhysicalDevice, FSurface, @SurfaceFormatCount, @SurfaceFormats[0]);
+    end;
+    SurfFmt := SelectVulkanSurfaceFormat(SurfaceFormats, FSwapchainFormat);
+    FSwapchainColorSpace := SurfFmt.colorSpace;
+
+    PresentModeCount := 0;
+    PresentModes := nil;
+    if Assigned(vkGetPhysicalDeviceSurfacePresentModesKHR) and
+       (vkGetPhysicalDeviceSurfacePresentModesKHR(FDevice.PhysicalDevice, FSurface, @PresentModeCount, nil) = VK_SUCCESS) and
+       (PresentModeCount > 0) then
+    begin
+      SetLength(PresentModes, PresentModeCount);
+      vkGetPhysicalDeviceSurfacePresentModesKHR(FDevice.PhysicalDevice, FSurface, @PresentModeCount, @PresentModes[0]);
+    end;
+    FSwapchainPresentMode := SelectVulkanPresentMode(PresentModes, False);
+    FSwapchainCompositeAlpha := SelectVulkanCompositeAlpha(Caps.supportedCompositeAlpha);
+
+    FSwapchainExtent.width := Max(Cardinal(1), AWidth);
+    FSwapchainExtent.height := Max(Cardinal(1), AHeight);
+    if Caps.currentExtent.width <> High(Cardinal) then
+      FSwapchainExtent := Caps.currentExtent
+    else if (Caps.maxImageExtent.width > 0) and (Caps.maxImageExtent.height > 0) then
+    begin
+      FSwapchainExtent.width := EnsureRange(FSwapchainExtent.width,
+        Max(Cardinal(1), Caps.minImageExtent.width), Caps.maxImageExtent.width);
+      FSwapchainExtent.height := EnsureRange(FSwapchainExtent.height,
+        Max(Cardinal(1), Caps.minImageExtent.height), Caps.maxImageExtent.height);
+    end;
+
+    ImageCount := Max(Cardinal(2), Caps.minImageCount);
+    if (Caps.maxImageCount > 0) and (ImageCount > Caps.maxImageCount) then
+      ImageCount := Caps.maxImageCount;
+
+    ImageUsage := VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    ColorUsage := [tuColorAttachment];
+    if Caps.supportedUsageFlags = 0 then
+    begin
+      ImageUsage := ImageUsage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+      ColorUsage := ColorUsage + [tuTransferSrc, tuTransferDst];
+    end else
+    begin
+      if (Caps.supportedUsageFlags and VK_IMAGE_USAGE_TRANSFER_SRC_BIT) <> 0 then
+      begin
+        ImageUsage := ImageUsage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        Include(ColorUsage, tuTransferSrc);
+      end;
+      if (Caps.supportedUsageFlags and VK_IMAGE_USAGE_TRANSFER_DST_BIT) <> 0 then
+      begin
+        ImageUsage := ImageUsage or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        Include(ColorUsage, tuTransferDst);
+      end;
+    end;
+
+    FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+    CreateInfo.sType := VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    CreateInfo.surface := FSurface;
+    CreateInfo.minImageCount := ImageCount;
+    CreateInfo.imageFormat := SurfFmt.format;
+    CreateInfo.imageColorSpace := FSwapchainColorSpace;
+    CreateInfo.imageExtent := FSwapchainExtent;
+    CreateInfo.imageArrayLayers := 1;
+    CreateInfo.imageUsage := ImageUsage;
+    if FDevice.GraphicsQueueFamily <> FDevice.PresentQueueFamily then
+    begin
+      QueueFamilyIndices[0] := FDevice.GraphicsQueueFamily;
+      QueueFamilyIndices[1] := FDevice.PresentQueueFamily;
+      CreateInfo.imageSharingMode := VK_SHARING_MODE_CONCURRENT;
+      CreateInfo.queueFamilyIndexCount := 2;
+      CreateInfo.pQueueFamilyIndices := @QueueFamilyIndices[0];
+    end else
+      CreateInfo.imageSharingMode := VK_SHARING_MODE_EXCLUSIVE;
+    CreateInfo.preTransform := Caps.currentTransform;
+    CreateInfo.compositeAlpha := FSwapchainCompositeAlpha;
+    CreateInfo.presentMode := FSwapchainPresentMode;
+    CreateInfo.clipped := VK_TRUE;
+    CreateInfo.oldSwapchain := OldSwapchain;
+
+    CheckVk(vkCreateSwapchainKHR(FDevice.Handle, @CreateInfo, nil, @FSwapchain),
+      'vkCreateSwapchainKHR(ControlSurface)');
+    if FSwapchain <> VK_NULL_HANDLE then
+      FDevice.SetDebugObjectName(VK_OBJECT_TYPE_SWAPCHAIN_KHR, FSwapchain, NamePrefix);
+  finally
+    if (OldSwapchain <> VK_NULL_HANDLE) and (FDevice.Handle <> nil) and Assigned(vkDestroySwapchainKHR) then
+      vkDestroySwapchainKHR(FDevice.Handle, OldSwapchain, nil);
+  end;
+
+  CheckVk(vkGetSwapchainImagesKHR(FDevice.Handle, FSwapchain, @ImageCount, nil),
+    'vkGetSwapchainImagesKHR(ControlSurface count)');
+  SetLength(Images, ImageCount);
+  CheckVk(vkGetSwapchainImagesKHR(FDevice.Handle, FSwapchain, @ImageCount, @Images[0]),
+    'vkGetSwapchainImagesKHR(ControlSurface)');
+
+  ColorDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
+    FSwapchainFormat, ColorUsage, 1);
+  ColorDesc.DebugName := NamePrefix + '_Color';
+
+  FillChar(SemInfo, SizeOf(SemInfo), 0);
+  SemInfo.sType := VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+  SetLength(FColorTextures, ImageCount);
+  SetLength(FRenderFinishedSemaphores, ImageCount);
+  SetLength(FImageInFlightFences, ImageCount);
+  for I := 0 to ImageCount - 1 do
+  begin
+    FillChar(ViewInfo, SizeOf(ViewInfo), 0);
+    ViewInfo.sType := VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ViewInfo.image := Images[I];
+    ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D;
+    ViewInfo.format := CreateInfo.imageFormat;
+    ViewInfo.subresourceRange.aspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
+    ViewInfo.subresourceRange.baseMipLevel := 0;
+    ViewInfo.subresourceRange.levelCount := 1;
+    ViewInfo.subresourceRange.baseArrayLayer := 0;
+    ViewInfo.subresourceRange.layerCount := 1;
+    CheckVk(vkCreateImageView(FDevice.Handle, @ViewInfo, nil, @ImgView),
+      'vkCreateImageView(ControlSwapchain)');
+    FColorTextures[I] := TVulkanRHITexture.CreateSwapchainWrapper(FDevice, ColorDesc, Images[I], ImgView);
+    FRenderFinishedSemaphores[I] := VK_NULL_HANDLE;
+    FImageInFlightFences[I] := VK_NULL_HANDLE;
+    if Assigned(vkCreateSemaphore) then
+      CheckVk(vkCreateSemaphore(FDevice.Handle, @SemInfo, nil, @FRenderFinishedSemaphores[I]),
+        'vkCreateSemaphore(ControlSwapchainRenderFinished)');
+  end;
+
+  FSwapchainDepthFormat := NegotiateOptimalPixelFormat(pfD24_UNorm_S8_UInt, [tuDepthStencil], FDevice.PhysicalDevice);
+  DepthDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
+    FSwapchainDepthFormat, [tuDepthStencil], 1);
+  DepthDesc.DebugName := NamePrefix + '_Depth';
+  FDepthTexture := TVulkanRHITexture.Create(FDevice, DepthDesc);
+
+  if FSampleCount > 1 then
+    EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, FSwapchainDepthFormat);
+end;
+
+procedure TCastleVulkanSwapchainSurface.SimulateForTesting(
+  const AWidth, AHeight: Cardinal;
+  const AImageCount: Cardinal;
+  const AColorFormat, ADepthFormat: TRHIPixelFormat);
+var
+  ImgCount, I: Cardinal;
+  ColorDesc, DepthDesc: TRHITextureDesc;
+  NamePrefix: String;
+begin
+  DestroySwapchainResources(True);
+  FSwapchainFormat := AColorFormat;
+  if (FDevice <> nil) and (FDevice.Handle <> nil) then
+    FSwapchainDepthFormat := NegotiateOptimalPixelFormat(ADepthFormat, [tuDepthStencil], FDevice.PhysicalDevice)
+  else
+    FSwapchainDepthFormat := ADepthFormat;
+  FSwapchainExtent.width := Max(Cardinal(1), AWidth);
+  FSwapchainExtent.height := Max(Cardinal(1), AHeight);
+  FRequestedWidth := FSwapchainExtent.width;
+  FRequestedHeight := FSwapchainExtent.height;
+  FSwapchainMinimized := False;
+  FSwapchainSuboptimal := False;
+  FCurrentImageIndex := 0;
+
+  if FDebugName <> '' then
+    NamePrefix := FDebugName + '_'
+  else
+    NamePrefix := 'SimControlSurface_';
+
+  ImgCount := Max(Cardinal(1), AImageCount);
+  ColorDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
+    FSwapchainFormat, [tuColorAttachment, tuTransferSrc, tuTransferDst], 1);
+  ColorDesc.DebugName := NamePrefix + 'Color';
+  SetLength(FColorTextures, ImgCount);
+  SetLength(FImageInFlightFences, ImgCount);
+  for I := 0 to ImgCount - 1 do
+  begin
+    FColorTextures[I] := TVulkanRHITexture.Create(FDevice, ColorDesc);
+    FImageInFlightFences[I] := VK_NULL_HANDLE;
+  end;
+
+  if FSwapchainDepthFormat <> pfUndefined then
+  begin
+    DepthDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
+      FSwapchainDepthFormat, [tuDepthStencil], 1);
+    DepthDesc.DebugName := NamePrefix + 'Depth';
+    FDepthTexture := TVulkanRHITexture.Create(FDevice, DepthDesc);
+  end;
+
+  if FSampleCount > 1 then
+    EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, FSwapchainDepthFormat);
+end;
+
+procedure TCastleVulkanSwapchainSurface.DestroySwapchainResources(
+  const ADestroySwapchainHandle: Boolean);
+var
+  I: Integer;
+begin
+  if FDevice <> nil then
+    FDevice.ClearFallbackFramebuffers;
+  FreeAndNil(FMSAAColorTexture);
+  FreeAndNil(FMSAADepthTexture);
+  FreeAndNil(FDepthTexture);
+  for I := 0 to High(FColorTextures) do
+    FreeAndNil(FColorTextures[I]);
+  SetLength(FColorTextures, 0);
+  SetLength(FImageInFlightFences, 0);
+
+  for I := 0 to High(FRenderFinishedSemaphores) do
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and
+       (FRenderFinishedSemaphores[I] <> VK_NULL_HANDLE) and Assigned(vkDestroySemaphore) then
+      vkDestroySemaphore(FDevice.Handle, FRenderFinishedSemaphores[I], nil);
+  SetLength(FRenderFinishedSemaphores, 0);
+
+  if ADestroySwapchainHandle and (FSwapchain <> VK_NULL_HANDLE) then
+  begin
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and Assigned(vkDestroySwapchainKHR) then
+      vkDestroySwapchainKHR(FDevice.Handle, FSwapchain, nil);
+    FSwapchain := VK_NULL_HANDLE;
+  end;
+end;
+
+function TCastleVulkanSwapchainSurface.GetSwapchainImageCount: Cardinal;
+begin
+  Result := Cardinal(Length(FColorTextures));
+end;
+
+procedure TCastleVulkanSwapchainSurface.Resize(const NewWidth, NewHeight: Cardinal);
+var
+  SimCount: Cardinal;
+begin
+  if (NewWidth = 0) or (NewHeight = 0) then
+  begin
+    FSwapchainMinimized := True;
+    Exit;
+  end;
+  FRequestedWidth := NewWidth;
+  FRequestedHeight := NewHeight;
+  FSwapchainMinimized := False;
+  if FDevice <> nil then
+    FDevice.WaitIdle;
+  if (FSurface = VK_NULL_HANDLE) and (Length(FColorTextures) > 0) then
+  begin
+    SimCount := Cardinal(Length(FColorTextures));
+    SimulateForTesting(NewWidth, NewHeight, SimCount, FSwapchainFormat, FSwapchainDepthFormat);
+  end else
+  if FSurface <> VK_NULL_HANDLE then
+  begin
+    Inc(FSwapchainRecreateCount);
+    CreateSwapchain(NewWidth, NewHeight);
+  end;
+end;
+
+function TCastleVulkanSwapchainSurface.GetCurrentColorTexture: TVulkanRHITexture;
+begin
+  if FCurrentImageIndex < Cardinal(Length(FColorTextures)) then
+    Result := FColorTextures[FCurrentImageIndex]
+  else
+    Result := nil;
+end;
+
+function TCastleVulkanSwapchainSurface.GetDepthTexture: TVulkanRHITexture;
+begin
+  Result := FDepthTexture;
+end;
+
+function TCastleVulkanSwapchainSurface.BuildRenderingInfo(
+  const ARenderArea: TRectangle;
+  const AClearColor: TCastleColor;
+  const AColorLoadOp, ADepthLoadOp: TRHIAttachmentLoadOp;
+  const AClearDepth: Single): TRHIRenderingInfo;
+var
+  W, H: Cardinal;
+  ResolveColorTex, ResolveDepthTex: TVulkanRHITexture;
+  ColorFmt, DepthFmt: TRHIPixelFormat;
+begin
+  Result := Default(TRHIRenderingInfo);
+  Result.RenderArea := ARenderArea;
+  W := Max(1, ARenderArea.Width);
+  H := Max(1, ARenderArea.Height);
+
+  ResolveColorTex := GetCurrentColorTexture;
+  ResolveDepthTex := GetDepthTexture;
+  if ResolveColorTex <> nil then
+    ColorFmt := ResolveColorTex.Desc.Format
+  else
+    ColorFmt := FSwapchainFormat;
+  if ResolveDepthTex <> nil then
+    DepthFmt := ResolveDepthTex.Desc.Format
+  else if FSwapchainDepthFormat <> pfUndefined then
+    DepthFmt := FSwapchainDepthFormat
+  else
+    DepthFmt := pfD24_UNorm_S8_UInt;
+
+  if (FSampleCount > 1) and (ResolveColorTex <> nil) then
+  begin
+    EnsureMSAATargets(W, H, ColorFmt, DepthFmt);
+    SetLength(Result.ColorAttachments, 1);
+    Result.ColorAttachments[0].Texture := FMSAAColorTexture;
+    Result.ColorAttachments[0].ResolveTexture := ResolveColorTex;
+    Result.ColorAttachments[0].ResolveMode := rmAverage;
+    Result.ColorAttachments[0].LoadOp := AColorLoadOp;
+    Result.ColorAttachments[0].StoreOp := soDontCare;
+    Result.ColorAttachments[0].ClearColor := AClearColor;
+
+    Result.DepthAttachment.Texture := FMSAADepthTexture;
+    Result.DepthAttachment.ResolveTexture := nil;
+    Result.DepthAttachment.ResolveMode := rmNone;
+    Result.DepthAttachment.LoadOp := ADepthLoadOp;
+    Result.DepthAttachment.StoreOp := soDontCare;
+    Result.DepthAttachment.ClearDepth := AClearDepth;
+  end else
+  begin
+    if ResolveColorTex <> nil then
+    begin
+      SetLength(Result.ColorAttachments, 1);
+      Result.ColorAttachments[0].Texture := ResolveColorTex;
+      Result.ColorAttachments[0].ResolveTexture := nil;
+      Result.ColorAttachments[0].ResolveMode := rmNone;
+      Result.ColorAttachments[0].LoadOp := AColorLoadOp;
+      Result.ColorAttachments[0].StoreOp := soStore;
+      Result.ColorAttachments[0].ClearColor := AClearColor;
+    end;
+    Result.DepthAttachment.Texture := ResolveDepthTex;
+    Result.DepthAttachment.ResolveTexture := nil;
+    Result.DepthAttachment.ResolveMode := rmNone;
+    Result.DepthAttachment.LoadOp := ADepthLoadOp;
+    Result.DepthAttachment.StoreOp := soStore;
+    Result.DepthAttachment.ClearDepth := AClearDepth;
+  end;
+  Result.HasDepthAttachment := Result.DepthAttachment.Texture <> nil;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -22815,8 +23613,86 @@ begin
     FBindlessTextureManager := TCastleVulkanBindlessTextureManager.Create(
       Self, FMaxBindlessTextures, FSupportsBindlessUpdateAfterBind);
   FTimestampProfiler := TCastleVulkanTimestampProfiler.Create(Self);
+  FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
   CreateFrameContexts;
   CreateSwapchain(InitialWidth, InitialHeight);
+end;
+
+constructor TVulkanRHIDevice.CreateSharedWithWSI(const EnableValidation: Boolean;
+  const AProbeSurfaceCallback: TVulkanCreateSurfaceEvent);
+var
+  ProbeSurface: VkSurfaceKHR;
+begin
+  inherited Create;
+  {$ifndef CASTLE_DISABLE_THREADS}
+  FValidationLock := TCriticalSection.Create;
+  {$endif}
+  FStrictValidationGate := IsVulkanStrictValidationGateEnv;
+  FBundledPipelineCacheFallbackUrl := DefaultBundledVulkanPipelineCacheUrl;
+  FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
+  FComputePipelineMap := TVulkanComputePipelineMap.Create([doOwnsValues]);
+  FVertexInputLibMap := TVulkanPipelineLibraryMap.Create;
+  FPreRasterLibMap := TVulkanPipelineLibraryMap.Create;
+  FFragmentShaderLibMap := TVulkanPipelineLibraryMap.Create;
+  FFragmentOutputLibMap := TVulkanPipelineLibraryMap.Create;
+  FRenderPassMap := TVulkanRenderPassMap.Create;
+  FFramebufferMap := TVulkanFramebufferMap.Create;
+  FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
+  FSupportsDynamicRendering := True;
+  FRequireWSISwapchain := True;
+  FAntiAliasing := aaNone;
+  FSampleCount := 1;
+  FSwapchainFormat := pfBGRA8_UNorm;
+  FSwapchainDepthFormat := pfD24_UNorm_S8_UInt;
+  FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
+  FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+
+  LoadVulkan;
+  CreateInstance(EnableValidation, True);
+
+  ProbeSurface := VK_NULL_HANDLE;
+  if Assigned(AProbeSurfaceCallback) then
+    ProbeSurface := AProbeSurfaceCallback(FInstance);
+  FSurface := ProbeSurface;
+  try
+    PickPhysicalDevice;
+    FSwapchainDepthFormat := NegotiateOptimalPixelFormat(pfD24_UNorm_S8_UInt, [tuDepthStencil], FPhysicalDevice);
+    CreateLogicalDevice;
+  finally
+    FSurface := VK_NULL_HANDLE;
+    if (ProbeSurface <> VK_NULL_HANDLE) and (FInstance <> nil) and Assigned(vkDestroySurfaceKHR) then
+      vkDestroySurfaceKHR(FInstance, ProbeSurface, nil);
+  end;
+
+  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
+  FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
+  FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
+  CreateDescriptorPool;
+  if FSupportsBindlessTextures and (FMaxBindlessTextures > 0) then
+    FBindlessTextureManager := TCastleVulkanBindlessTextureManager.Create(
+      Self, FMaxBindlessTextures, FSupportsBindlessUpdateAfterBind);
+  FTimestampProfiler := TCastleVulkanTimestampProfiler.Create(Self);
+  CreateFrameContexts;
+end;
+
+class function TVulkanRHIDevice.TryCreateSharedWithWSI(out ADevice: TVulkanRHIDevice;
+  const EnableValidation: Boolean;
+  const AProbeSurfaceCallback: TVulkanCreateSurfaceEvent): Boolean;
+begin
+  ADevice := nil;
+  try
+    ADevice := TVulkanRHIDevice.CreateSharedWithWSI(EnableValidation, AProbeSurfaceCallback);
+    Result := (ADevice <> nil) and (ADevice.Handle <> nil);
+    if not Result then
+      FreeAndNil(ADevice);
+  except
+    on Exception do
+    begin
+      FreeAndNil(ADevice);
+      Result := False;
+    end;
+  end;
 end;
 
 constructor TVulkanRHIDevice.CreateOffscreen(const EnableValidation: Boolean);
@@ -22857,6 +23733,7 @@ begin
     FBindlessTextureManager := TCastleVulkanBindlessTextureManager.Create(
       Self, FMaxBindlessTextures, FSupportsBindlessUpdateAfterBind);
   FTimestampProfiler := TCastleVulkanTimestampProfiler.Create(Self);
+  FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
   CreateFrameContexts;
 end;
 
@@ -22953,6 +23830,7 @@ begin
     FBindlessTextureManager := TCastleVulkanBindlessTextureManager.Create(
       Self, FMaxBindlessTextures, FSupportsBindlessUpdateAfterBind);
   FTimestampProfiler := TCastleVulkanTimestampProfiler.Create(Self);
+  FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
   for I := 0 to MaxFramesInFlight - 1 do
     FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
 end;
@@ -23931,6 +24809,12 @@ begin
   FreeAndNil(FBindlessTextureManager);
   FreeAndNil(FStagingUploader);
   FlushAllDeferredDeletions;
+  FActiveSwapchainSurface := nil;
+  if FSwapchainSurfaces <> nil then
+  begin
+    FSwapchainSurfaces.Clear;
+    FreeAndNil(FSwapchainSurfaces);
+  end;
   DestroySwapchain;
   FreeAndNil(FPipelineMap);
   FreeAndNil(FComputePipelineMap);
@@ -24175,7 +25059,7 @@ var
     HasSwapchainExt: Boolean;
     PresentSupport: VkBool32;
   begin
-    if FSurface = VK_NULL_HANDLE then
+    if (FSurface = VK_NULL_HANDLE) and (not FRequireWSISwapchain) then
       Exit(True);
     HasSwapchainExt := False;
     if Assigned(vkEnumerateDeviceExtensionProperties) then
@@ -24198,7 +25082,7 @@ var
 
     if not HasSwapchainExt then
       Exit(False);
-    if not Assigned(vkGetPhysicalDeviceSurfaceSupportKHR) then
+    if (FSurface = VK_NULL_HANDLE) or (not Assigned(vkGetPhysicalDeviceSurfaceSupportKHR)) then
       Exit(True);
 
     QCount := 0;
@@ -26335,6 +27219,352 @@ begin
   end;
 end;
 
+function TVulkanRHIDevice.GetSwapchainSurfaceCount: Cardinal;
+begin
+  if FSwapchainSurfaces <> nil then
+    Result := Cardinal(FSwapchainSurfaces.Count)
+  else
+    Result := 0;
+end;
+
+function TVulkanRHIDevice.GetSwapchainSurface(const AIndex: Integer): TCastleVulkanSwapchainSurface;
+begin
+  if (FSwapchainSurfaces <> nil) and (AIndex >= 0) and (AIndex < FSwapchainSurfaces.Count) then
+    Result := FSwapchainSurfaces[AIndex]
+  else
+    Result := nil;
+end;
+
+function TVulkanRHIDevice.CreateSwapchainSurface(
+  const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
+  const InitialWidth, InitialHeight: Cardinal;
+  const ADebugName: String): TCastleVulkanSwapchainSurface;
+begin
+  if FSwapchainSurfaces = nil then
+    FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
+  Result := TCastleVulkanSwapchainSurface.Create(
+    Self, ACreateSurfaceCallback, InitialWidth, InitialHeight, ADebugName);
+  FSwapchainSurfaces.Add(Result);
+  FActiveSwapchainSurface := Result;
+end;
+
+function TVulkanRHIDevice.CreateSwapchainSurface(
+  const ANativeDesc: TVulkanNativeSurfaceDesc;
+  const InitialWidth, InitialHeight: Cardinal;
+  const ADebugName: String): TCastleVulkanSwapchainSurface;
+begin
+  if FSwapchainSurfaces = nil then
+    FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
+  Result := TCastleVulkanSwapchainSurface.Create(
+    Self, ANativeDesc, InitialWidth, InitialHeight, ADebugName);
+  FSwapchainSurfaces.Add(Result);
+  FActiveSwapchainSurface := Result;
+end;
+
+function TVulkanRHIDevice.CreateSimulatedSwapchainSurface(
+  const AWidth, AHeight: Cardinal;
+  const AImageCount: Cardinal;
+  const AColorFormat, ADepthFormat: TRHIPixelFormat;
+  const ADebugName: String): TCastleVulkanSwapchainSurface;
+begin
+  if FSwapchainSurfaces = nil then
+    FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
+  Result := TCastleVulkanSwapchainSurface.CreateSimulatedForTesting(
+    Self, AWidth, AHeight, AImageCount, AColorFormat, ADepthFormat, ADebugName);
+  FSwapchainSurfaces.Add(Result);
+  FActiveSwapchainSurface := Result;
+end;
+
+procedure TVulkanRHIDevice.DestroySwapchainSurface(var ASurface: TCastleVulkanSwapchainSurface);
+begin
+  if ASurface = nil then
+    Exit;
+  WaitIdle;
+  if FActiveSwapchainSurface = ASurface then
+    FActiveSwapchainSurface := nil;
+  if (FSwapchainSurfaces <> nil) and (FSwapchainSurfaces.IndexOf(ASurface) >= 0) then
+  begin
+    { FSwapchainSurfaces owns items (OwnsObjects = True), so Remove frees ASurface }
+    FSwapchainSurfaces.Remove(ASurface);
+    ASurface := nil;
+  end else
+    FreeAndNil(ASurface);
+  if (FActiveSwapchainSurface = nil) and (FSwapchainSurfaces <> nil) and
+     (FSwapchainSurfaces.Count > 0) then
+    FActiveSwapchainSurface := FSwapchainSurfaces[FSwapchainSurfaces.Count - 1];
+end;
+
+function TVulkanRHIDevice.BeginSurfaceFrame(
+  const ASurface: TCastleVulkanSwapchainSurface): TRHICommandList;
+var
+  Frame: TVulkanFrameContext;
+  AcquireSem: VkSemaphore;
+  AcquireRes: VkResult;
+  SurfIdx, ImgIdx: Integer;
+  Surf: TCastleVulkanSwapchainSurface;
+  PriorFence: VkFence;
+begin
+  if ASurface = nil then
+    Exit(nil);
+
+  FActiveSwapchainSurface := ASurface;
+  Inc(FTotalFramesStarted);
+  if FFrames[FFrameIndex].CommandList = nil then
+    FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
+  if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
+    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
+
+  Frame := FFrames[FFrameIndex];
+
+  if (FDevice <> nil) and (Frame.InFlightFence <> VK_NULL_HANDLE) and Assigned(vkWaitForFences) then
+  begin
+    CheckVk(vkWaitForFences(FDevice, 1, @Frame.InFlightFence, VK_TRUE, High(UInt64)),
+      'vkWaitForFences(SurfaceFrame)');
+    if FSwapchainSurfaces <> nil then
+      for SurfIdx := 0 to FSwapchainSurfaces.Count - 1 do
+      begin
+        Surf := FSwapchainSurfaces[SurfIdx];
+        for ImgIdx := 0 to High(Surf.FImageInFlightFences) do
+          if Surf.FImageInFlightFences[ImgIdx] = Frame.InFlightFence then
+            Surf.FImageInFlightFences[ImgIdx] := VK_NULL_HANDLE;
+      end;
+  end;
+
+  FlushDeferredDeletions(FFrameIndex);
+  if FMemoryAllocator <> nil then
+    FMemoryAllocator.GetFrameRingBuffer(FFrameIndex).Reset;
+  if FStagingUploader <> nil then
+    FStagingUploader.ReclaimFrameSlot(FFrameIndex);
+  if FWorkerCommandPoolManager <> nil then
+    FWorkerCommandPoolManager.ResetFrameSlot(FFrameIndex);
+  if Frame.TransientDescriptorAllocator <> nil then
+    Frame.TransientDescriptorAllocator.ResetPools;
+  FDeferResourceDestruction := True;
+
+  if ASurface.FSwapchainMinimized then
+  begin
+    if (ASurface.FSurface <> VK_NULL_HANDLE) and (FDevice <> nil) and (ASurface.FSwapchain = VK_NULL_HANDLE) then
+      ASurface.CreateSwapchain(
+        Max(Cardinal(1), ASurface.FRequestedWidth),
+        Max(Cardinal(1), ASurface.FRequestedHeight));
+    if ASurface.FSwapchainMinimized then
+    begin
+      FDeferResourceDestruction := False;
+      Exit(nil);
+    end;
+  end;
+
+  if Length(ASurface.FColorTextures) > 0 then
+  begin
+    FActiveColorTarget := nil;
+    FActiveDepthTarget := nil;
+  end;
+
+  AcquireSem := ASurface.FImageAvailableSemaphores[FFrameIndex];
+  if AcquireSem = VK_NULL_HANDLE then
+    AcquireSem := Frame.ImageAvailableSemaphore;
+
+  if (FDevice <> nil) and (ASurface.FSwapchain <> VK_NULL_HANDLE) and Assigned(vkAcquireNextImageKHR) then
+  begin
+    AcquireRes := vkAcquireNextImageKHR(FDevice, ASurface.FSwapchain, High(UInt64),
+      AcquireSem, VK_NULL_HANDLE, @ASurface.FCurrentImageIndex);
+
+    if AcquireRes = VK_ERROR_OUT_OF_DATE_KHR then
+    begin
+      ASurface.Resize(
+        Max(Cardinal(1), Max(ASurface.FRequestedWidth, ASurface.FSwapchainExtent.width)),
+        Max(Cardinal(1), Max(ASurface.FRequestedHeight, ASurface.FSwapchainExtent.height)));
+      if ASurface.FSwapchainMinimized or (ASurface.FSwapchain = VK_NULL_HANDLE) then
+      begin
+        FDeferResourceDestruction := False;
+        Exit(nil);
+      end;
+      AcquireRes := vkAcquireNextImageKHR(FDevice, ASurface.FSwapchain, High(UInt64),
+        AcquireSem, VK_NULL_HANDLE, @ASurface.FCurrentImageIndex);
+    end;
+
+    if AcquireRes = VK_SUBOPTIMAL_KHR then
+      ASurface.FSwapchainSuboptimal := True
+    else if AcquireRes <> VK_SUCCESS then
+    begin
+      FDeferResourceDestruction := False;
+      Exit(nil);
+    end;
+
+    if ASurface.FCurrentImageIndex < Cardinal(Length(ASurface.FImageInFlightFences)) then
+    begin
+      PriorFence := ASurface.FImageInFlightFences[ASurface.FCurrentImageIndex];
+      if (PriorFence <> VK_NULL_HANDLE) and (PriorFence <> Frame.InFlightFence) and
+         Assigned(vkWaitForFences) then
+        CheckVk(vkWaitForFences(FDevice, 1, @PriorFence, VK_TRUE, High(UInt64)),
+          'vkWaitForFences(SurfaceImageInFlight)');
+      ASurface.FImageInFlightFences[ASurface.FCurrentImageIndex] := Frame.InFlightFence;
+    end;
+  end else
+  if Length(ASurface.FColorTextures) > 0 then
+    ASurface.FCurrentImageIndex := ASurface.FFramesPresentedCount mod Cardinal(Length(ASurface.FColorTextures));
+
+  if (FDevice <> nil) and (Frame.InFlightFence <> VK_NULL_HANDLE) and Assigned(vkResetFences) then
+    CheckVk(vkResetFences(FDevice, 1, @Frame.InFlightFence), 'vkResetFences(SurfaceFrame)');
+
+  Frame.CommandList.BeginRecording;
+  if FTimestampProfiler <> nil then
+    FTimestampProfiler.BeginFrame(Frame.CommandList, FFrameIndex);
+  if FStagingUploader <> nil then
+    FStagingUploader.FlushPendingUploads(Frame.CommandList);
+  if FBindlessTextureManager <> nil then
+    FBindlessTextureManager.FlushPendingUpdates;
+  Result := Frame.CommandList;
+  SetActiveCommandList(Result);
+end;
+
+procedure TVulkanRHIDevice.EndSurfaceFrameAndPresent(
+  const ASurface: TCastleVulkanSwapchainSurface);
+var
+  Frame: TVulkanFrameContext;
+  SubmitInfo: VkSubmitInfo;
+  TimelineSubmit: VkTimelineSemaphoreSubmitInfo;
+  WaitSems: array[0..1] of VkSemaphore;
+  WaitStages: array[0..1] of VkPipelineStageFlags;
+  WaitValues: array[0..1] of UInt64;
+  SignalValueZero: UInt64;
+  WaitCount: Cardinal;
+  HasAsyncWait: Boolean;
+  AsyncTimelineSem, AsyncBinarySem: VkSemaphore;
+  AsyncWaitValue: UInt64;
+  PresentInfo: VkPresentInfoKHR;
+  PresentRes: VkResult;
+  CmdHandle: VkCommandBuffer;
+  AcquireSem, SignalSem: VkSemaphore;
+  CurColorTex: TVulkanRHITexture;
+begin
+  if ASurface = nil then
+    Exit;
+
+  FActiveSwapchainSurface := ASurface;
+  Frame := FFrames[FFrameIndex];
+  if (Frame.CommandList <> nil) and Frame.CommandList.IsRendering then
+    Frame.CommandList.EndRendering;
+
+  SetActiveCommandList(nil);
+  if Frame.CommandList = nil then
+    Exit;
+
+  if FStagingUploader <> nil then
+    FStagingUploader.FlushPendingUploads(Frame.CommandList);
+  if FBindlessTextureManager <> nil then
+    FBindlessTextureManager.FlushPendingUpdates;
+
+  CurColorTex := ASurface.GetCurrentColorTexture;
+  if (CurColorTex <> nil) and ((ASurface.FSwapchain <> VK_NULL_HANDLE) or (FDevice = nil)) then
+    Frame.CommandList.TransitionTexture(CurColorTex, rsPresent);
+  Frame.CommandList.EndRecording;
+
+  HasAsyncWait := (FStagingUploader <> nil) and
+    FStagingUploader.ConsumePendingGraphicsWait(AsyncTimelineSem, AsyncWaitValue, AsyncBinarySem);
+
+  if (FDevice <> nil) and (ASurface.FSwapchain <> VK_NULL_HANDLE) and Assigned(vkQueueSubmit) then
+  begin
+    AcquireSem := ASurface.FImageAvailableSemaphores[FFrameIndex];
+    if AcquireSem = VK_NULL_HANDLE then
+      AcquireSem := Frame.ImageAvailableSemaphore;
+    WaitSems[0] := AcquireSem;
+    WaitStages[0] := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    WaitValues[0] := 0;
+    WaitCount := 1;
+    SignalValueZero := 0;
+
+    FillChar(TimelineSubmit, SizeOf(TimelineSubmit), 0);
+    TimelineSubmit.sType := VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+
+    if HasAsyncWait then
+    begin
+      if (AsyncTimelineSem <> VK_NULL_HANDLE) and FSupportsTimelineSemaphores then
+      begin
+        WaitSems[1] := AsyncTimelineSem;
+        WaitStages[1] :=
+          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
+          VK_PIPELINE_STAGE_TRANSFER_BIT;
+        WaitValues[1] := AsyncWaitValue;
+        WaitCount := 2;
+        TimelineSubmit.waitSemaphoreValueCount := 2;
+        TimelineSubmit.pWaitSemaphoreValues := @WaitValues[0];
+        TimelineSubmit.signalSemaphoreValueCount := 1;
+        TimelineSubmit.pSignalSemaphoreValues := @SignalValueZero;
+      end else if AsyncBinarySem <> VK_NULL_HANDLE then
+      begin
+        WaitSems[1] := AsyncBinarySem;
+        WaitStages[1] :=
+          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
+          VK_PIPELINE_STAGE_TRANSFER_BIT;
+        WaitCount := 2;
+      end;
+    end;
+
+    CmdHandle := Frame.CommandList.Handle;
+    if (ASurface.FCurrentImageIndex < Cardinal(Length(ASurface.FRenderFinishedSemaphores))) and
+       (ASurface.FRenderFinishedSemaphores[ASurface.FCurrentImageIndex] <> VK_NULL_HANDLE) then
+      SignalSem := ASurface.FRenderFinishedSemaphores[ASurface.FCurrentImageIndex]
+    else
+      SignalSem := Frame.RenderFinishedSemaphore;
+
+    FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
+    SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    if TimelineSubmit.waitSemaphoreValueCount > 0 then
+      SubmitInfo.pNext := @TimelineSubmit;
+    SubmitInfo.waitSemaphoreCount := WaitCount;
+    SubmitInfo.pWaitSemaphores := @WaitSems[0];
+    SubmitInfo.pWaitDstStageMask := @WaitStages[0];
+    SubmitInfo.commandBufferCount := 1;
+    SubmitInfo.pCommandBuffers := @CmdHandle;
+    SubmitInfo.signalSemaphoreCount := 1;
+    SubmitInfo.pSignalSemaphores := @SignalSem;
+
+    CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, Frame.InFlightFence),
+      'vkQueueSubmit(SurfaceFrame)');
+
+    if Assigned(vkQueuePresentKHR) then
+    begin
+      FillChar(PresentInfo, SizeOf(PresentInfo), 0);
+      PresentInfo.sType := VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+      PresentInfo.waitSemaphoreCount := 1;
+      PresentInfo.pWaitSemaphores := @SignalSem;
+      PresentInfo.swapchainCount := 1;
+      PresentInfo.pSwapchains := @ASurface.FSwapchain;
+      PresentInfo.pImageIndices := @ASurface.FCurrentImageIndex;
+
+      PresentRes := vkQueuePresentKHR(FPresentQueue, @PresentInfo);
+      if (PresentRes = VK_ERROR_OUT_OF_DATE_KHR) or (PresentRes = VK_SUBOPTIMAL_KHR) or
+         ASurface.FSwapchainSuboptimal then
+      begin
+        ASurface.FSwapchainSuboptimal := False;
+        ASurface.Resize(
+          Max(Cardinal(1), Max(ASurface.FRequestedWidth, ASurface.FSwapchainExtent.width)),
+          Max(Cardinal(1), Max(ASurface.FRequestedHeight, ASurface.FSwapchainExtent.height)));
+      end else
+        CheckVk(PresentRes, 'vkQueuePresentKHR(SurfaceFrame)');
+    end;
+  end else
+  if (FDevice <> nil) and (ASurface.FSwapchain = VK_NULL_HANDLE) and Assigned(vkQueueSubmit) then
+  begin
+    CmdHandle := Frame.CommandList.Handle;
+    FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
+    SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.commandBufferCount := 1;
+    SubmitInfo.pCommandBuffers := @CmdHandle;
+    CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, Frame.InFlightFence),
+      'vkQueueSubmit(SimulatedSurfaceFrame)');
+  end;
+
+  FFrameIndex := (FFrameIndex + 1) mod MaxFramesInFlight;
+  Inc(ASurface.FFramesPresentedCount);
+  Inc(FTotalFramesPresented);
+end;
+
 procedure TVulkanRHIDevice.WaitIdle;
 begin
   if FStagingUploader <> nil then
@@ -26362,6 +27592,9 @@ begin
     else
       Result := ActiveCommandList.ActiveRenderingInfo.ColorAttachments[0].Texture;
   end else
+  if (FActiveSwapchainSurface <> nil) and (FActiveSwapchainSurface.GetCurrentColorTexture <> nil) then
+    Result := FActiveSwapchainSurface.GetCurrentColorTexture
+  else
   if FCurrentSwapchainImageIndex < Cardinal(Length(FSwapchainColorTextures)) then
     Result := FSwapchainColorTextures[FCurrentSwapchainImageIndex]
   else
@@ -26379,6 +27612,9 @@ begin
     else
       Result := ActiveCommandList.ActiveRenderingInfo.DepthAttachment.Texture;
   end else
+  if (FActiveSwapchainSurface <> nil) and (FActiveSwapchainSurface.GetDepthTexture <> nil) then
+    Result := FActiveSwapchainSurface.GetDepthTexture
+  else
   if FSwapchainDepthTexture <> nil then
     Result := FSwapchainDepthTexture
   else
