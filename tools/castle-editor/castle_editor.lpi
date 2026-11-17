@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="145">
+    <Units Count="147">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -807,6 +807,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormTelemetryInsights"/>
       </Unit144>
+      <Unit145>
+        <Filename Value="../common-code/toolstatetree.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolStateTree"/>
+      </Unit145>
+      <Unit146>
+        <Filename Value="code/formstatetree.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormStateTree"/>
+      </Unit146>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

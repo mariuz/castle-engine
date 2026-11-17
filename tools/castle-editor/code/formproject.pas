@@ -650,6 +650,7 @@ type
       MenuItemRibbonStudio: TMenuItem;
       MenuItemSettlementStudio: TMenuItem;
       MenuItemTelemetryInsights: TMenuItem;
+      MenuItemStateTree: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -720,6 +721,7 @@ type
     procedure MenuItemRibbonStudioClick(Sender: TObject);
     procedure MenuItemSettlementStudioClick(Sender: TObject);
     procedure MenuItemTelemetryInsightsClick(Sender: TObject);
+    procedure MenuItemStateTreeClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2594,6 +2596,11 @@ begin
   MenuItemTelemetryInsights.Caption := 'Unreal Insights Live Telemetry, Flame-Graph & Chrome-Trace Studio...';
   MenuItemTelemetryInsights.OnClick := @MenuItemTelemetryInsightsClick;
   MenuItemDesign.Add(MenuItemTelemetryInsights);
+
+  MenuItemStateTree := TMenuItem.Create(MenuItemDesign);
+  MenuItemStateTree.Caption := 'StateTree Hierarchical AI, Evaluators & Task Studio...';
+  MenuItemStateTree.OnClick := @MenuItemStateTreeClick;
+  MenuItemDesign.Add(MenuItemStateTree);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5870,6 +5877,12 @@ procedure TProjectForm.MenuItemTelemetryInsightsClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowTelemetryInsightsDialog;
+end;
+
+procedure TProjectForm.MenuItemStateTreeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowStateTreeDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

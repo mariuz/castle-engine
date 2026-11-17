@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–336** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–337** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3834,6 +3834,29 @@ ChromeJson := Prof.ExportChromeTraceJson;
 
 ---
 
+## 66BJ. StateTree Hierarchical AI Decision Tree, Evaluators & Task Studio (Phase 337)
+
+Castle Game Engine provides hierarchical nested selector/leaf StateTrees, live spatial evaluators, root-to-leaf ancestor interrupt preemption, timed task chains, and nested Mermaid `stateDiagram-v2` export matching Unreal Engine 6.0+'s `UStateTree` architecture:
+
+1. **StateTree Runtime (`src/scene/castlestatetree.pas`)**:
+   - `TCastleStateTreeBehavior` runs live spatial evaluators (`ThreatDistance`), drills down nested `EnterConditions` (`Root/Combat/MeleeEngage`), evaluates ancestor transitions root-to-leaf so high-priority parent rules preempt deep leaf tasks immediately, and validates & exports nested Mermaid diagrams.
+2. **StateTree Studio (`TStateTreeForm` & `TStateTreeHelper`)**:
+   - Open via the top-bar **`StateTree`** button, Hierarchy context menu, or **`Design -> StateTree Hierarchical AI, Evaluators & Task Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TStateTreeHelper.SpawnTacticalGuardStateTreeDemo(Viewport, DesignOwner, Guard, Intruder, Tree);
+Intruder.Translation := Vector3(0, 0.9, 2.0);
+Tree.StepTree(0.05); // ActiveStatePath = 'Root/Combat/MeleeEngage'
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE StateTree Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-statetree-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — AI Behaviors & Combat Logic (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Behavior Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3958,4 +3981,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolribbonstudio.pas`](../tests/code/testcases/testtoolribbonstudio.pas) (`TTestToolRibbonStudio` — 2 tests)**: Verifies `EvaluateCatmullRomVec3` exact endpoint Kronecker interpolation & curved arc midpoint, `CatmullSubdivisions` `1 -> 4` exact `4x` triangle amplification, `LifetimeSec` sample aging/pruning to `0`, `TCastleLightningBeam` exact start/target world endpoint pinning with jagged interior displacement (`16` main segments + `3` forks = `88` tris), seeded determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsettlementstudio.pas`](../tests/code/testcases/testtoolsettlementstudio.pas) (`TTestToolSettlementStudio` — 2 tests)**: Verifies `pspCrossroadsHamlet`, `pspWalledMarketTown`, and `pspLinearHighwayOutpost` road graphs with strict zero pairwise building overlap (`CountOverlappingLotPairs = 0`) & zero road intrusion (`CountRoadIntrudingLots = 0`), seeded determinism, `WorldRay` downward foundation snapping onto an elevated `Y = 4.25m` plateau, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltelemetryinsights.pas`](../tests/code/testcases/testtooltelemetryinsights.pas) (`TTestToolTelemetryInsights` — 2 tests)**: Verifies ring-buffer oldest-frame eviction (`15` frames into `10`-slot ring retaining `FrameIndex 5..14`), nested `Depth 0..2` flame-graph spans, exact `P50 / P95 / P99` frame-time percentiles & `> 16.67ms` hitch-spike detection, valid Chrome/Perfetto `traceEvents` JSON export, unified **56-Studio Hub** Horizon 2–7 indexing, and the 15th MCP tool `cge_capture_telemetry_trace` (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolstatetree.pas`](../tests/code/testcases/testtoolstatetree.pas) (`TTestToolStateTree` — 2 tests)**: Verifies `TCastleStateTreeBehavior` spatial `ThreatDistance` evaluator, nested selector drilldown (`Root/Patrol/WaypointWalk` -> `Root/Combat/RangedSuppress` -> `Root/Combat/MeleeEngage`), timed `stttOnStateCompleted` task cycling, **parent `Combat` transition preemption** of leaf `MeleeEngage` into `Root/FleeSurvival/RetreatCover` on critical HP, Boss/Medic presets, `ValidateTree`, nested Mermaid `stateDiagram-v2` export, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

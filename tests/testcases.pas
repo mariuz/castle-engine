@@ -163,6 +163,7 @@ uses
   TestToolRibbonStudio,
   TestToolSettlementStudio,
   TestToolTelemetryInsights,
+  TestToolStateTree,
   TestCastleVulkanRHI;
 
 implementation
