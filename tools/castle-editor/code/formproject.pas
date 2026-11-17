@@ -656,6 +656,7 @@ type
       MenuItemErosionStudio: TMenuItem;
       MenuItemMegaLights: TMenuItem;
       MenuItemGameplayCue: TMenuItem;
+      MenuItemDataLayers: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -732,6 +733,7 @@ type
     procedure MenuItemErosionStudioClick(Sender: TObject);
     procedure MenuItemMegaLightsClick(Sender: TObject);
     procedure MenuItemGameplayCueClick(Sender: TObject);
+    procedure MenuItemDataLayersClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2636,6 +2638,11 @@ begin
   MenuItemGameplayCue.Caption := 'Gameplay Cue, Hit-Stop & Floating Damage-Number Studio...';
   MenuItemGameplayCue.OnClick := @MenuItemGameplayCueClick;
   MenuItemDesign.Add(MenuItemGameplayCue);
+
+  MenuItemDataLayers := TMenuItem.Create(MenuItemDesign);
+  MenuItemDataLayers.Caption := 'World Partition Runtime Data Layers Studio...';
+  MenuItemDataLayers.OnClick := @MenuItemDataLayersClick;
+  MenuItemDesign.Add(MenuItemDataLayers);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5948,6 +5955,12 @@ procedure TProjectForm.MenuItemGameplayCueClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowGameplayCueDialog;
+end;
+
+procedure TProjectForm.MenuItemDataLayersClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowDataLayersDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

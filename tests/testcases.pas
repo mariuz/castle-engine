@@ -169,6 +169,7 @@ uses
   TestToolErosionStudio,
   TestToolMegaLights,
   TestToolGameplayCue,
+  TestToolDataLayers,
   TestCastleVulkanRHI;
 
 implementation

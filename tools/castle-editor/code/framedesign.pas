@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -850,6 +850,8 @@ type
       MenuTreeViewItemMegaLights: TMenuItem;
       ButtonGameplayCue: TSpeedButton;
       MenuTreeViewItemGameplayCue: TMenuItem;
+      ButtonDataLayers: TSpeedButton;
+      MenuTreeViewItemDataLayers: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1397,6 +1399,8 @@ type
     procedure MenuTreeViewItemMegaLightsClick(Sender: TObject);
     procedure ButtonGameplayCueClick(Sender: TObject);
     procedure MenuTreeViewItemGameplayCueClick(Sender: TObject);
+    procedure ButtonDataLayersClick(Sender: TObject);
+    procedure MenuTreeViewItemDataLayersClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2890,6 +2894,7 @@ type
     procedure ShowErosionStudioDialog;
     procedure ShowMegaLightsDialog;
     procedure ShowGameplayCueDialog;
+    procedure ShowDataLayersDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2911,7 +2916,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7781,6 +7786,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonGameplayCue,
       PanelMiddleTop.GetControlIndex(ButtonMegaLights) + 1);
 
+  ButtonDataLayers := TSpeedButton.Create(Self);
+  ButtonDataLayers.Caption := 'DataLayer';
+  ButtonDataLayers.Hint := 'Open World Partition Runtime Data Layers Studio.' + NL +
+    'Switch multi-layer world scenarios & inspect parent/sub-layer inheritance.';
+  ButtonDataLayers.ShowHint := true;
+  ButtonDataLayers.AutoSize := true;
+  ButtonDataLayers.Constraints.MinHeight := 33;
+  ButtonDataLayers.Constraints.MinWidth := 68;
+  ButtonDataLayers.BorderSpacing.Left := 2;
+  ButtonDataLayers.OnClick := @ButtonDataLayersClick;
+  ButtonDataLayers.Parent := PanelMiddleTop;
+  if ButtonGameplayCue.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonDataLayers,
+      PanelMiddleTop.GetControlIndex(ButtonGameplayCue) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10915,6 +10935,11 @@ begin
   MenuTreeViewItemGameplayCue.Caption := 'Gameplay Cue, Hit-Stop && Floating Damage-Number Studio...';
   MenuTreeViewItemGameplayCue.OnClick := @MenuTreeViewItemGameplayCueClick;
   MenuTreeView.Items.Add(MenuTreeViewItemGameplayCue);
+
+  MenuTreeViewItemDataLayers := TMenuItem.Create(Self);
+  MenuTreeViewItemDataLayers.Caption := 'World Partition Runtime Data Layers Studio...';
+  MenuTreeViewItemDataLayers.OnClick := @MenuTreeViewItemDataLayersClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemDataLayers);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -16259,6 +16284,10 @@ var
         Suffix := Suffix + ' ' + TCastleLightFunctionBehavior(NodeObj).LightFunctionSummaryBadge
       else if NodeObj is TCastleGameplayCueDirector then
         Suffix := Suffix + ' ' + TCastleGameplayCueDirector(NodeObj).GameplayCueSummaryBadge
+      else if NodeObj is TCastleDataLayerManager then
+        Suffix := Suffix + ' ' + TCastleDataLayerManager(NodeObj).DataLayerSummaryBadge
+      else if NodeObj is TCastleDataLayerTagBehavior then
+        Suffix := Suffix + ' ' + TCastleDataLayerTagBehavior(NodeObj).DataLayerTagSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -56515,6 +56544,7 @@ begin
   else if SameText(AStudioId, 'erosion_studio') then ShowErosionStudioDialog
   else if SameText(AStudioId, 'mega_lights') then ShowMegaLightsDialog
   else if SameText(AStudioId, 'gameplay_cue') then ShowGameplayCueDialog
+  else if SameText(AStudioId, 'data_layers') then ShowDataLayersDialog
   else
     Result := False;
 end;
@@ -57246,6 +57276,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemGameplayCueClick(Sender: TObject);
 begin
   ShowGameplayCueDialog;
+end;
+
+procedure TDesignFrame.ShowDataLayersDialog;
+var
+  Dlg: TDataLayersForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TDataLayersForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonDataLayersClick(Sender: TObject);
+begin
+  ShowDataLayersDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemDataLayersClick(Sender: TObject);
+begin
+  ShowDataLayersDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);
