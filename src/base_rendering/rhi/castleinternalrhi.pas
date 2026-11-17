@@ -628,6 +628,7 @@ type
     FIsMemoryAliased: Boolean;
     FAliasedCarrierTexture: TRHITexture;
     function GetEstimatedByteSize: UInt64; virtual;
+    function GetRenderedLayerMask: Cardinal; virtual;
   public
     constructor Create(const ADevice: TRHIDevice; const ADesc: TRHITextureDesc);
     { Uploads a TEncodedImage (TCastleImage or TGPUCompressedImage) into a mip/layer. }
@@ -641,6 +642,7 @@ type
     property IsMemoryAliased: Boolean read FIsMemoryAliased;
     property AliasedCarrierTexture: TRHITexture read FAliasedCarrierTexture;
     property EstimatedByteSize: UInt64 read GetEstimatedByteSize;
+    property RenderedLayerMask: Cardinal read GetRenderedLayerMask;
   end;
 
   { Immutable texture sampler state. }
@@ -915,6 +917,7 @@ type
     function GetOrCreatePipeline(const ADesc: TRHIGraphicsPipelineDesc): TRHIPipeline; virtual; abstract;
 
     { Creates or retrieves a cached Compute Pipeline State Object matching ADesc. }
+    function GetOrCreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline; virtual;
     function CreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline; virtual;
 
     { Creates a hardware query pool for GPU timestamps or occlusion queries. }
@@ -925,6 +928,12 @@ type
       const ReadArea: TRectangle): TRGBAlphaImage; overload; virtual; abstract;
     function GrabTextureImage(const SourceTexture: TRHITexture;
       const ReadArea: TRectangle; const DestImage: TCastleImage): Boolean; overload; virtual;
+    { Reads back a specific 2D subresource slice (MipLevel, ArrayLayer) into a TRGBAlphaImage. }
+    function GrabTextureSubresourceImage(const SourceTexture: TRHITexture;
+      const AMipLevel, AArrayLayer: Cardinal): TRGBAlphaImage; virtual;
+    { Reads back any color/HDR/float/depth texture into a full-precision TRGBAlphaFloatImage. }
+    function GrabTextureFloatImage(const SourceTexture: TRHITexture;
+      const ReadArea: TRectangle): TRGBAlphaFloatImage; virtual;
 
     { Pipeline Cache persistence (loads/saves VkPipelineCache to disk) }
     procedure LoadPipelineCache(const CacheFileUrl: String); virtual; abstract;
@@ -1942,6 +1951,11 @@ begin
   Result := EstimateDescriptorByteSize(FDesc);
 end;
 
+function TRHITexture.GetRenderedLayerMask: Cardinal;
+begin
+  Result := 0;
+end;
+
 { TRHISampler }
 
 constructor TRHISampler.Create(const ADevice: TRHIDevice; const ADesc: TRHISamplerDesc);
@@ -2218,6 +2232,11 @@ begin
   EndFrameAndPresent;
 end;
 
+function TRHIDevice.GetOrCreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline;
+begin
+  Result := CreateComputePipeline(ADesc);
+end;
+
 function TRHIDevice.CreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline;
 begin
   Result := nil;
@@ -2241,6 +2260,37 @@ begin
   try
     DestImage.Assign(Grabbed);
     Result := True;
+  finally
+    FreeAndNil(Grabbed);
+  end;
+end;
+
+function TRHIDevice.GrabTextureSubresourceImage(const SourceTexture: TRHITexture;
+  const AMipLevel, AArrayLayer: Cardinal): TRGBAlphaImage;
+var
+  MipW, MipH: Cardinal;
+begin
+  if SourceTexture = nil then
+    Exit(nil);
+  MipW := Max(Cardinal(1), SourceTexture.Desc.Width shr AMipLevel);
+  MipH := Max(Cardinal(1), SourceTexture.Desc.Height shr AMipLevel);
+  if (AMipLevel = 0) and (AArrayLayer = 0) then
+    Result := GrabTextureImage(SourceTexture, Rectangle(0, 0, Integer(MipW), Integer(MipH)))
+  else
+    Result := nil;
+end;
+
+function TRHIDevice.GrabTextureFloatImage(const SourceTexture: TRHITexture;
+  const ReadArea: TRectangle): TRGBAlphaFloatImage;
+var
+  Grabbed: TRGBAlphaImage;
+begin
+  Result := nil;
+  Grabbed := GrabTextureImage(SourceTexture, ReadArea);
+  if Grabbed <> nil then
+  try
+    Result := TRGBAlphaFloatImage.Create(Grabbed.Width, Grabbed.Height);
+    Result.Assign(Grabbed);
   finally
     FreeAndNil(Grabbed);
   end;

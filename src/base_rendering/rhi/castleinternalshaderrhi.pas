@@ -571,6 +571,7 @@ type
   private
     FBackend: TRHIBackendType;
     function GenerateVersionAndLayoutMacros: String;
+    function GenerateVersionAndLayoutMacrosForStage(const AStage: TRHIShaderStage): String;
     function GenerateStandardUniformBlocks(const AStage: TRHIShaderStage): String;
     function GenerateStageIO(const AStage: TRHIShaderStage): String;
   public
@@ -578,6 +579,14 @@ type
 
     { Builds the complete preamble injected before CGE's internal GLSL templates }
     function GeneratePreamble(const AStage: TRHIShaderStage): String;
+
+    { Builds a clean cross-backend compute shader preamble (#version 450 on Vulkan,
+      #version 430 core on OpenGL, #version 310 es on OpenGLES) with unified
+      CASTLE_UBO, CASTLE_SSBO, CASTLE_SAMPLER, CASTLE_IMAGE, and CASTLE_PUSH_CONSTANT
+      macros plus layout(local_size_x, local_size_y, local_size_z) in; }
+    function GenerateComputePreamble(const ALocalSizeX: Cardinal = 1;
+      const ALocalSizeY: Cardinal = 1;
+      const ALocalSizeZ: Cardinal = 1): String;
 
     { Builds a bindless texture/material GLSL 450 preamble using GL_EXT_nonuniform_qualifier,
       Set 1 Binding 0 unbounded/sized sampler2D array (castle_BindlessTextures[]), and
@@ -1870,6 +1879,26 @@ end;
 
 function TCastleShaderGeneratorRHI.GenerateVersionAndLayoutMacros: String;
 begin
+  Result := GenerateVersionAndLayoutMacrosForStage(ssVertex);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateVersionAndLayoutMacrosForStage(
+  const AStage: TRHIShaderStage): String;
+
+  function BuildOpenGLSlotMacros: String;
+  var
+    S, B: Integer;
+  begin
+    Result := '';
+    for S := 0 to 3 do
+      for B := 0 to 7 do
+        Result := Result + Format('#define CASTLE_GL_SLOT_%d_%d %d', [S, B, S * 8 + B]) + NL;
+    Result := Result +
+      '#define CASTLE_GL_BIND2(SetIdx, BindIdx) CASTLE_GL_SLOT_ ## SetIdx ## _ ## BindIdx' + NL +
+      '#define CASTLE_GL_BIND(SetIdx, BindIdx) CASTLE_GL_BIND2(SetIdx, BindIdx)' + NL;
+  end;
+
+begin
   case FBackend of
     rbVulkan:
       Result :=
@@ -1878,38 +1907,71 @@ begin
         '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, set = SetIdx, binding = BindIdx)' + NL +
         '#define CASTLE_SSBO(SetIdx, BindIdx) layout(std430, set = SetIdx, binding = BindIdx)' + NL +
         '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(set = SetIdx, binding = BindIdx)' + NL +
+        '#define CASTLE_IMAGE(SetIdx, BindIdx, ImgFmt) layout(ImgFmt, set = SetIdx, binding = BindIdx)' + NL +
         '#define CASTLE_PUSH_CONSTANT layout(push_constant)' + NL +
         '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
         '#define CASTLE_VERTEX_INDEX gl_VertexIndex' + NL +
         '#define CASTLE_INSTANCE_INDEX gl_InstanceIndex' + NL;
 
     rbOpenGL:
-      Result :=
-        '#version 330 core' + NL +
-        '#extension GL_ARB_shading_language_420pack : enable' + NL +
-        '#extension GL_ARB_explicit_attrib_location : enable' + NL +
-        '#define CASTLE_OPENGL 1' + NL +
-        { Flattens (SetIdx, BindIdx) to match GL_DESCRIPTOR_SET_SLOT_STRIDE = 4 }
-        '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, binding = (SetIdx * 4 + BindIdx))' + NL +
-        '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(binding = (SetIdx * 4 + BindIdx))' + NL +
-        { Maps Push Constants to reserved UBO slot 15 in OpenGL }
-        '#define CASTLE_PUSH_CONSTANT layout(std140, binding = 15)' + NL +
-        '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
-        '#define CASTLE_VERTEX_INDEX gl_VertexID' + NL +
-        '#define CASTLE_INSTANCE_INDEX gl_InstanceID' + NL;
+      begin
+        if AStage = ssCompute then
+          Result := '#version 430 core' + NL
+        else
+          Result :=
+            '#version 330 core' + NL +
+            '#extension GL_ARB_separate_shader_objects : enable' + NL +
+            '#extension GL_ARB_shading_language_420pack : enable' + NL +
+            '#extension GL_ARB_explicit_attrib_location : enable' + NL +
+            '#extension GL_ARB_shader_storage_buffer_object : enable' + NL +
+            '#extension GL_ARB_shader_image_load_store : enable' + NL;
+        Result := Result +
+          '#define CASTLE_OPENGL 1' + NL +
+          BuildOpenGLSlotMacros +
+          { Flattens (SetIdx, BindIdx) to literal integer slot SetIdx * 8 + BindIdx }
+          '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+          '#define CASTLE_SSBO(SetIdx, BindIdx) layout(std430, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+          '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+          '#define CASTLE_IMAGE(SetIdx, BindIdx, ImgFmt) layout(ImgFmt, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+          { Maps Push Constants to reserved UBO slot 24 in OpenGL }
+          '#define CASTLE_PUSH_CONSTANT layout(std140, binding = 24)' + NL +
+          '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
+          '#define CASTLE_VERTEX_INDEX gl_VertexID' + NL +
+          '#define CASTLE_INSTANCE_INDEX gl_InstanceID' + NL;
+      end;
 
     rbOpenGLES:
-      Result :=
-        '#version 300 es' + NL +
-        'precision highp float;' + NL +
-        'precision highp int;' + NL +
-        '#define CASTLE_OPENGLES 1' + NL +
-        '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140)' + NL +
-        '#define CASTLE_SAMPLER(SetIdx, BindIdx)' + NL +
-        '#define CASTLE_PUSH_CONSTANT layout(std140)' + NL +
-        '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
-        '#define CASTLE_VERTEX_INDEX gl_VertexID' + NL +
-        '#define CASTLE_INSTANCE_INDEX gl_InstanceID' + NL;
+      begin
+        if AStage = ssCompute then
+          Result :=
+            '#version 310 es' + NL +
+            'precision highp float;' + NL +
+            'precision highp int;' + NL +
+            '#define CASTLE_OPENGLES 1' + NL +
+            BuildOpenGLSlotMacros +
+            '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+            '#define CASTLE_SSBO(SetIdx, BindIdx) layout(std430, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+            '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+            '#define CASTLE_IMAGE(SetIdx, BindIdx, ImgFmt) layout(ImgFmt, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+            '#define CASTLE_PUSH_CONSTANT layout(std140, binding = 24)' + NL +
+            '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
+            '#define CASTLE_VERTEX_INDEX gl_VertexID' + NL +
+            '#define CASTLE_INSTANCE_INDEX gl_InstanceID' + NL
+        else
+          Result :=
+            '#version 300 es' + NL +
+            'precision highp float;' + NL +
+            'precision highp int;' + NL +
+            '#define CASTLE_OPENGLES 1' + NL +
+            '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140)' + NL +
+            '#define CASTLE_SSBO(SetIdx, BindIdx) layout(std430)' + NL +
+            '#define CASTLE_SAMPLER(SetIdx, BindIdx)' + NL +
+            '#define CASTLE_IMAGE(SetIdx, BindIdx, ImgFmt) layout(ImgFmt)' + NL +
+            '#define CASTLE_PUSH_CONSTANT layout(std140)' + NL +
+            '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
+            '#define CASTLE_VERTEX_INDEX gl_VertexID' + NL +
+            '#define CASTLE_INSTANCE_INDEX gl_InstanceID' + NL;
+      end;
   end;
 end;
 
@@ -2112,10 +2174,24 @@ end;
 
 function TCastleShaderGeneratorRHI.GeneratePreamble(const AStage: TRHIShaderStage): String;
 begin
+  if AStage = ssCompute then
+    Result := GenerateVersionAndLayoutMacrosForStage(ssCompute) + NL
+  else
+    Result :=
+      GenerateVersionAndLayoutMacrosForStage(AStage) + NL +
+      GenerateStandardUniformBlocks(AStage) + NL +
+      GenerateStageIO(AStage) + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateComputePreamble(const ALocalSizeX,
+  ALocalSizeY, ALocalSizeZ: Cardinal): String;
+begin
   Result :=
-    GenerateVersionAndLayoutMacros + NL +
-    GenerateStandardUniformBlocks(AStage) + NL +
-    GenerateStageIO(AStage) + NL;
+    GenerateVersionAndLayoutMacrosForStage(ssCompute) + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = %d) in;',
+      [Max(Cardinal(1), ALocalSizeX),
+       Max(Cardinal(1), ALocalSizeY),
+       Max(Cardinal(1), ALocalSizeZ)]) + NL;
 end;
 
 function TCastleShaderGeneratorRHI.GenerateBindlessPreamble(const AStage: TRHIShaderStage;

@@ -27,6 +27,7 @@ uses
   CastleTextureFont_Default3d_Sans,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
   CastleInternalVulkanWSI, CastleInternalShaderCompiler, CastleInternalRHI_Vulkan,
+  CastleInternalRHI_OpenGL,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
   CastleRendererInternalShader, CastleRendererInternalLights, CastleRendererInternalTextureEnv, X3DNodes, X3DFields, X3DCameraUtils,
   CastleInternalGeometryArrays, CastleSceneInternalShape, CastleInternalOcclusionCulling,
@@ -416,6 +417,9 @@ type
     procedure TestSharedDeviceMultiControlSwapchainSurfacesHeadlessAndSimulatedRHI;
     procedure TestRealVulkanMultiControlHeadlessSurfacesSharedDevice3DAnd2DRHI;
     procedure TestRealX11MultiChildWidgetSurfacesSharedVulkanDevicePresentAndResizeRHI;
+    procedure TestOpenGLRHIShaderTranslationHeadlessComputeIndirectAndQueryPoolRHI;
+    procedure TestRealOpenGLRHIComputeSSBOStorageImageIndirectMultiDrawAndQueriesRHI;
+    procedure TestUnifiedRenderGraphOpenGLVsVulkanComputeAndGraphicsBackendParityRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -33981,6 +33985,950 @@ begin
 begin
   { Non-X11 target OS }
 {$endif}
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ Phase 116: Full TOpenGLRHIDevice Compute, Indirect Multi-Draw, Query Pool &  }
+{            Unified TRHIRenderGraph Backend Parity                            }
+{ ---------------------------------------------------------------------------- }
+
+procedure TTestCastleVulkanRHI.TestOpenGLRHIShaderTranslationHeadlessComputeIndirectAndQueryPoolRHI;
+var
+  GLDev: TOpenGLRHIDevice;
+  GenGL: TCastleShaderGeneratorRHI;
+  VkSrc, TranslatedSrc, CompPreamble: String;
+  VBODesc, IBODesc, UBODesc, SSBODesc, IndirectDesc, CountDesc: TRHIBufferDesc;
+  VBO, IBO, UBO, SSBO, IndirectBuf, CountBuf, DispatchIndBuf: TOpenGLRHIBuffer;
+  VS, FS, CS: TRHIShaderModule;
+  SetLayout: TRHIDescriptorSetLayout;
+  DescSet: TOpenGLRHIDescriptorSet;
+  BindDescs: array[0..2] of TRHIDescriptorBindingDesc;
+  TexStorage: TRHITexture;
+  GraphPipeDesc: TRHIGraphicsPipelineDesc;
+  CompPipeDesc: TRHIComputePipelineDesc;
+  GraphPipe1, GraphPipe2: TRHIPipeline;
+  CompPipe1, CompPipe2: TRHIComputePipeline;
+  TimePool, OcclPool: TOpenGLRHIQueryPool;
+  QueryVals: array[0..1] of UInt64;
+  Cmd: TOpenGLRHICommandList;
+  Graph: TRHIRenderGraph;
+  HTransientA, HFinal: TRHIRenderGraphResourceHandle;
+  PassComp, PassGraph, PassDead: TRHIRenderGraphPass;
+  FinalTex: TRHITexture;
+  PayloadIn, PayloadOut: array[0..3] of Cardinal;
+  DispIndCmd: TRHIDispatchIndirectCommand;
+  PushVec: TVector4;
+begin
+  { 1. Verify Vulkan #version 450 -> OpenGL #version 430 core shader translation }
+  VkSrc :=
+    '#version 450' + LineEnding +
+    '#extension GL_ARB_separate_shader_objects : enable' + LineEnding +
+    'layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;' + LineEnding +
+    'layout(std140, set = 0, binding = 1) uniform SceneUBO { vec4 Params; } uScene;' + LineEnding +
+    'layout(std430, set = 1, binding = 2) buffer DataSSBO { uint Values[]; } sData;' + LineEnding +
+    'layout(rgba16f, set = 0, binding = 3) uniform writeonly image2D uOutImg;' + LineEnding +
+    'layout(push_constant) uniform PushBlock { vec4 Scale; } pc;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  int vid = gl_VertexIndex + gl_InstanceIndex;' + LineEnding +
+    '}';
+  TranslatedSrc := TranslateVulkanGLSLToOpenGL(ssCompute, VkSrc, False);
+  AssertTrue('Translated GLSL must emit #version 430 core',
+    Pos('#version 430 core', TranslatedSrc) > 0);
+  AssertFalse('Translated GLSL must strip GL_ARB_separate_shader_objects from #version 450 input',
+    Pos('GL_ARB_separate_shader_objects', TranslatedSrc) > 0);
+  AssertTrue('Set 0 Binding 1 must flatten to binding = 1',
+    Pos('binding = 1', TranslatedSrc) > 0);
+  AssertTrue('Set 1 Binding 2 must flatten to binding = 10 (1*8 + 2)',
+    Pos('binding = 10', TranslatedSrc) > 0);
+  AssertTrue('Set 0 Binding 3 image2D must flatten to binding = 3',
+    Pos('binding = 3', TranslatedSrc) > 0);
+  AssertTrue('layout(push_constant) must rewrite to std140, binding = 24',
+    Pos('std140, binding = 24', TranslatedSrc) > 0);
+  AssertTrue('gl_VertexIndex must rewrite to gl_VertexID',
+    Pos('gl_VertexID', TranslatedSrc) > 0);
+  AssertTrue('gl_InstanceIndex must rewrite to gl_InstanceID',
+    Pos('gl_InstanceID', TranslatedSrc) > 0);
+
+  GenGL := TCastleShaderGeneratorRHI.Create(rbOpenGL);
+  try
+    CompPreamble := GenGL.GenerateComputePreamble(16, 4, 1);
+    AssertTrue('GenerateComputePreamble(rbOpenGL) must emit #version 430 core',
+      Pos('#version 430 core', CompPreamble) > 0);
+    AssertTrue('GenerateComputePreamble(rbOpenGL) must define CASTLE_SSBO',
+      Pos('#define CASTLE_SSBO(', CompPreamble) > 0);
+    AssertTrue('GenerateComputePreamble(rbOpenGL) must define CASTLE_IMAGE',
+      Pos('#define CASTLE_IMAGE(', CompPreamble) > 0);
+    AssertTrue('GenerateComputePreamble(rbOpenGL) must emit local_size_x = 16, local_size_y = 4',
+      Pos('layout(local_size_x = 16, local_size_y = 4, local_size_z = 1) in;', CompPreamble) > 0);
+  finally
+    FreeAndNil(GenGL);
+  end;
+
+  { 2. Verify Headless TOpenGLRHIDevice buffer targets, PSO/Compute caching, Indirect, Queries & RenderGraph }
+  VBO := nil; IBO := nil; UBO := nil; SSBO := nil;
+  IndirectBuf := nil; CountBuf := nil; DispatchIndBuf := nil;
+  TexStorage := nil; FinalTex := nil;
+  SetLayout := nil; DescSet := nil;
+  VS := nil; FS := nil; CS := nil;
+  TimePool := nil; OcclPool := nil;
+  GLDev := TOpenGLRHIDevice.CreateHeadless(128, 128, True, True, True);
+  try
+    AssertFalse('Headless OpenGL RHI device must have HasLiveGLContext = False', GLDev.HasLiveGLContext);
+    AssertTrue('Headless OpenGL RHI device Capabilities.SupportsComputeShaders', GLDev.Capabilities.SupportsComputeShaders);
+    AssertTrue('Headless OpenGL RHI device Capabilities.SupportsMultiDrawIndirect', GLDev.Capabilities.SupportsMultiDrawIndirect);
+    AssertTrue('Headless OpenGL RHI device Capabilities.SupportsDrawIndirectCount', GLDev.Capabilities.SupportsDrawIndirectCount);
+
+    PayloadIn[0] := 11;
+    PayloadIn[1] := 22;
+    PayloadIn[2] := 33;
+    PayloadIn[3] := 44;
+
+    VBODesc := TRHIBufferDesc.Create(64, [buVertex], muCpuToGpu, 'GLHeadlessVBO');
+    IBODesc := TRHIBufferDesc.Create(32, [buIndex], muGpuOnly, 'GLHeadlessIBO');
+    UBODesc := TRHIBufferDesc.Create(64, [buUniform], muCpuToGpu, 'GLHeadlessUBO');
+    SSBODesc := TRHIBufferDesc.Create(SizeOf(PayloadIn), [buStorage], muGpuOnly, 'GLHeadlessSSBO');
+    IndirectDesc := TRHIBufferDesc.Create(64, [buIndirect], muGpuOnly, 'GLHeadlessIndirect');
+    CountDesc := TRHIBufferDesc.Create(16, [buStorage, buIndirect], muGpuOnly, 'GLHeadlessCount');
+
+    VBO := GLDev.CreateBuffer(VBODesc) as TOpenGLRHIBuffer;
+    IBO := GLDev.CreateBuffer(IBODesc) as TOpenGLRHIBuffer;
+    UBO := GLDev.CreateBuffer(UBODesc) as TOpenGLRHIBuffer;
+    SSBO := GLDev.CreateBuffer(SSBODesc, @PayloadIn[0]) as TOpenGLRHIBuffer;
+    IndirectBuf := GLDev.CreateBuffer(IndirectDesc) as TOpenGLRHIBuffer;
+    CountBuf := GLDev.CreateBuffer(CountDesc) as TOpenGLRHIBuffer;
+    DispIndCmd.GroupCountX := 4;
+    DispIndCmd.GroupCountY := 2;
+    DispIndCmd.GroupCountZ := 1;
+    DispatchIndBuf := GLDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(DispIndCmd), [buIndirect], muGpuOnly, 'GLDispInd'),
+      @DispIndCmd) as TOpenGLRHIBuffer;
+
+    SSBO.ReadData(PayloadOut[0], SizeOf(PayloadOut), 0);
+    AssertEquals('Host shadow SSBO ReadData[0]', Cardinal(11), PayloadOut[0]);
+    AssertEquals('Host shadow SSBO ReadData[3]', Cardinal(44), PayloadOut[3]);
+
+    TexStorage := GLDev.CreateTexture(
+      TRHITextureDesc.Create2D(32, 32, pfRGBA16_Float, [tuSampled, tuStorage]));
+    FinalTex := GLDev.CreateTexture(
+      TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]));
+
+    FillChar(BindDescs, SizeOf(BindDescs), 0);
+    BindDescs[0].Binding := 0;
+    BindDescs[0].DescriptorType := dtUniformBuffer;
+    BindDescs[0].Count := 1;
+    BindDescs[0].StageFlags := [ssCompute];
+    BindDescs[1].Binding := 1;
+    BindDescs[1].DescriptorType := dtStorageBuffer;
+    BindDescs[1].Count := 1;
+    BindDescs[1].StageFlags := [ssCompute];
+    BindDescs[2].Binding := 2;
+    BindDescs[2].DescriptorType := dtStorageImage;
+    BindDescs[2].Count := 1;
+    BindDescs[2].StageFlags := [ssCompute];
+
+    SetLayout := GLDev.CreateDescriptorSetLayout(BindDescs);
+    DescSet := GLDev.CreateDescriptorSet(SetLayout) as TOpenGLRHIDescriptorSet;
+    DescSet.BindUniformBuffer(0, UBO);
+    DescSet.BindStorageBuffer(1, SSBO);
+    DescSet.BindTextureSubresource(2, TexStorage, 0, 0, nil);
+    DescSet.Update;
+    AssertEquals('DescriptorSet.UpdateCount = 1', Cardinal(1), DescSet.UpdateCount);
+
+    VS := GLDev.CreateShaderModuleFromGLSL(ssVertex,
+      '#version 450' + LineEnding + 'void main() { gl_Position = vec4(0.0); }', 'HeadlessVS');
+    FS := GLDev.CreateShaderModuleFromGLSL(ssFragment,
+      '#version 450' + LineEnding + 'layout(location=0) out vec4 o; void main() { o = vec4(1.0); }', 'HeadlessFS');
+    CS := GLDev.CreateShaderModuleFromGLSL(ssCompute, VkSrc, 'HeadlessCS');
+
+    GraphPipeDesc := Default(TRHIGraphicsPipelineDesc);
+    GraphPipeDesc.VertexShader := VS;
+    GraphPipeDesc.FragmentShader := FS;
+    GraphPipeDesc.Topology := ptTriangleList;
+    GraphPipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    GraphPipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+    GraphPipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    GraphPipeDesc.PushConstantSize := 16;
+    GraphPipe1 := GLDev.GetOrCreatePipeline(GraphPipeDesc);
+    GraphPipe2 := GLDev.GetOrCreatePipeline(GraphPipeDesc);
+    AssertTrue('Graphics PSO cache hit returns identical instance', GraphPipe1 = GraphPipe2);
+    AssertEquals('Graphics PipelineCacheHits = 1', Cardinal(1), GLDev.PipelineCacheHits);
+    AssertEquals('Graphics PipelineCacheMisses = 1', Cardinal(1), GLDev.PipelineCacheMisses);
+
+    CompPipeDesc := Default(TRHIComputePipelineDesc);
+    CompPipeDesc.ComputeShader := CS;
+    CompPipeDesc.PushConstantSize := 16;
+    CompPipeDesc.PushConstantStages := [ssCompute];
+    CompPipe1 := GLDev.GetOrCreateComputePipeline(CompPipeDesc);
+    CompPipe2 := GLDev.GetOrCreateComputePipeline(CompPipeDesc);
+    AssertTrue('Compute PSO cache hit returns identical instance', CompPipe1 = CompPipe2);
+    AssertEquals('ComputePipelineCacheHits = 1', Cardinal(1), GLDev.ComputePipelineCacheHits);
+    AssertEquals('ComputePipelineCacheMisses = 1', Cardinal(1), GLDev.ComputePipelineCacheMisses);
+
+    TimePool := GLDev.CreateQueryPool(TRHIQueryPoolDesc.Create(qtTimestamp, 2, 'GLTimePool')) as TOpenGLRHIQueryPool;
+    OcclPool := GLDev.CreateQueryPool(TRHIQueryPoolDesc.Create(qtOcclusion, 2, 'GLOcclPool')) as TOpenGLRHIQueryPool;
+
+    Cmd := GLDev.BeginFrame as TOpenGLRHICommandList;
+    Cmd.ResetQueryPool(TimePool, 0, 2);
+    Cmd.ResetQueryPool(OcclPool, 0, 2);
+    Cmd.WriteTimestamp(TimePool, 0, ssCompute);
+
+    Cmd.BindComputePipeline(CompPipe1);
+    Cmd.BindComputeDescriptorSet(0, DescSet, []);
+    PushVec := Vector4(1, 2, 3, 4);
+    Cmd.PushConstants([ssCompute], 0, SizeOf(PushVec), PushVec);
+    Cmd.Dispatch(2, 2, 1);
+    Cmd.DispatchIndirect(DispatchIndBuf, 0);
+
+    Cmd.BeginRendering(TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 32, 32), FinalTex, loClear, Vector4(0, 0, 0, 1), nil, loDontCare));
+    Cmd.BeginQuery(OcclPool, 0, True);
+    Cmd.BindPipeline(GraphPipe1);
+    Cmd.BindVertexBuffers(0, [VBO], [0]);
+    Cmd.BindIndexBuffer(IBO, 0, itUInt16);
+    Cmd.DrawIndirect(IndirectBuf, 0, 2, SizeOf(TRHIDrawIndirectCommand));
+    Cmd.DrawIndexedIndirect(IndirectBuf, 0, 2, SizeOf(TRHIDrawIndexedIndirectCommand));
+    Cmd.DrawIndirectCount(IndirectBuf, 0, CountBuf, 0, 4, SizeOf(TRHIDrawIndirectCommand));
+    Cmd.DrawIndexedIndirectCount(IndirectBuf, 0, CountBuf, 0, 4, SizeOf(TRHIDrawIndexedIndirectCommand));
+    Cmd.EndQuery(OcclPool, 0);
+    Cmd.EndRendering;
+    Cmd.WriteTimestamp(TimePool, 1, ssFragment);
+    GLDev.EndFrameAndPresent;
+
+    AssertEquals('ComputeDispatchCount = 2', Cardinal(2), GLDev.ComputeDispatchCount);
+    AssertEquals('IndirectDrawCallCount = 4', Cardinal(4), GLDev.IndirectDrawCallCount);
+    AssertTrue('Timestamp query pool GetResults succeeds', TimePool.GetResults(0, 2, QueryVals, True));
+    AssertTrue('Timestamp[1] > Timestamp[0]', QueryVals[1] > QueryVals[0]);
+    AssertTrue('Occlusion query pool GetResults succeeds', OcclPool.GetResults(0, 1, QueryVals, True));
+    AssertTrue('Occlusion simulated samples > 0', QueryVals[0] > 0);
+
+    { Verify TRHIRenderGraph compiles, culls dead pass, and executes on TOpenGLRHIDevice }
+    Graph := TRHIRenderGraph.Create(GLDev);
+    try
+      HTransientA := Graph.DeclareTransientTexture('TransientStorage',
+        TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuStorage, tuSampled]));
+      HFinal := Graph.ImportExternalTexture('FinalOut', FinalTex, rsUndefined, rsTransferSrc);
+
+      PassComp := Graph.AddPass('ComputeGen', rgptCompute);
+      PassComp.WriteStorageTexture(HTransientA, rsUnorderedAccess);
+
+      PassGraph := Graph.AddPass('CompositeGraphics', rgptGraphics);
+      PassGraph.ReadTexture(HTransientA, rsShaderRead);
+      PassGraph.WriteColorAttachment(HFinal, loClear, Vector4(0, 0, 0, 1), soStore);
+
+      PassDead := Graph.AddPass('UnusedDeadPass', rgptCompute);
+      PassDead.WriteStorageTexture(
+        Graph.DeclareTransientTexture('DeadTex', TRHITextureDesc.Create2D(16, 16, pfRGBA8_UNorm, [tuStorage])),
+        rsUnorderedAccess);
+
+      Graph.Compile;
+      AssertEquals('RenderGraph on TOpenGLRHIDevice must cull 1 dead pass', 1, Graph.CulledPassCount);
+      AssertEquals('RenderGraph on TOpenGLRHIDevice must compile 2 active passes', 2, Graph.CompiledPassCount);
+
+      Cmd := GLDev.BeginOffscreenFrame as TOpenGLRHICommandList;
+      Graph.Execute(Cmd);
+      GLDev.EndOffscreenFrame;
+
+      AssertEquals('RenderGraph ExecutionCount = 1', Cardinal(1), Graph.ExecutionCount);
+      AssertEquals('RenderGraph DebugScopesEmittedCount = 2', Cardinal(2), Graph.DebugScopesEmittedCount);
+    finally
+      FreeAndNil(Graph);
+    end;
+  finally
+    FreeAndNil(OcclPool);
+    FreeAndNil(TimePool);
+    FreeAndNil(CS);
+    FreeAndNil(FS);
+    FreeAndNil(VS);
+    FreeAndNil(DescSet);
+    FreeAndNil(SetLayout);
+    FreeAndNil(FinalTex);
+    FreeAndNil(TexStorage);
+    FreeAndNil(DispatchIndBuf);
+    FreeAndNil(CountBuf);
+    FreeAndNil(IndirectBuf);
+    FreeAndNil(SSBO);
+    FreeAndNil(UBO);
+    FreeAndNil(IBO);
+    FreeAndNil(VBO);
+    FreeAndNil(GLDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealOpenGLRHIComputeSSBOStorageImageIndirectMultiDrawAndQueriesRHI;
+type
+  TColoredQuadVertex = packed record
+    Pos: TVector3;
+    Color: TVector4;
+  end;
+const
+  HdrStorageComputeSrc =
+    '#version 450' + LineEnding +
+    'layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;' + LineEnding +
+    'layout(rgba16f, set = 0, binding = 0) uniform writeonly image2D u_OutHDR;' + LineEnding +
+    'layout(push_constant) uniform HdrPC { vec4 ColorScale; } pc;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  ivec2 p = ivec2(gl_GlobalInvocationID.xy);' + LineEnding +
+    '  if (p.x >= 32 || p.y >= 32) return;' + LineEnding +
+    '  imageStore(u_OutHDR, p, pc.ColorScale);' + LineEnding +
+    '}';
+  QuadVS =
+    '#version 450' + LineEnding +
+    'layout(location = 0) in vec3 aPos;' + LineEnding +
+    'layout(location = 1) in vec4 aColor;' + LineEnding +
+    'layout(location = 0) out vec4 vColor;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  vColor = aColor;' + LineEnding +
+    '  gl_Position = vec4(aPos, 1.0);' + LineEnding +
+    '}';
+  QuadFS =
+    '#version 450' + LineEnding +
+    'layout(location = 0) in vec4 vColor;' + LineEnding +
+    'layout(location = 0) out vec4 oColor;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  oColor = vColor;' + LineEnding +
+    '}';
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  Win: TCastleWindow;
+  GLDev: TOpenGLRHIDevice;
+  Cmd: TOpenGLRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  CullCS, HdrCS, VS, FS: TRHIShaderModule;
+  CullLayout, HdrLayout: TRHIDescriptorSetLayout;
+  CullSet, HdrSet: TOpenGLRHIDescriptorSet;
+  CullBinds: array[0..3] of TRHIDescriptorBindingDesc;
+  HdrBind: array[0..0] of TRHIDescriptorBindingDesc;
+  CullPipe, HdrPipe: TRHIComputePipeline;
+  CullPipeDesc, HdrPipeDesc: TRHIComputePipelineDesc;
+  CullUBOData: TCastleGpuCullingUniformBlock;
+  Instances: array[0..3] of TCastleGpuCullingInstance;
+  CullUBO, InstSSBO, IndirectOutBuf, VisOutBuf, DispIndBuf: TOpenGLRHIBuffer;
+  VisibleCountReadback: Cardinal;
+  DispIndCmd: TRHIDispatchIndirectCommand;
+  HdrTex, ColorTex, DepthTex: TRHITexture;
+  HdrScale: TVector4;
+  HdrReadback: TRGBAlphaFloatImage;
+  HdrPx: TVector4;
+  Verts: array[0..11] of TColoredQuadVertex;
+  Indices: array[0..17] of UInt16;
+  QuadVBO, QuadIBO: TRHIBuffer;
+  GraphPipeDesc: TRHIGraphicsPipelineDesc;
+  GraphPipe: TRHIPipeline;
+  OcclPool, TimePool: TRHIQueryPool;
+  OcclRes, TimeRes: array[0..1] of UInt64;
+  ColorReadback: TRGBAlphaImage;
+begin
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  if (GetEnvironmentVariable('DISPLAY') = '') and (GetEnvironmentVariable('WAYLAND_DISPLAY') = '') then
+    Exit;
+  {$endif}
+
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  Win := nil;
+  GLDev := nil;
+  Gen := nil;
+  HdrReadback := nil;
+  ColorReadback := nil;
+  CullCS := nil; HdrCS := nil; VS := nil; FS := nil;
+  CullLayout := nil; HdrLayout := nil;
+  CullSet := nil; HdrSet := nil;
+  CullUBO := nil; InstSSBO := nil; IndirectOutBuf := nil; VisOutBuf := nil; DispIndBuf := nil;
+  HdrTex := nil; ColorTex := nil; DepthTex := nil;
+  QuadVBO := nil; QuadIBO := nil;
+  OcclPool := nil; TimePool := nil;
+  try
+    ApplicationProperties.RenderBackend := backendOpenGL;
+    SetRHIDevice(nil);
+    SetActiveCommandList(nil);
+
+    Win := TCastleWindow.Create(nil);
+    Win.Width := 128;
+    Win.Height := 128;
+    Win.Visible := False;
+    try
+      Win.Open;
+    except
+      on Exception do
+      begin
+        FreeAndNil(Win);
+        Exit;
+      end;
+    end;
+
+    GLDev := TOpenGLRHIDevice.Create(128, 128);
+    AssertTrue('Live OpenGL window must yield GLDev.HasLiveGLContext = True', GLDev.HasLiveGLContext);
+    if not GLDev.Capabilities.SupportsComputeShaders then
+      Exit;
+
+    { --- Part A: Live GL_COMPUTE_SHADER + SSBO GPU Frustum Culling + DispatchIndirect HDR Storage Image --- }
+    Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+    CullCS := GLDev.CreateShaderModuleFromGLSL(ssCompute, Gen.GenerateComputeCullingShader(64), 'OpenGLGpuCullingCS');
+
+    FillChar(CullBinds, SizeOf(CullBinds), 0);
+    CullBinds[0].Binding := 0; CullBinds[0].DescriptorType := dtUniformBuffer; CullBinds[0].Count := 1; CullBinds[0].StageFlags := [ssCompute];
+    CullBinds[1].Binding := 1; CullBinds[1].DescriptorType := dtStorageBuffer; CullBinds[1].Count := 1; CullBinds[1].StageFlags := [ssCompute];
+    CullBinds[2].Binding := 2; CullBinds[2].DescriptorType := dtStorageBuffer; CullBinds[2].Count := 1; CullBinds[2].StageFlags := [ssCompute];
+    CullBinds[3].Binding := 3; CullBinds[3].DescriptorType := dtStorageBuffer; CullBinds[3].Count := 1; CullBinds[3].StageFlags := [ssCompute];
+    CullLayout := GLDev.CreateDescriptorSetLayout(CullBinds);
+
+    { Frustum planes keeping X in [-2..+2]: x + 2 >= 0 and -x + 2 >= 0 }
+    FillChar(CullUBOData, SizeOf(CullUBOData), 0);
+    CullUBOData.FrustumPlanes[0] := Vector4( 1, 0, 0, 2.0);
+    CullUBOData.FrustumPlanes[1] := Vector4(-1, 0, 0, 2.0);
+    CullUBOData.FrustumPlanes[2] := Vector4( 0, 1, 0, 2.0);
+    CullUBOData.FrustumPlanes[3] := Vector4( 0,-1, 0, 2.0);
+    CullUBOData.FrustumPlanes[4] := Vector4( 0, 0, 1, 2.0);
+    CullUBOData.FrustumPlanes[5] := Vector4( 0, 0,-1, 2.0);
+    CullUBOData.InstanceCount := 4;
+    CullUBOData.EnableFrustumCulling := 1;
+    CullUBOData.EnableDistanceCulling := 0;
+    CullUBOData.CompactDrawStream := 1;
+
+    FillChar(Instances, SizeOf(Instances), 0);
+    { Instance 0: INSIDE frustum -> draws Quad 0 (FirstIndex = 0, Red left quad) }
+    Instances[0].BoundingSphere := Vector4(-0.5, 0.0, 0.0, 0.25);
+    Instances[0].IndexCount := 6;
+    Instances[0].FirstIndex := 0;
+    Instances[0].InstanceCount := 1;
+    { Instance 1: OUTSIDE frustum (X = +9.0) -> culled! (Quad 2 Blue center quad must NOT draw!) }
+    Instances[1].BoundingSphere := Vector4(9.0, 0.0, 0.0, 0.25);
+    Instances[1].IndexCount := 6;
+    Instances[1].FirstIndex := 12;
+    Instances[1].InstanceCount := 1;
+    { Instance 2: INSIDE frustum -> draws Quad 1 (FirstIndex = 6, Green right quad) }
+    Instances[2].BoundingSphere := Vector4(0.5, 0.0, 0.0, 0.25);
+    Instances[2].IndexCount := 6;
+    Instances[2].FirstIndex := 6;
+    Instances[2].InstanceCount := 1;
+    { Instance 3: OUTSIDE frustum (Y = -9.0) -> culled! }
+    Instances[3].BoundingSphere := Vector4(0.0, -9.0, 0.0, 0.25);
+    Instances[3].IndexCount := 6;
+    Instances[3].FirstIndex := 12;
+    Instances[3].InstanceCount := 1;
+
+    CullUBO := GLDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(CullUBOData), [buUniform], muCpuToGpu, 'GLCullUBO'),
+      @CullUBOData) as TOpenGLRHIBuffer;
+    InstSSBO := GLDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(Instances), [buStorage], muGpuOnly, 'GLCullInstSSBO'),
+      @Instances[0]) as TOpenGLRHIBuffer;
+    IndirectOutBuf := GLDev.CreateBuffer(
+      TRHIBufferDesc.Create(4 * SizeOf(TRHIDrawIndexedIndirectCommand), [buStorage, buIndirect], muGpuOnly, 'GLIndirectOut')) as TOpenGLRHIBuffer;
+    VisibleCountReadback := 0;
+    VisOutBuf := GLDev.CreateBuffer(
+      TRHIBufferDesc.Create(32, [buStorage, buIndirect], muGpuOnly, 'GLVisCountBuf'),
+      @VisibleCountReadback) as TOpenGLRHIBuffer;
+
+    CullSet := GLDev.CreateDescriptorSet(CullLayout) as TOpenGLRHIDescriptorSet;
+    CullSet.BindUniformBuffer(0, CullUBO);
+    CullSet.BindStorageBuffer(1, InstSSBO);
+    CullSet.BindStorageBuffer(2, IndirectOutBuf);
+    CullSet.BindStorageBuffer(3, VisOutBuf);
+    CullSet.Update;
+
+    CullPipeDesc := Default(TRHIComputePipelineDesc);
+    CullPipeDesc.ComputeShader := CullCS;
+    CullPipeDesc.DebugName := 'GLCullPipe';
+    CullPipe := GLDev.GetOrCreateComputePipeline(CullPipeDesc);
+
+    { Indirect HDR storage-image compute pipeline }
+    HdrCS := GLDev.CreateShaderModuleFromGLSL(ssCompute, HdrStorageComputeSrc, 'GLHdrStorageCS');
+    FillChar(HdrBind, SizeOf(HdrBind), 0);
+    HdrBind[0].Binding := 0;
+    HdrBind[0].DescriptorType := dtStorageImage;
+    HdrBind[0].Count := 1;
+    HdrBind[0].StageFlags := [ssCompute];
+    HdrLayout := GLDev.CreateDescriptorSetLayout(HdrBind);
+    HdrTex := GLDev.CreateTexture(
+      TRHITextureDesc.Create2D(32, 32, pfRGBA16_Float, [tuStorage, tuSampled, tuTransferSrc]));
+    HdrSet := GLDev.CreateDescriptorSet(HdrLayout) as TOpenGLRHIDescriptorSet;
+    HdrSet.BindStorageImage(0, HdrTex, 0, 0);
+    HdrSet.Update;
+
+    HdrPipeDesc := Default(TRHIComputePipelineDesc);
+    HdrPipeDesc.ComputeShader := HdrCS;
+    HdrPipeDesc.PushConstantSize := SizeOf(TVector4);
+    HdrPipeDesc.PushConstantStages := [ssCompute];
+    HdrPipeDesc.DebugName := 'GLHdrPipe';
+    HdrPipe := GLDev.GetOrCreateComputePipeline(HdrPipeDesc);
+
+    DispIndCmd.GroupCountX := 4; { 4 * 8 = 32 }
+    DispIndCmd.GroupCountY := 4; { 4 * 8 = 32 }
+    DispIndCmd.GroupCountZ := 1;
+    DispIndBuf := GLDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(DispIndCmd), [buIndirect], muGpuOnly, 'GLDispIndBuf'),
+      @DispIndCmd) as TOpenGLRHIBuffer;
+
+    { --- Part B: Indirect-Count Multi-Draw Geometry + Timestamp & Occlusion Queries --- }
+    { Quad 0 (Left [-0.85..-0.25], z = 0.2): Bright Red }
+    Verts[0].Pos := Vector3(-0.85, -0.55, 0.2); Verts[0].Color := Vector4(1.0, 0.1, 0.1, 1.0);
+    Verts[1].Pos := Vector3(-0.25, -0.55, 0.2); Verts[1].Color := Vector4(1.0, 0.1, 0.1, 1.0);
+    Verts[2].Pos := Vector3(-0.25,  0.55, 0.2); Verts[2].Color := Vector4(1.0, 0.1, 0.1, 1.0);
+    Verts[3].Pos := Vector3(-0.85,  0.55, 0.2); Verts[3].Color := Vector4(1.0, 0.1, 0.1, 1.0);
+    { Quad 1 (Right [+0.25..+0.85], z = 0.2): Bright Green }
+    Verts[4].Pos := Vector3( 0.25, -0.55, 0.2); Verts[4].Color := Vector4(0.1, 1.0, 0.2, 1.0);
+    Verts[5].Pos := Vector3( 0.85, -0.55, 0.2); Verts[5].Color := Vector4(0.1, 1.0, 0.2, 1.0);
+    Verts[6].Pos := Vector3( 0.85,  0.55, 0.2); Verts[6].Color := Vector4(0.1, 1.0, 0.2, 1.0);
+    Verts[7].Pos := Vector3( 0.25,  0.55, 0.2); Verts[7].Color := Vector4(0.1, 1.0, 0.2, 1.0);
+    { Quad 2 (Behind Left [-0.75..-0.35], z = 0.8 > 0.2 -> occluded by Quad 0! And also culled in indirect stream): Cyan }
+    Verts[8].Pos  := Vector3(-0.75, -0.45, 0.8); Verts[8].Color  := Vector4(0.0, 0.9, 1.0, 1.0);
+    Verts[9].Pos  := Vector3(-0.35, -0.45, 0.8); Verts[9].Color  := Vector4(0.0, 0.9, 1.0, 1.0);
+    Verts[10].Pos := Vector3(-0.35,  0.45, 0.8); Verts[10].Color := Vector4(0.0, 0.9, 1.0, 1.0);
+    Verts[11].Pos := Vector3(-0.75,  0.45, 0.8); Verts[11].Color := Vector4(0.0, 0.9, 1.0, 1.0);
+
+    Indices[0] := 0; Indices[1] := 1; Indices[2] := 2; Indices[3] := 2; Indices[4] := 3; Indices[5] := 0;
+    Indices[6] := 4; Indices[7] := 5; Indices[8] := 6; Indices[9] := 6; Indices[10] := 7; Indices[11] := 4;
+    Indices[12] := 8; Indices[13] := 9; Indices[14] := 10; Indices[15] := 10; Indices[16] := 11; Indices[17] := 8;
+
+    QuadVBO := GLDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(Verts), [buVertex], muGpuOnly, 'GLQuadVBO'), @Verts[0]);
+    QuadIBO := GLDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(Indices), [buIndex], muGpuOnly, 'GLQuadIBO'), @Indices[0]);
+
+    VS := GLDev.CreateShaderModuleFromGLSL(ssVertex, QuadVS, 'GLQuadVS');
+    FS := GLDev.CreateShaderModuleFromGLSL(ssFragment, QuadFS, 'GLQuadFS');
+
+    GraphPipeDesc := Default(TRHIGraphicsPipelineDesc);
+    GraphPipeDesc.VertexShader := VS;
+    GraphPipeDesc.FragmentShader := FS;
+    GraphPipeDesc.Topology := ptTriangleList;
+    SetLength(GraphPipeDesc.VertexInput.Bindings, 1);
+    GraphPipeDesc.VertexInput.Bindings[0].Binding := 0;
+    GraphPipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TColoredQuadVertex);
+    GraphPipeDesc.VertexInput.Bindings[0].PerInstance := False;
+    SetLength(GraphPipeDesc.VertexInput.Attributes, 2);
+    GraphPipeDesc.VertexInput.Attributes[0].Location := 0;
+    GraphPipeDesc.VertexInput.Attributes[0].Binding := 0;
+    GraphPipeDesc.VertexInput.Attributes[0].Format := vafVector3;
+    GraphPipeDesc.VertexInput.Attributes[0].Offset := 0;
+    GraphPipeDesc.VertexInput.Attributes[0].AttributeName := 'aPos';
+    GraphPipeDesc.VertexInput.Attributes[1].Location := 1;
+    GraphPipeDesc.VertexInput.Attributes[1].Binding := 0;
+    GraphPipeDesc.VertexInput.Attributes[1].Format := vafVector4;
+    GraphPipeDesc.VertexInput.Attributes[1].Offset := SizeOf(TVector3);
+    GraphPipeDesc.VertexInput.Attributes[1].AttributeName := 'aColor';
+    GraphPipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    GraphPipeDesc.Rasterizer.CullMode := cmNone;
+    GraphPipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+    GraphPipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    GraphPipeDesc.DebugName := 'GLQuadPSO';
+    GraphPipe := GLDev.GetOrCreatePipeline(GraphPipeDesc);
+
+    ColorTex := GLDev.CreateTexture(
+      TRHITextureDesc.Create2D(128, 128, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]));
+    DepthTex := GLDev.CreateTexture(
+      TRHITextureDesc.Create2D(128, 128, pfD24_UNorm_S8_UInt, [tuDepthStencil]));
+
+    OcclPool := GLDev.CreateQueryPool(TRHIQueryPoolDesc.Create(qtOcclusion, 2, 'LiveGLOcclPool'));
+    TimePool := GLDev.CreateQueryPool(TRHIQueryPoolDesc.Create(qtTimestamp, 2, 'LiveGLTimePool'));
+
+    Cmd := GLDev.BeginOffscreenFrame as TOpenGLRHICommandList;
+    Cmd.ResetQueryPool(OcclPool, 0, 2);
+    Cmd.ResetQueryPool(TimePool, 0, 2);
+    Cmd.WriteTimestamp(TimePool, 0, ssCompute);
+
+    { 1. GPU Compute Culling pass }
+    Cmd.BindComputePipeline(CullPipe);
+    Cmd.BindComputeDescriptorSet(0, CullSet, []);
+    Cmd.Dispatch(1, 1, 1);
+
+    { 2. GPU DispatchIndirect HDR storage-image compute pass (writes unclamped HDR 2.5, 0.5, 1.75, 1.0) }
+    Cmd.BindComputePipeline(HdrPipe);
+    Cmd.BindComputeDescriptorSet(0, HdrSet, []);
+    HdrScale := Vector4(2.5, 0.5, 1.75, 1.0);
+    Cmd.PushConstants([ssCompute], 0, SizeOf(HdrScale), HdrScale);
+    Cmd.DispatchIndirect(DispIndBuf, 0);
+
+    { 3. Offscreen Graphics pass consuming GPU-culled IndirectBuffer + VisOutBuf count via DrawIndexedIndirectCount }
+    Cmd.BeginRendering(TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Vector4(0.04, 0.06, 0.25, 1.0),
+      DepthTex, loClear, 1.0));
+    Cmd.BindPipeline(GraphPipe);
+    Cmd.BindVertexBuffers(0, [QuadVBO], [0]);
+    Cmd.BindIndexBuffer(QuadIBO, 0, itUInt16);
+
+    Cmd.BeginQuery(OcclPool, 0, True);
+    Cmd.DrawIndexedIndirectCount(IndirectOutBuf, 0, VisOutBuf, 0, 4, SizeOf(TRHIDrawIndexedIndirectCommand));
+    Cmd.EndQuery(OcclPool, 0);
+
+    { Draw Quad 2 (z = 0.8 behind Quad 0's z = 0.2) inside Occlusion Query 1 -> 0 samples must pass! }
+    Cmd.BeginQuery(OcclPool, 1, True);
+    Cmd.DrawIndexed(6, 1, 12, 0, 0);
+    Cmd.EndQuery(OcclPool, 1);
+
+    Cmd.EndRendering;
+    Cmd.WriteTimestamp(TimePool, 1, ssFragment);
+    GLDev.EndOffscreenFrame;
+    GLDev.WaitIdle;
+
+    { Verify GPU compute culling wrote VisibleCount = 2 into SSBO }
+    VisOutBuf.ReadData(VisibleCountReadback, SizeOf(VisibleCountReadback), 0);
+    AssertEquals('OpenGL 4.3+ GPU compute culling SSBO must compact 2 visible draws out of 4',
+      Cardinal(2), VisibleCountReadback);
+
+    { Verify unclamped HDR > 1.0 float readback from DispatchIndirect + glBindImageTexture }
+    HdrReadback := GLDev.GrabTextureFloatImage(HdrTex, Rectangle(0, 0, 32, 32));
+    HdrPx := HdrReadback.PixelPtr(16, 16)^;
+    AssertTrue(Format('DispatchIndirect RGBA16F storage image must preserve HDR > 1.0 (expected ~2.5, 0.5, 1.75; got %.3f, %.3f, %.3f)',
+      [HdrPx.X, HdrPx.Y, HdrPx.Z]),
+      (Abs(HdrPx.X - 2.5) < 0.05) and (Abs(HdrPx.Y - 0.5) < 0.05) and (Abs(HdrPx.Z - 1.75) < 0.05));
+
+    { Verify DrawIndexedIndirectCount rendered Red left quad (28,64), Green right quad (100,64), and Navy center (64,64) }
+    ColorReadback := GLDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+    AssertTrue('Left visible indirect quad (28,64) must be Red (R > 220, G < 50)',
+      (ColorReadback.PixelPtr(28, 64)^.X > 220) and (ColorReadback.PixelPtr(28, 64)^.Y < 50));
+    AssertTrue('Right visible indirect quad (100,64) must be Green (G > 220, R < 50)',
+      (ColorReadback.PixelPtr(100, 64)^.Y > 220) and (ColorReadback.PixelPtr(100, 64)^.X < 50));
+    AssertTrue('Center pixel (64,64) must remain Navy background (B > 45, R < 25)',
+      (ColorReadback.PixelPtr(64, 64)^.Z > 45) and (ColorReadback.PixelPtr(64, 64)^.X < 25));
+
+    { Verify live GL_SAMPLES_PASSED occlusion queries & GL_TIMESTAMP nanosecond queries }
+    AssertTrue('Live OpenGL OcclusionPool.GetResults must succeed', OcclPool.GetResults(0, 2, OcclRes, True));
+    AssertTrue('Visible indirect quads must pass > 500 depth samples', OcclRes[0] > 500);
+    AssertEquals('Depth-occluded Quad 2 behind Quad 0 must pass 0 samples', Int64(0), Int64(OcclRes[1]));
+
+    AssertTrue('Live OpenGL TimestampPool.GetResults must succeed', TimePool.GetResults(0, 2, TimeRes, True));
+    AssertTrue('Live OpenGL GPU timestamp[0] must be non-zero nanoseconds', TimeRes[0] > 0);
+    AssertTrue('Live OpenGL GPU timestamp[1] >= timestamp[0]', TimeRes[1] >= TimeRes[0]);
+  finally
+    FreeAndNil(ColorReadback);
+    FreeAndNil(HdrReadback);
+    FreeAndNil(TimePool);
+    FreeAndNil(OcclPool);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(FS);
+    FreeAndNil(VS);
+    FreeAndNil(QuadIBO);
+    FreeAndNil(QuadVBO);
+    FreeAndNil(DispIndBuf);
+    FreeAndNil(HdrSet);
+    FreeAndNil(HdrTex);
+    FreeAndNil(HdrLayout);
+    FreeAndNil(HdrCS);
+    FreeAndNil(CullSet);
+    FreeAndNil(VisOutBuf);
+    FreeAndNil(IndirectOutBuf);
+    FreeAndNil(InstSSBO);
+    FreeAndNil(CullUBO);
+    FreeAndNil(CullLayout);
+    FreeAndNil(CullCS);
+    FreeAndNil(Gen);
+    FreeAndNil(GLDev);
+    if Win <> nil then
+    begin
+      Win.Close;
+      FreeAndNil(Win);
+    end;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+  end;
+end;
+
+type
+  TUnifiedBackendRenderGraphRunner = class
+  public
+    Dev: TRHIDevice;
+    Graph: TRHIRenderGraph;
+    HBrdfLut: TRHIRenderGraphResourceHandle;
+    HSceneColor: TRHIRenderGraphResourceHandle;
+    HFinalOut: TRHIRenderGraphResourceHandle;
+    LutPipe: TRHIComputePipeline;
+    LutSet: TRHIDescriptorSet;
+    Batch2D: TCastleBatch2DRenderer;
+    WhiteSet: TRHIDescriptorSet;
+    SceneSet: TRHIDescriptorSet;
+    LutSampleSet: TRHIDescriptorSet;
+    procedure ExecBrdfComputePass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure ExecSceneGraphicsPass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure ExecCompositeGraphicsPass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+  end;
+
+procedure TUnifiedBackendRenderGraphRunner.ExecBrdfComputePass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass;
+  const ACmd: TRHICommandList);
+type
+  TBrdfPC = packed record
+    LutWidth: Cardinal;
+    LutHeight: Cardinal;
+    SampleCount: Cardinal;
+    Reserved: Cardinal;
+  end;
+var
+  LutTex: TRHITexture;
+  PC: TBrdfPC;
+begin
+  if APass = nil then ;
+  LutTex := AGraph.ResolvePhysicalTexture(HBrdfLut);
+  LutSet.BindTextureSubresource(0, LutTex, 0, 0, nil);
+  LutSet.Update;
+
+  PC.LutWidth := 64;
+  PC.LutHeight := 64;
+  PC.SampleCount := 32;
+  PC.Reserved := 0;
+
+  ACmd.BindComputePipeline(LutPipe);
+  ACmd.BindComputeDescriptorSet(0, LutSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch(8, 8, 1);
+end;
+
+procedure TUnifiedBackendRenderGraphRunner.ExecSceneGraphicsPass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass;
+  const ACmd: TRHICommandList);
+var
+  SR, IR: TFloatRectangle;
+begin
+  if (AGraph = nil) and (APass = nil) then ;
+  Batch2D.Begin2DPass(ACmd, 64, 64);
+  IR := FloatRectangle(0, 0, 1, 1);
+
+  { Left Cobalt Blue bar }
+  SR := FloatRectangle(4, 6, 24, 52);
+  Batch2D.DrawQuads(Batch2D.WhitePixelTexture, WhiteSet, @SR, @IR, 1,
+    Vector4(0.12, 0.42, 0.95, 1.0), CastleInternalBatch2DRHI.bmNone, False, Rectangle(0, 0, 64, 64));
+
+  { Top-Right Coral Orange block }
+  SR := FloatRectangle(32, 34, 28, 24);
+  Batch2D.DrawQuads(Batch2D.WhitePixelTexture, WhiteSet, @SR, @IR, 1,
+    Vector4(0.95, 0.36, 0.14, 1.0), CastleInternalBatch2DRHI.bmNone, False, Rectangle(0, 0, 64, 64));
+
+  Batch2D.End2DPass;
+end;
+
+procedure TUnifiedBackendRenderGraphRunner.ExecCompositeGraphicsPass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass;
+  const ACmd: TRHICommandList);
+var
+  SceneTex, LutTex: TRHITexture;
+  SR, IR: TFloatRectangle;
+begin
+  if APass = nil then ;
+  SceneTex := AGraph.ResolvePhysicalTexture(HSceneColor);
+  LutTex := AGraph.ResolvePhysicalTexture(HBrdfLut);
+
+  SceneSet.BindTexture(0, SceneTex, Batch2D.NearestSampler);
+  SceneSet.Update;
+  LutSampleSet.BindTexture(0, LutTex, Batch2D.NearestSampler);
+  LutSampleSet.Update;
+
+  Batch2D.Begin2DPass(ACmd, 64, 64);
+  { 1. Blit SceneColor transient render target across full 64x64 output }
+  SR := FloatRectangle(0, 0, 64, 64);
+  IR := FloatRectangle(0, 0, 64, 64);
+  Batch2D.DrawQuads(SceneTex, SceneSet, @SR, @IR, 1,
+    Vector4(1.0, 1.0, 1.0, 1.0), CastleInternalBatch2DRHI.bmNone, False, Rectangle(0, 0, 64, 64));
+
+  { 2. Composite compute-generated Split-Sum GGX BRDF LUT into bottom-right (32..60, 6..30) }
+  SR := FloatRectangle(32, 6, 28, 24);
+  IR := FloatRectangle(0, 0, 64, 64);
+  Batch2D.DrawQuads(LutTex, LutSampleSet, @SR, @IR, 1,
+    Vector4(1.0, 1.0, 1.0, 1.0), CastleInternalBatch2DRHI.bmNone, False, Rectangle(0, 0, 64, 64));
+  Batch2D.End2DPass;
+end;
+
+procedure TTestCastleVulkanRHI.TestUnifiedRenderGraphOpenGLVsVulkanComputeAndGraphicsBackendParityRHI;
+
+  function ExecuteSharedGraphOnBackend(const ADev: TRHIDevice): TRGBAlphaImage;
+  var
+    Gen: TCastleShaderGeneratorRHI;
+    LutCS: TRHIShaderModule;
+    LutBind: array[0..0] of TRHIDescriptorBindingDesc;
+    LutLayout: TRHIDescriptorSetLayout;
+    LutPipeDesc: TRHIComputePipelineDesc;
+    FinalTex: TRHITexture;
+    Runner: TUnifiedBackendRenderGraphRunner;
+    Pass1, Pass2, Pass3, Pass4Dead: TRHIRenderGraphPass;
+    Cmd: TRHICommandList;
+  begin
+    Result := nil;
+    Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+    Runner := TUnifiedBackendRenderGraphRunner.Create;
+    Runner.Batch2D := nil;
+    Runner.Graph := nil;
+    Runner.LutSet := nil;
+    Runner.WhiteSet := nil;
+    Runner.SceneSet := nil;
+    Runner.LutSampleSet := nil;
+    LutCS := nil;
+    LutLayout := nil;
+    FinalTex := nil;
+    try
+      Runner.Dev := ADev;
+      LutCS := ADev.CreateShaderModuleFromGLSL(ssCompute,
+        Gen.GenerateIBLBrdfLutComputeShader(8, 8), 'IBLBrdfLutComputeCS');
+
+      FillChar(LutBind, SizeOf(LutBind), 0);
+      LutBind[0].Binding := 0;
+      LutBind[0].DescriptorType := dtStorageImage;
+      LutBind[0].Count := 1;
+      LutBind[0].StageFlags := [ssCompute];
+      LutLayout := ADev.CreateDescriptorSetLayout(LutBind);
+      Runner.LutSet := ADev.CreateDescriptorSet(LutLayout);
+
+      LutPipeDesc := Default(TRHIComputePipelineDesc);
+      LutPipeDesc.ComputeShader := LutCS;
+      LutPipeDesc.DescriptorSetLayouts := [LutLayout];
+      LutPipeDesc.PushConstantSize := 16;
+      LutPipeDesc.PushConstantStages := [ssCompute];
+      LutPipeDesc.DebugName := 'UnifiedBrdfLutCS';
+      Runner.LutPipe := ADev.GetOrCreateComputePipeline(LutPipeDesc);
+
+      Runner.Batch2D := TCastleBatch2DRenderer.Create(ADev);
+      Runner.WhiteSet := ADev.CreateDescriptorSet(Runner.Batch2D.TextureSetLayout);
+      Runner.WhiteSet.BindTexture(0, Runner.Batch2D.WhitePixelTexture, Runner.Batch2D.NearestSampler);
+      Runner.WhiteSet.Update;
+      Runner.SceneSet := ADev.CreateDescriptorSet(Runner.Batch2D.TextureSetLayout);
+      Runner.LutSampleSet := ADev.CreateDescriptorSet(Runner.Batch2D.TextureSetLayout);
+
+      FinalTex := ADev.CreateTexture(
+        TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuSampled, tuTransferSrc]));
+
+      Runner.Graph := TRHIRenderGraph.Create(ADev);
+      Runner.HBrdfLut := Runner.Graph.DeclareTransientTexture('TransientBrdfLut',
+        TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuStorage, tuSampled]));
+      Runner.HSceneColor := Runner.Graph.DeclareTransientTexture('TransientSceneColor',
+        TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuSampled]));
+      Runner.HFinalOut := Runner.Graph.ImportExternalTexture('FinalOutput',
+        FinalTex, rsUndefined, rsTransferSrc);
+
+      Pass1 := Runner.Graph.AddPass('BrdfLutComputePass', rgptCompute);
+      Pass1.WriteStorageTexture(Runner.HBrdfLut, rsUnorderedAccess);
+      Pass1.OnExecute := {$ifdef FPC}@{$endif}Runner.ExecBrdfComputePass;
+
+      Pass2 := Runner.Graph.AddPass('SceneForwardGraphicsPass', rgptGraphics);
+      Pass2.WriteColorAttachment(Runner.HSceneColor, loClear, Vector4(0.08, 0.09, 0.14, 1.0), soStore);
+      Pass2.OnExecute := {$ifdef FPC}@{$endif}Runner.ExecSceneGraphicsPass;
+
+      Pass3 := Runner.Graph.AddPass('FinalCompositeGraphicsPass', rgptGraphics);
+      Pass3.ReadTexture(Runner.HBrdfLut, rsShaderRead);
+      Pass3.ReadTexture(Runner.HSceneColor, rsShaderRead);
+      Pass3.WriteColorAttachment(Runner.HFinalOut, loClear, Vector4(0.0, 0.0, 0.0, 1.0), soStore);
+      Pass3.OnExecute := {$ifdef FPC}@{$endif}Runner.ExecCompositeGraphicsPass;
+
+      Pass4Dead := Runner.Graph.AddPass('DeadUnreferencedComputePass', rgptCompute);
+      Pass4Dead.WriteStorageTexture(
+        Runner.Graph.DeclareTransientTexture('UnusedDeadTex',
+          TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuStorage])),
+        rsUnorderedAccess);
+
+      Runner.Graph.Compile;
+      AssertEquals('Unified RenderGraph must cull 1 dead pass on both backends',
+        1, Runner.Graph.CulledPassCount);
+      AssertEquals('Unified RenderGraph must compile 3 active passes on both backends',
+        3, Runner.Graph.CompiledPassCount);
+
+      Cmd := ADev.BeginOffscreenFrame;
+      Runner.Graph.Execute(Cmd);
+      ADev.EndOffscreenFrame;
+      ADev.WaitIdle;
+
+      Result := ADev.GrabTextureImage(FinalTex, Rectangle(0, 0, 64, 64));
+    finally
+      FreeAndNil(Runner.Graph);
+      FreeAndNil(FinalTex);
+      FreeAndNil(Runner.LutSampleSet);
+      FreeAndNil(Runner.SceneSet);
+      FreeAndNil(Runner.WhiteSet);
+      FreeAndNil(Runner.Batch2D);
+      FreeAndNil(Runner.LutSet);
+      FreeAndNil(LutLayout);
+      FreeAndNil(LutCS);
+      FreeAndNil(Runner);
+      FreeAndNil(Gen);
+    end;
+  end;
+
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  VkDev: TVulkanRHIDevice;
+  GLWin: TCastleWindow;
+  GLDev: TOpenGLRHIDevice;
+  VkImg, GLImg: TRGBAlphaImage;
+  Metrics: TRHIVisualDiffMetrics;
+begin
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  if (GetEnvironmentVariable('DISPLAY') = '') and (GetEnvironmentVariable('WAYLAND_DISPLAY') = '') then
+    Exit;
+  {$endif}
+
+  VkDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(VkDev, True) then
+    Exit;
+
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  GLWin := nil;
+  GLDev := nil;
+  VkImg := nil;
+  GLImg := nil;
+  try
+    { 1. Execute shared 4-pass Compute + Graphics TRHIRenderGraph on live Vulkan 1.4 }
+    SetRHIDevice(VkDev);
+    VkImg := ExecuteSharedGraphOnBackend(VkDev);
+    VkDev.AssertZeroValidationErrors('Phase116.UnifiedRenderGraphVulkan');
+
+    { 2. Execute the EXACT SAME 4-pass Compute + Graphics TRHIRenderGraph on live OpenGL 4.5 }
+    SetRHIDevice(nil);
+    SetActiveCommandList(nil);
+    ApplicationProperties.RenderBackend := backendOpenGL;
+
+    GLWin := TCastleWindow.Create(nil);
+    GLWin.Width := 128;
+    GLWin.Height := 128;
+    GLWin.Visible := False;
+    try
+      GLWin.Open;
+    except
+      on Exception do
+      begin
+        FreeAndNil(GLWin);
+        Exit;
+      end;
+    end;
+
+    GLDev := TOpenGLRHIDevice.Create(128, 128);
+    if not GLDev.Capabilities.SupportsComputeShaders then
+      Exit;
+
+    SetRHIDevice(GLDev);
+    GLImg := ExecuteSharedGraphOnBackend(GLDev);
+
+    { 3. Verify pixel-level parity across Cobalt bar, Coral block, Dark background, and BRDF LUT }
+    AssertTrue('OpenGL Cobalt bar (14,32) B > 200', GLImg.PixelPtr(14, 32)^.Z > 200);
+    AssertTrue('OpenGL Coral block (44,44) R > 200', GLImg.PixelPtr(44, 44)^.X > 200);
+    AssertTrue('OpenGL BRDF LUT region (52,18) R > 120 (GGX scale)', GLImg.PixelPtr(52, 18)^.X > 120);
+
+    AssertTrue('Unified TRHIRenderGraph Compute + Graphics output must match between live Vulkan and live OpenGL (RMSE <= 0.03)',
+      CompareImagesDetailedDiff(VkImg, GLImg, 0.03, Metrics));
+  finally
+    FreeAndNil(GLImg);
+    FreeAndNil(VkImg);
+    FreeAndNil(GLDev);
+    if GLWin <> nil then
+    begin
+      GLWin.Close;
+      FreeAndNil(GLWin);
+    end;
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(VkDev);
+  end;
 end;
 
 initialization

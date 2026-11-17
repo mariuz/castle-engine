@@ -101,6 +101,7 @@ type
     procedure RecordVkMipmapBlits(const ACmd: VkCommandBuffer);
   protected
     procedure ReleaseDeviceResources; override;
+    function GetRenderedLayerMask: Cardinal; override;
   public
     { Standard constructor that allocates a new VkImage and VkImageView }
     constructor Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHITextureDesc); overload;
@@ -4609,7 +4610,7 @@ type
       const Layout: TRHIDescriptorSetLayout): TRHIDescriptorSet; override;
 
     function GetOrCreatePipeline(const ADesc: TRHIGraphicsPipelineDesc): TRHIPipeline; override;
-    function GetOrCreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline;
+    function GetOrCreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline; override;
     function CreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline; override;
     function CreateQueryPool(const ADesc: TRHIQueryPoolDesc): TRHIQueryPool; override;
     function CreateTimelineSemaphore(const AInitialValue: UInt64 = 0): TCastleVulkanTimelineSemaphore;
@@ -4622,12 +4623,12 @@ type
     function GrabTextureImage(const SourceTexture: TRHITexture;
       const ReadArea: TRectangle): TRGBAlphaImage; overload; override;
     function GrabTextureSubresourceImage(const SourceTexture: TRHITexture;
-      const AMipLevel, AArrayLayer: Cardinal): TRGBAlphaImage;
+      const AMipLevel, AArrayLayer: Cardinal): TRGBAlphaImage; override;
     { Reads back any color/HDR/float/depth texture (pfRGBA16_Float, pfRGBA32_Float,
       pfRG16_Float, pfR16_Float, pfR32_Float, pfRGBA8_UNorm, pfBGRA8_UNorm, pfD32_Float)
       into a full-precision TRGBAlphaFloatImage without [0..1] 8-bit clamping. }
     function GrabTextureFloatImage(const SourceTexture: TRHITexture;
-      const ReadArea: TRectangle): TRGBAlphaFloatImage;
+      const ReadArea: TRectangle): TRGBAlphaFloatImage; override;
 
     procedure LoadPipelineCache(const CacheFileUrl: String); override;
     procedure SavePipelineCache(const CacheFileUrl: String); override;
@@ -7104,6 +7105,11 @@ end;
 function TVulkanRHITexture.GetSubresourceViewCount: Cardinal;
 begin
   Result := Cardinal(Length(FSubresourceViews));
+end;
+
+function TVulkanRHITexture.GetRenderedLayerMask: Cardinal;
+begin
+  Result := FRenderedLayerMask;
 end;
 
 function TVulkanRHITexture.GetSubresourceImageView(

@@ -763,6 +763,7 @@ var
   X0, Y0, X1, Y1, SinA, CosA, CX, CY: Single;
   PackedTint: Cardinal;
   VPtr: PCastle2DVertex;
+  FlipRenderedVulkanV: Boolean;
 
   procedure WriteRotVertex(const VX, VY, U, V: Single); inline;
   var
@@ -826,6 +827,9 @@ begin
 
   InvTexW := 1.0 / Max(1, ATexture.Desc.Width);
   InvTexH := 1.0 / Max(1, ATexture.Desc.Height);
+  FlipRenderedVulkanV := (FDevice <> nil) and
+    (FDevice.Capabilities.Backend = rbVulkan) and
+    (ATexture.RenderedLayerMask <> 0);
   PackedTint := PackColorRgba8(ColorTint);
 
   if RotationRad <> 0.0 then
@@ -845,9 +849,16 @@ begin
     Y1 := SR.Bottom + SR.Height;
 
     U0 := IR.Left * InvTexW;
-    V0 := IR.Bottom * InvTexH;
     U1 := (IR.Left + IR.Width) * InvTexW;
-    V1 := (IR.Bottom + IR.Height) * InvTexH;
+    if FlipRenderedVulkanV then
+    begin
+      V0 := 1.0 - (IR.Bottom * InvTexH);
+      V1 := 1.0 - ((IR.Bottom + IR.Height) * InvTexH);
+    end else
+    begin
+      V0 := IR.Bottom * InvTexH;
+      V1 := (IR.Bottom + IR.Height) * InvTexH;
+    end;
 
     if RotationRad <> 0.0 then
     begin
