@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–338** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–339** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3881,6 +3881,29 @@ Rig.SolveRig(0.0);
 
 ---
 
+## 66BL. Spring-Arm Camera Whisker Occlusion, Pull-In & Lag Recovery Studio (Phase 339)
+
+Castle Game Engine provides a 5-ray whisker-probed 3rd-person Spring-Arm camera collision boom with instant wall pull-in, grazing corner detection, smooth exponential ease-out recovery, and over-the-shoulder chase lag matching Unreal Engine 6.0+'s `USpringArmComponent`:
+
+1. **Spring-Arm Runtime (`src/scene/castlespringarm.pas`)**:
+   - `TCastleSpringArm` sweeps 5 parallel whisker rays (`Center` + `±ProbeRadius` `Right/Left/Up/Down`) via `WorldRay`, snaps inward immediately (`ClosestHitDist - ProbeRadius`) on obstacle hit, and eases back smoothly (`RecoveryExtendSpeed`) when clear.
+2. **Spring-Arm Studio (`TSpringArmForm` & `TSpringArmHelper`)**:
+   - Open via the top-bar **`SpringArm`** button, Hierarchy context menu, or **`Design -> Spring-Arm Camera Whisker Occlusion & Lag Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TSpringArmHelper.SpawnThirdPersonSpringArmCorridorDemo(Viewport, DesignOwner, Hero, Wall, SA);
+Wall.Translation := Vector3(0, 0, 2.0);
+SA.StepSpringArm(0.016, Viewport.Items); // Instant pull-in to 1.75m
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Scene & Cameras](https://castle-engine.io/manual_scene.php) · [UE USpringArmComponent](https://dev.epicgames.com/documentation/en-us/unreal-engine/using-spring-arm-components-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Third-Person Cameras & Collisions (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4007,4 +4030,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtooltelemetryinsights.pas`](../tests/code/testcases/testtooltelemetryinsights.pas) (`TTestToolTelemetryInsights` — 2 tests)**: Verifies ring-buffer oldest-frame eviction (`15` frames into `10`-slot ring retaining `FrameIndex 5..14`), nested `Depth 0..2` flame-graph spans, exact `P50 / P95 / P99` frame-time percentiles & `> 16.67ms` hitch-spike detection, valid Chrome/Perfetto `traceEvents` JSON export, unified **56-Studio Hub** Horizon 2–7 indexing, and the 15th MCP tool `cge_capture_telemetry_trace` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolstatetree.pas`](../tests/code/testcases/testtoolstatetree.pas) (`TTestToolStateTree` — 2 tests)**: Verifies `TCastleStateTreeBehavior` spatial `ThreatDistance` evaluator, nested selector drilldown (`Root/Patrol/WaypointWalk` -> `Root/Combat/RangedSuppress` -> `Root/Combat/MeleeEngage`), timed `stttOnStateCompleted` task cycling, **parent `Combat` transition preemption** of leaf `MeleeEngage` into `Root/FleeSurvival/RetreatCover` on critical HP, Boss/Medic presets, `ValidateTree`, nested Mermaid `stateDiagram-v2` export, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcontrolrig.pas`](../tests/code/testcases/testtoolcontrolrig.pas) (`TTestToolControlRig` — 2 tests)**: Verifies 6-joint (`4.00m`) `FABRIK` reachable tip convergence (`< 0.005m`) and out-of-reach straight-line extension (`(0, 0, 4.0)`) with exact `0.80m` segment length preservation (`MaxSegmentLengthDrift < 0.0005m`), progressive `0°..90°` forearm/spine twist distribution, 8-joint sinusoidal tail waves, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolspringarm.pas`](../tests/code/testcases/testtoolspringarm.pas) (`TTestToolSpringArm` — 2 tests)**: Verifies 5-whisker `WorldRay` instant corridor-wall pull-in (`4.50m -> 1.75m` at `Z = 2.0m`), asymmetric smooth exponential ease-out recovery when cleared, off-center grazing pillar corner catch (`Center` clear while `+X` whisker hits), `PositionLagSpeed` chase smoothing, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -842,6 +842,8 @@ type
       MenuTreeViewItemStateTree: TMenuItem;
       ButtonControlRig: TSpeedButton;
       MenuTreeViewItemControlRig: TMenuItem;
+      ButtonSpringArm: TSpeedButton;
+      MenuTreeViewItemSpringArm: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1381,6 +1383,8 @@ type
     procedure MenuTreeViewItemStateTreeClick(Sender: TObject);
     procedure ButtonControlRigClick(Sender: TObject);
     procedure MenuTreeViewItemControlRigClick(Sender: TObject);
+    procedure ButtonSpringArmClick(Sender: TObject);
+    procedure MenuTreeViewItemSpringArmClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2870,6 +2874,7 @@ type
     procedure ShowTelemetryInsightsDialog;
     procedure ShowStateTreeDialog;
     procedure ShowControlRigDialog;
+    procedure ShowSpringArmDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2891,7 +2896,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7701,6 +7706,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonControlRig,
       PanelMiddleTop.GetControlIndex(ButtonStateTree) + 1);
 
+  ButtonSpringArm := TSpeedButton.Create(Self);
+  ButtonSpringArm.Caption := 'SpringArm';
+  ButtonSpringArm.Hint := 'Open Spring-Arm Camera Whisker Occlusion & Lag Studio.' + NL +
+    'Author 5-ray whisker camera booms with instant wall pull-in & smooth lagged recovery.';
+  ButtonSpringArm.ShowHint := true;
+  ButtonSpringArm.AutoSize := true;
+  ButtonSpringArm.Constraints.MinHeight := 33;
+  ButtonSpringArm.Constraints.MinWidth := 68;
+  ButtonSpringArm.BorderSpacing.Left := 2;
+  ButtonSpringArm.OnClick := @ButtonSpringArmClick;
+  ButtonSpringArm.Parent := PanelMiddleTop;
+  if ButtonControlRig.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonSpringArm,
+      PanelMiddleTop.GetControlIndex(ButtonControlRig) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10815,6 +10835,11 @@ begin
   MenuTreeViewItemControlRig.Caption := 'Control Rig Multi-Bone FABRIK, Twist && Wave Studio...';
   MenuTreeViewItemControlRig.OnClick := @MenuTreeViewItemControlRigClick;
   MenuTreeView.Items.Add(MenuTreeViewItemControlRig);
+
+  MenuTreeViewItemSpringArm := TMenuItem.Create(Self);
+  MenuTreeViewItemSpringArm.Caption := 'Spring-Arm Camera Whisker Occlusion && Lag Studio...';
+  MenuTreeViewItemSpringArm.OnClick := @MenuTreeViewItemSpringArmClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSpringArm);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -16149,6 +16174,8 @@ var
         Suffix := Suffix + ' ' + TCastleStateTreeBehavior(NodeObj).StateTreeSummaryBadge
       else if NodeObj is TCastleControlRigBehavior then
         Suffix := Suffix + ' ' + TCastleControlRigBehavior(NodeObj).ControlRigSummaryBadge
+      else if NodeObj is TCastleSpringArm then
+        Suffix := Suffix + ' ' + TCastleSpringArm(NodeObj).SpringArmSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -56401,6 +56428,7 @@ begin
   else if SameText(AStudioId, 'telemetry_insights') then ShowTelemetryInsightsDialog
   else if SameText(AStudioId, 'state_tree') then ShowStateTreeDialog
   else if SameText(AStudioId, 'control_rig') then ShowControlRigDialog
+  else if SameText(AStudioId, 'spring_arm') then ShowSpringArmDialog
   else
     Result := False;
 end;
@@ -57024,6 +57052,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemControlRigClick(Sender: TObject);
 begin
   ShowControlRigDialog;
+end;
+
+procedure TDesignFrame.ShowSpringArmDialog;
+var
+  Dlg: TSpringArmForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TSpringArmForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonSpringArmClick(Sender: TObject);
+begin
+  ShowSpringArmDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSpringArmClick(Sender: TObject);
+begin
+  ShowSpringArmDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

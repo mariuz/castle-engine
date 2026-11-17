@@ -652,6 +652,7 @@ type
       MenuItemTelemetryInsights: TMenuItem;
       MenuItemStateTree: TMenuItem;
       MenuItemControlRig: TMenuItem;
+      MenuItemSpringArm: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -724,6 +725,7 @@ type
     procedure MenuItemTelemetryInsightsClick(Sender: TObject);
     procedure MenuItemStateTreeClick(Sender: TObject);
     procedure MenuItemControlRigClick(Sender: TObject);
+    procedure MenuItemSpringArmClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2608,6 +2610,11 @@ begin
   MenuItemControlRig.Caption := 'Control Rig Multi-Bone FABRIK, Twist & Wave Studio...';
   MenuItemControlRig.OnClick := @MenuItemControlRigClick;
   MenuItemDesign.Add(MenuItemControlRig);
+
+  MenuItemSpringArm := TMenuItem.Create(MenuItemDesign);
+  MenuItemSpringArm.Caption := 'Spring-Arm Camera Whisker Occlusion & Lag Studio...';
+  MenuItemSpringArm.OnClick := @MenuItemSpringArmClick;
+  MenuItemDesign.Add(MenuItemSpringArm);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5896,6 +5903,12 @@ procedure TProjectForm.MenuItemControlRigClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowControlRigDialog;
+end;
+
+procedure TProjectForm.MenuItemSpringArmClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSpringArmDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

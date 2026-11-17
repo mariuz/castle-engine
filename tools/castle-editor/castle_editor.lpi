@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="149">
+    <Units Count="151">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -827,6 +827,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormControlRig"/>
       </Unit148>
+      <Unit149>
+        <Filename Value="../common-code/toolspringarm.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSpringArm"/>
+      </Unit149>
+      <Unit150>
+        <Filename Value="code/formspringarm.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSpringArm"/>
+      </Unit150>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
