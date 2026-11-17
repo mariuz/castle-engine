@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="163">
+    <Units Count="165">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -897,6 +897,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSoundscape"/>
       </Unit162>
+      <Unit163>
+        <Filename Value="../common-code/toolregressionharness.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolRegressionHarness"/>
+      </Unit163>
+      <Unit164>
+        <Filename Value="code/formregressionharness.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormRegressionHarness"/>
+      </Unit164>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

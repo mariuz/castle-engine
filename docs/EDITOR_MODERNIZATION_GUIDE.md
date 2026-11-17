@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–345** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–346** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4043,6 +4043,28 @@ Director.StepSoundscape(Viewport.Items, Vector3(0, 1.7, 0), 0.50);
 
 ---
 
+## 66BS. Deterministic Golden-Snapshot State Hasher, Drift Auditor & 66-Studio Hub / 16-Tool MCP Upgrade (Phase 346)
+
+Castle Game Engine provides canonically sorted 64-bit FNV-1a world-state hashing, non-destructive dual-pass seeded replay verification, per-actor drift diffing, the unified **66-Studio Hub** catalog across Horizons 2–8, and the **16th MCP tool `cge_verify_determinism_hash`**:
+
+1. **Deterministic Regression Harness (`tools/common-code/toolregressionharness.pas`)**:
+   - `TDeterminismRegressionHarness` quantizes non-transient actor transforms (`1 mm` / `1 mrad`) and Horizon 8 simulation subsystem states into a canonically sorted 64-bit FNV-1a digest (`CaptureWorldSnapshot`), runs non-destructive dual-pass seeded verification (`VerifyDualRunDeterminism`), and pinpoints `TRANSFORM_DRIFT` / `VISIBILITY_DRIFT` / `SUBSYSTEM_DRIFT` / `ADDED` / `MISSING` actor diffs (`CompareSnapshots`).
+2. **Regression Studio, 66-Studio Hub & 16th MCP Tool (`TRegressionHarnessForm`, `TStudioHubManager`, `TCastleMcpServer`)**:
+   - Open via the top-bar **`Regress`** button, Hierarchy context menu, or **`Design -> Deterministic Golden-Snapshot & Drift Auditor Studio...`**, browse all **66 studios** in the Unified Studio Hub, or invoke `cge_verify_determinism_hash` over JSON-RPC 2.0 MCP.
+
+### Example Usage (Pascal API)
+```pascal
+Audit := TDeterminismRegressionHarness.VerifyDualRunDeterminism(Viewport, DesignOwner, 24, 1.0 / 60.0, 20260346);
+Golden := TDeterminismRegressionHarness.CaptureWorldSnapshot(Viewport, DesignOwner, 'GoldenBase');
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Automated Testing (`CastleTester`)](https://castle-engine.io/autotests) · [UE Automation System](https://dev.epicgames.com/documentation/en-us/unreal-engine/automation-system-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Castle Game Engine Editor & Production Tooling (YouTube)](https://www.youtube.com/watch?v=f35MP274-4k)
+- **Screenshots:** [CGE Editor Production Workspace](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4109,7 +4131,7 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 ```
 
 In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 editor subsystems include dedicated automated test suites:
-- **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 15 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 16 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnprshaderstudio.pas`](../tests/code/testcases/testtoolnprshaderstudio.pas) (`TTestToolNprShaderStudio` — 2 tests)**: Verifies all 5 `TCastleStylizedShaderPreset` GLSL generators (`PLUG_lighting_apply`, `PLUG_material_light_diffuse`, `PLUG_fragment_modify`), X3D `TEffectNode` attach/enable/disable/remove lifecycle on `TCastleScene`, `.castle-transform` JSON serialization roundtrip, and `TLightShadowBudgetAuditor` multi-light overlap hotspot scoring, multi-shadow-volume conflict detection, `EnsureSingleShadowVolumeLight`, and `ClampUnboundedLightRadii` (`0 unfreed memory blocks`).
@@ -4176,4 +4198,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtooldatalayers.pas`](../tests/code/testcases/testtooldatalayers.pas) (`TTestToolDataLayers` — 2 tests)**: Verifies hierarchical parent-to-child effective state inheritance (`CitySiege = Unloaded / LoadedHidden` cascading to `SiegeCatapults` & `BreachFires` despite `DesiredState = Activated`), 1-click scenario switching (`PeacetimeTown`, `ActiveSiegeBattle`, `PostWarRuins`), undefined layer tag diagnostics, Mermaid `flowchart TD` export, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooljigglebone.pas`](../tests/code/testcases/testtooljigglebone.pas) (`TTestToolJiggleBone` — 2 tests)**: Verifies `+5.0m` parent impulse whip with strict `MaxConeAngleDeg = 30°` spherical cone clamping & exact `0.80m` rod length preservation, under-damped (`zeta = 0.16`) ringing reversals vs. critically-damped (`zeta = 1.05`) smooth settling, horizontal tail `-Y` gravity sag, and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsoundscape.pas`](../tests/code/testcases/testtoolsoundscape.pas) (`TTestToolSoundscape` — 2 tests)**: Verifies context-reactive biome switching (`ForestDawnBirds` -> `NocturnalCrickets` -> `AlpineHowlingWind` -> `CavernWaterDrips`), `WorldRay` stone-wall acoustic occlusion muffling (`20,000 Hz` clear LOS vs. `950 Hz` & `0.28x` gain behind bunker wall), seeded 3D hemisphere determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolregressionharness.pas`](../tests/code/testcases/testtoolregressionharness.pas) (`TTestToolRegressionHarness` — 2 tests)**: Verifies canonically sorted 64-bit FNV-1a world-state hashing across multi-subsystem Horizon 8 scenes, dual-pass 24-frame seeded replay bit-exact determinism with non-destructive world restoration, per-actor `TRANSFORM_DRIFT` (`0.35m`) & `VISIBILITY_DRIFT` diff pinpointing, Golden JSON reload roundtrips, the unified **66-Studio Hub** Horizon 2–8 catalog, and the 16th MCP tool `cge_verify_determinism_hash` (`0 unfreed memory blocks`).
 

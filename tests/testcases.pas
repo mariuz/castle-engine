@@ -172,6 +172,7 @@ uses
   TestToolDataLayers,
   TestToolJiggleBone,
   TestToolSoundscape,
+  TestToolRegressionHarness,
   TestCastleVulkanRHI;
 
 implementation

@@ -43,7 +43,7 @@ uses
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -856,6 +856,8 @@ type
       MenuTreeViewItemJiggleBone: TMenuItem;
       ButtonSoundscape: TSpeedButton;
       MenuTreeViewItemSoundscape: TMenuItem;
+      ButtonRegressionHarness: TSpeedButton;
+      MenuTreeViewItemRegressionHarness: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1409,6 +1411,8 @@ type
     procedure MenuTreeViewItemJiggleBoneClick(Sender: TObject);
     procedure ButtonSoundscapeClick(Sender: TObject);
     procedure MenuTreeViewItemSoundscapeClick(Sender: TObject);
+    procedure ButtonRegressionHarnessClick(Sender: TObject);
+    procedure MenuTreeViewItemRegressionHarnessClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2905,6 +2909,7 @@ type
     procedure ShowDataLayersDialog;
     procedure ShowJiggleBoneDialog;
     procedure ShowSoundscapeDialog;
+    procedure ShowRegressionHarnessDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2926,7 +2931,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7841,6 +7846,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonSoundscape,
       PanelMiddleTop.GetControlIndex(ButtonJiggleBone) + 1);
 
+  ButtonRegressionHarness := TSpeedButton.Create(Self);
+  ButtonRegressionHarness.Caption := 'Regress';
+  ButtonRegressionHarness.Hint := 'Open Deterministic Golden-Snapshot & Drift Auditor Studio.' + NL +
+    'Compute 64-bit FNV-1a world-state hashes & verify dual-run seeded replay determinism.';
+  ButtonRegressionHarness.ShowHint := true;
+  ButtonRegressionHarness.AutoSize := true;
+  ButtonRegressionHarness.Constraints.MinHeight := 33;
+  ButtonRegressionHarness.Constraints.MinWidth := 66;
+  ButtonRegressionHarness.BorderSpacing.Left := 2;
+  ButtonRegressionHarness.OnClick := @ButtonRegressionHarnessClick;
+  ButtonRegressionHarness.Parent := PanelMiddleTop;
+  if ButtonSoundscape.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonRegressionHarness,
+      PanelMiddleTop.GetControlIndex(ButtonSoundscape) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10990,6 +11010,11 @@ begin
   MenuTreeViewItemSoundscape.Caption := 'Ambient Soundscape Biome && Acoustic Occlusion Studio...';
   MenuTreeViewItemSoundscape.OnClick := @MenuTreeViewItemSoundscapeClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSoundscape);
+
+  MenuTreeViewItemRegressionHarness := TMenuItem.Create(Self);
+  MenuTreeViewItemRegressionHarness.Caption := 'Deterministic Golden-Snapshot && Drift Auditor Studio...';
+  MenuTreeViewItemRegressionHarness.OnClick := @MenuTreeViewItemRegressionHarnessClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemRegressionHarness);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -56601,6 +56626,7 @@ begin
   else if SameText(AStudioId, 'data_layers') then ShowDataLayersDialog
   else if SameText(AStudioId, 'jiggle_bone') then ShowJiggleBoneDialog
   else if SameText(AStudioId, 'soundscape_studio') then ShowSoundscapeDialog
+  else if SameText(AStudioId, 'regression_harness') then ShowRegressionHarnessDialog
   else
     Result := False;
 end;
@@ -57413,6 +57439,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemSoundscapeClick(Sender: TObject);
 begin
   ShowSoundscapeDialog;
+end;
+
+procedure TDesignFrame.ShowRegressionHarnessDialog;
+var
+  Dlg: TRegressionHarnessForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TRegressionHarnessForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonRegressionHarnessClick(Sender: TObject);
+begin
+  ShowRegressionHarnessDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemRegressionHarnessClick(Sender: TObject);
+begin
+  ShowRegressionHarnessDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

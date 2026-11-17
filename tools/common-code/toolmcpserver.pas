@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -983,7 +983,7 @@ begin
   P.Add('query', MakePropSchema('string', 'Optional multi-token case-insensitive keyword filter (e.g. "ackermann", "gauntlet", "phase 325").'));
   P.Add('category', MakePropSchema('integer', 'Optional studio domain index (-1 = all 6 domains, 0..5 = specific TStudioHubCategory).'));
   AddToolDef('cge_list_studios',
-    'Search and list all 56 specialized Castle Game Engine Horizon 2-7 editor studios across 6 domains.',
+    'Search and list all 66 specialized Castle Game Engine Horizon 2-8 editor studios across 6 domains.',
     P, []);
 
   AddToolDef('cge_audit_world_readiness',
@@ -995,6 +995,13 @@ begin
   P.Add('includeChromeTrace', MakePropSchema('boolean', 'When true, embeds Chrome about://tracing / Perfetto traceEvents JSON spans in the response.'));
   AddToolDef('cge_capture_telemetry_trace',
     'Capture a multi-frame Unreal Insights-style subsystem flame-graph profile of the open design, returning P50/P95/P99 frame times, hitch spikes, top hotspot subsystem, and optional Chrome/Perfetto traceEvents.',
+    P, []);
+
+  P := TJSONObject.Create;
+  P.Add('steps', MakePropSchema('integer', 'Number of deterministic fixed-timestep frames to simulate in each dual-run pass (default 20, range 1..240).'));
+  P.Add('seed', MakePropSchema('integer', 'Deterministic PRNG seed applied across simulation subsystems before each pass (default 20260346).'));
+  AddToolDef('cge_verify_determinism_hash',
+    'Compute the canonical 64-bit FNV-1a world-state hash and run a non-destructive dual-pass seeded determinism verification across all actors & simulation subsystems.',
     P, []);
 end;
 
@@ -1106,6 +1113,9 @@ var
   TelemetryProf: TTelemetryInsightsProfiler;
   TelemetryStats: TTelemetryAggregateStats;
   IncludeChromeTrace: Boolean;
+  DetAudit: TDeterminismAuditResult;
+  DetSnap: TGoldenWorldSnapshot;
+  DetSeed: Integer;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -1734,6 +1744,44 @@ begin
     finally
       FreeAndNil(OutPayload);
       FreeAndNil(TelemetryProf);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_verify_determinism_hash' then
+  begin
+    if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+    MaxLines := 20;
+    DetSeed := 20260346;
+    if ArgsObj <> nil then
+    begin
+      MaxLines := EnsureRange(ArgsObj.Get('steps', 20), 1, 240);
+      DetSeed := ArgsObj.Get('seed', 20260346);
+    end;
+    DetSnap := TDeterminismRegressionHarness.CaptureWorldSnapshot(
+      DesignRoot, DesignOwner, 'McpBaseline', 0, DetSeed);
+    OutPayload := TJSONObject.Create;
+    try
+      DetAudit := TDeterminismRegressionHarness.VerifyDualRunDeterminism(
+        DesignRoot, DesignOwner, MaxLines, 1.0 / 60.0, DetSeed);
+      OutPayload.Add('worldHashHex', DetSnap.WorldHashHex);
+      OutPayload.Add('bitExactMatch', DetAudit.BitExactMatch);
+      OutPayload.Add('runAHashHex', DetAudit.RunAHashHex);
+      OutPayload.Add('runBHashHex', DetAudit.RunBHashHex);
+      OutPayload.Add('actorsCompared', DetAudit.ActorsCompared);
+      OutPayload.Add('driftedActorCount', DetAudit.DriftedActorCount);
+      OutPayload.Add('maxPositionDriftMeters', DetAudit.MaxPositionDriftMeters);
+      OutPayload.Add('stateRestoredCleanly', DetAudit.StateRestoredCleanly);
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+      FreeAndNil(DetSnap);
     end;
     Exit;
   end;

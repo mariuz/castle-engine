@@ -121,7 +121,10 @@ uses
   CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript,
   CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain,
   CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm,
-  CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement;
+  CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement,
+  CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker,
+  CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone,
+  CastleSoundscape;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -385,6 +388,38 @@ begin
   Reg('telemetry_insights', 'Unreal Insights Live Telemetry Ring-Buffer & Flame-Graph Studio', 'Insights',
     shcPerformanceQaDeploy, 336, 'unreal insights telemetry ringbuffer flamegraph p50 p95 p99 chrometrace perfetto',
     '120-frame ring-buffer flame-graph profiler, P50/P95/P99 hitch detector & Perfetto JSON export.');
+
+  { Horizon 8 (Phases 337-346 — UE 6.0+ StateTree, Control Rig, MegaLights, Erosion, Data Layers & Golden QA Parity, +10 -> 66 studios) }
+  Reg('state_tree', 'StateTree Hierarchical AI Decision Tree, Evaluators & Task Studio', 'StateTree',
+    shcCharactersAiGas, 337, 'statetree hierarchical ai selector enter condition evaluator preemption mermaid',
+    'Hierarchical selector trees, spatial evaluators, ancestor transition preemption & Mermaid export.');
+  Reg('control_rig', 'Control Rig Procedural Multi-Bone FABRIK & Twist Distribution Studio', 'CtrlRig',
+    shcCharactersAiGas, 338, 'control rig procedural multi bone fabrik ik solver twist roll tail tentacle',
+    'Arbitrary N-joint FABRIK solver, anti-candy-wrapper twist roll & sinusoidal tail waves.');
+  Reg('spring_arm', 'Spring-Arm Camera Collision Whisker Probe & Lagged Boom Studio', 'SpringArm',
+    shcCinematicsAudioInput, 339, 'spring arm camera boom whisker ray collision pull in lag shoulder',
+    '5-whisker WorldRay camera occlusion pull-in, asymmetric ease-out recovery & chase lag.');
+  Reg('erosion_studio', 'Landscape Thermal Talus & Droplet Hydraulic Erosion Baker Studio', 'Erosion',
+    shcWorldEnvironment, 340, 'terrain landscape thermal talus hydraulic raindrop erosion sediment splatmap',
+    'Mass-conserving Olsen thermal repose slumping, Beyer hydraulic gullies & RGBA splatmaps.');
+  Reg('mega_lights', 'MegaLights Clustered 3D Light-Grid Culler, Gobo Cookie & Flicker Studio', 'MegaLight',
+    shcMaterialsVfxLighting, 341, 'megalights clustered tile light grid culler gobo cookie venetian caustic flicker',
+    '16x8x16 clustered 3D light-grid hotspot culler, procedural gobo cookies & torch flicker.');
+  Reg('gameplay_cue', 'Gameplay Cue Combat Feedback, Hit-Stop & Floating Damage-Number Studio', 'GameCue',
+    shcCharactersAiGas, 342, 'gameplay cue combat hit stop freeze timescale camera punch floating damage crit pool',
+    'Tag-routed combat cues, 0.05x hit-stop freezes, camera punch & zero-alloc damage popups.');
+  Reg('data_layers', 'World Partition Runtime Data Layers & Sub-Layer Inheritance Studio', 'DataLayer',
+    shcWorldEnvironment, 343, 'world partition runtime data layer unloaded hidden activated scenario inheritance',
+    'Hierarchical Unloaded/LoadedHidden/Activated Data Layers and 1-click scenario presets.');
+  Reg('jiggle_bone', 'Secondary-Motion Jiggle Bone Springs & Spherical Limit Cone Studio', 'Jiggle',
+    shcCharactersAiGas, 344, 'jiggle bone spring secondary motion inertia damping gravity spherical cone ear pouch',
+    'Sub-stepped inertial world-space tip springs, gravity sag & spherical limit-cone clamping.');
+  Reg('soundscape_studio', 'Ambient Soundscape Biome Director & Acoustic Ray Occlusion Studio', 'SndScape',
+    shcCinematicsAudioInput, 345, 'soundscape ambient biome birds crickets wind cavern ray acoustic occlusion lpf',
+    'Context-reactive biome palettes, 3D hemisphere call scatter & WorldRay wall muffling.');
+  Reg('regression_harness', 'Deterministic Golden-Snapshot State Hasher & Drift Auditor Studio', 'Regress',
+    shcPerformanceQaDeploy, 346, 'determinism golden snapshot fnv1a hash replay drift regression qa audit',
+    '64-bit FNV-1a world-state hasher, dual-run seeded replay verifier & per-actor drift diff.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -536,8 +571,17 @@ var
     if (C is TCastlePoseSearchDatabase) or (C is TCastleMotionMatchingBehavior) or
        (C is TCastleMassEntityManager) or (C is TCastlePhysicalHitRagdollBehavior) then
       BumpSub(shcCharactersAiGas);
-    if (C is TCastleCommonUiRouter) or (C is TCastleMvvmBinder) then
+    if (C is TCastleCommonUiRouter) or (C is TCastleMvvmBinder) or
+       (C is TCastleSpringArm) or (C is TCastleSoundscapeDirector) then
       BumpSub(shcCinematicsAudioInput);
+    if (C is TCastleTerrainErosionBaker) or (C is TCastleDataLayerManager) or
+       (C is TCastleDataLayerTagBehavior) then
+      BumpSub(shcWorldEnvironment);
+    if (C is TCastleMegaLightsManager) or (C is TCastleLightFunctionBehavior) then
+      BumpSub(shcMaterialsVfxLighting);
+    if (C is TCastleStateTreeBehavior) or (C is TCastleControlRigBehavior) or
+       (C is TCastleGameplayCueDirector) or (C is TCastleJiggleBoneBehavior) then
+      BumpSub(shcCharactersAiGas);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

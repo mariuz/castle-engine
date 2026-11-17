@@ -659,6 +659,7 @@ type
       MenuItemDataLayers: TMenuItem;
       MenuItemJiggleBone: TMenuItem;
       MenuItemSoundscape: TMenuItem;
+      MenuItemRegressionHarness: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -738,6 +739,7 @@ type
     procedure MenuItemDataLayersClick(Sender: TObject);
     procedure MenuItemJiggleBoneClick(Sender: TObject);
     procedure MenuItemSoundscapeClick(Sender: TObject);
+    procedure MenuItemRegressionHarnessClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2657,6 +2659,11 @@ begin
   MenuItemSoundscape.Caption := 'Ambient Soundscape Biome & Acoustic Occlusion Studio...';
   MenuItemSoundscape.OnClick := @MenuItemSoundscapeClick;
   MenuItemDesign.Add(MenuItemSoundscape);
+
+  MenuItemRegressionHarness := TMenuItem.Create(MenuItemDesign);
+  MenuItemRegressionHarness.Caption := 'Deterministic Golden-Snapshot & Drift Auditor Studio...';
+  MenuItemRegressionHarness.OnClick := @MenuItemRegressionHarnessClick;
+  MenuItemDesign.Add(MenuItemRegressionHarness);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5987,6 +5994,12 @@ procedure TProjectForm.MenuItemSoundscapeClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSoundscapeDialog;
+end;
+
+procedure TProjectForm.MenuItemRegressionHarnessClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowRegressionHarnessDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

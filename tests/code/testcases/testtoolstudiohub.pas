@@ -47,8 +47,8 @@ var
   Matches: TStudioCatalogEntryArray;
   Entry: TStudioCatalogEntry;
 begin
-  { Verify all 56 Horizon 2-7 studios are indexed across all 6 domain categories }
-  AssertEquals(56, TStudioHubManager.StudioCount);
+  { Verify all 66 Horizon 2-8 studios are indexed across all 6 domain categories }
+  AssertEquals(66, TStudioHubManager.StudioCount);
 
   for Cat in TStudioHubCategory do
   begin
@@ -100,6 +100,15 @@ begin
   TStudioHubManager.FilterStudios(-1, 'phase 336', Matches);
   AssertEquals(1, Length(Matches));
   AssertEquals('telemetry_insights', Matches[0].StudioId);
+
+  { Horizon 8 studio search & lookup }
+  TStudioHubManager.FilterStudios(-1, 'statetree preemption', Matches);
+  AssertEquals(1, Length(Matches));
+  AssertEquals('state_tree', Matches[0].StudioId);
+
+  TStudioHubManager.FilterStudios(-1, 'fnv1a golden', Matches);
+  AssertEquals(1, Length(Matches));
+  AssertEquals('regression_harness', Matches[0].StudioId);
 end;
 
 procedure TTestToolStudioHub.TestCrossStudioWorldReadinessAuditWarningDetectionAndFullRemediation;
