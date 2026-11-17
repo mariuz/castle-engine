@@ -647,6 +647,7 @@ type
       MenuItemRagdollStudio: TMenuItem;
       MenuItemCommonUiStudio: TMenuItem;
       MenuItemHlodStudio: TMenuItem;
+      MenuItemRibbonStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -714,6 +715,7 @@ type
     procedure MenuItemRagdollStudioClick(Sender: TObject);
     procedure MenuItemCommonUiStudioClick(Sender: TObject);
     procedure MenuItemHlodStudioClick(Sender: TObject);
+    procedure MenuItemRibbonStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2573,6 +2575,11 @@ begin
   MenuItemHlodStudio.Caption := 'World Partition HLOD Spatial Cluster & Draw-Call Studio...';
   MenuItemHlodStudio.OnClick := @MenuItemHlodStudioClick;
   MenuItemDesign.Add(MenuItemHlodStudio);
+
+  MenuItemRibbonStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemRibbonStudio.Caption := 'Niagara Ribbon Slash Trail & Arc Lightning VFX Studio...';
+  MenuItemRibbonStudio.OnClick := @MenuItemRibbonStudioClick;
+  MenuItemDesign.Add(MenuItemRibbonStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5831,6 +5838,12 @@ procedure TProjectForm.MenuItemHlodStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowHlodStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemRibbonStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowRibbonStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

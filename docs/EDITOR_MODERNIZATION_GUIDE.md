@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–333** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–334** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3763,6 +3763,30 @@ Mgr.EvaluateCameraDistanceSwap(Vector3(0, 12, 120), Viewport.Items, DesignOwner)
 
 ---
 
+## 66BG. Niagara-Style Sword-Slash / Projectile Ribbon Trail & Arc Lightning VFX Studio (Phase 334)
+
+Castle Game Engine provides dual-socket melee weapon slash arcs, C1 Catmull-Rom subdivided projectile ribbons, and deterministic midpoint-displaced 3D arc-lightning beams matching Unreal Engine 6.0+'s Niagara Ribbon and Beam VFX workflows:
+
+1. **Ribbon & Lightning Runtime (`src/scene/castleribbontrail.pas`)**:
+   - `TCastleRibbonTrail` records dual-socket (`BladeHiltOffset` + `BladeLength`) or single-point world samples, subdivides arcs via `EvaluateCatmullRomVec3`, tapers `StartWidth -> EndWidth` and color brightness across `LifetimeSec`, and scrolls UVs.
+   - `TCastleLightningBeam` generates recursive midpoint-displaced 3D bolts (`SubdivisionDepth`, `JitterAmplitude`) with forked secondary tendrils (`BranchCount`) pinned to `TargetTransformName`.
+2. **Ribbon & Lightning VFX Studio (`TRibbonStudioForm` & `TRibbonStudioHelper`)**:
+   - Open via the top-bar **`RibbonVFX`** button, Hierarchy context menu, or **`Design -> Niagara Ribbon Slash Trail & Arc Lightning VFX Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TRibbonStudioHelper.SpawnKatanaSlashAndLightningDemo(Viewport, DesignOwner, Rib, Beam, TargetPillar);
+TRibbonStudioHelper.SimulateSwordSlashArc(Rib, 12, 145.0);
+Beam.StrikeNow(2026);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Shapes & Materials](https://castle-engine.io/x3d_implementation_shape.php) · [UE Niagara Ribbon Renderer](https://dev.epicgames.com/documentation/en-us/unreal-engine/ribbon-renderer-in-unreal-engine-niagara) · [UE Niagara Beam VFX](https://dev.epicgames.com/documentation/en-us/unreal-engine/create-a-beam-effect-in-niagara-for-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Real-Time Shaders, Particles & Combat VFX (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Shader Showcase](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3884,4 +3908,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolragdollstudio.pas`](../tests/code/testcases/testtoolragdollstudio.pas) (`TTestToolRagdollStudio` — 2 tests)**: Verifies `ApplyPointHitImpulse` nearest-bone headshot selection (`rbiHead`), topological hop attenuation (`Head > SpineChest > Pelvis > 0`), critically-damped PD motor spring upright recovery (`MaxPoseDeviationMeters < 0.015m`), `KnockdownThreshold` transition to `prmFullLimpRagdoll` with floor clamping & PBD neck-length preservation, `BeginGetUpRecovery` smooth stand-up blend, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcommonuistudio.pas`](../tests/code/testcases/testtoolcommonuistudio.pas) (`TTestToolCommonUiStudio` — 2 tests)**: Verifies 2x2 cardinal D-Pad cone navigation (`cndRight`/`cndDown`/`cndLeft`/`cndUp`), `PushActivatableLayer` modal focus isolation & `PopActivatableLayer` prior-focus restoration, live `KB/Mouse` (`[Enter]`) -> `Xbox` (`(A)`) -> `DualSense` (`(Cross)`) prompt glyph updates, formatted/scaled `PushViewModelToUi` (`84.0px`, `'HP: 35%'`), two-way `PullUiToViewModel` (`Slider.Value`, `Checkbox.Checked`), and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolhlodstudio.pas`](../tests/code/testcases/testtoolhlodstudio.pas) (`TTestToolHlodStudio` — 2 tests)**: Verifies 4-quadrant `24m` spatial cell partitioning (`16` static props -> `4` cells with `HlodIgnore_HeroBeacon` excluded), near-camera Full Detail (`16` draws) vs. far-camera HLOD proxy collapse (`4` single-draw-call proxies, `-75%` draw calls), `[40..50m]` hysteresis deadband non-thrashing, `hpmClusteredBoxes`/`hpmMergedCellBounds`/`hpmOctagonalPrism` triangle counts, `RestoreAllFullDetailProps`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolribbonstudio.pas`](../tests/code/testcases/testtoolribbonstudio.pas) (`TTestToolRibbonStudio` — 2 tests)**: Verifies `EvaluateCatmullRomVec3` exact endpoint Kronecker interpolation & curved arc midpoint, `CatmullSubdivisions` `1 -> 4` exact `4x` triangle amplification, `LifetimeSec` sample aging/pruning to `0`, `TCastleLightningBeam` exact start/target world endpoint pinning with jagged interior displacement (`16` main segments + `3` forks = `88` tris), seeded determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

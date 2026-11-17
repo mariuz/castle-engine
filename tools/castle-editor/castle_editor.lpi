@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="139">
+    <Units Count="141">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -777,6 +777,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormHlodStudio"/>
       </Unit138>
+      <Unit139>
+        <Filename Value="../common-code/toolribbonstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolRibbonStudio"/>
+      </Unit139>
+      <Unit140>
+        <Filename Value="code/formribbonstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormRibbonStudio"/>
+      </Unit140>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -160,6 +160,7 @@ uses
   TestToolRagdollStudio,
   TestToolCommonUiStudio,
   TestToolHlodStudio,
+  TestToolRibbonStudio,
   TestCastleVulkanRHI;
 
 implementation
