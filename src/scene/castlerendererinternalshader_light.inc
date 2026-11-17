@@ -21,6 +21,16 @@
 //type
   TLightingModel = (lmPhong, lmPhysical, lmUnlit);
 
+  { A light node's custom field passed as a per-light uniform: the value
+    last passed (an owned copy, to compare with new values) and its uniform,
+    found once. }
+  TLightCustomField = class
+    Value: TX3DField;
+    UniformName: String;
+    Uniform: TGLSLUniform;
+    destructor Destroy; override;
+  end;
+
   TLightUniforms = class
     Number: Cardinal;
     ShaderProgram: TGLSLProgram;
@@ -55,7 +65,7 @@
     { Current values provided for the light node's custom fields
       (per-light uniforms of light effects), by field name.
       Owned copies of the fields, to compare with new values. }
-    CustomFields: {$ifdef FPC}specialize{$endif} TObjectDictionary<String, TX3DField>;
+    CustomFields: {$ifdef FPC}specialize{$endif} TObjectDictionary<String, TLightCustomField>;
 
     { Initialized by @link(FindUniforms). }
     UniformCastle_LightSourcePosition,
@@ -152,12 +162,20 @@
 
 {$ifdef read_implementation}
 
+{ TLightCustomField ------------------------------------------------------ }
+
+destructor TLightCustomField.Destroy;
+begin
+  FreeAndNil(Value);
+  inherited;
+end;
+
 { TLightUniforms ------------------------------------------------------- }
 
 constructor TLightUniforms.Create;
 begin
   inherited;
-  CustomFields := {$ifdef FPC}specialize{$endif} TObjectDictionary<String, TX3DField>.Create([doOwnsValues]);
+  CustomFields := {$ifdef FPC}specialize{$endif} TObjectDictionary<String, TLightCustomField>.Create([doOwnsValues]);
 end;
 
 destructor TLightUniforms.Destroy;
@@ -169,25 +187,55 @@ end;
 procedure TLightUniforms.SetCustomFieldUniform(const AProgram: TX3DShaderProgram;
   const Field: TX3DField);
 var
-  Current: TX3DField;
+  Current: TLightCustomField;
 begin
   if not CustomFields.TryGetValue(Field.X3DName, Current) then
-    Current := nil;
-  if (Current <> nil) and
-     (Current.ClassType = Field.ClassType) and
-     Current.FastEqualsValue(Field) then
+  begin
+    { The uniform is missing when the light's effects don't use it,
+      or the shader doesn't use the light's effects (like unlit shapes). }
+    Current := TLightCustomField.Create;
+    Current.UniformName := Field.X3DName + IntToStr(Number);
+    Current.Uniform := AProgram.Uniform(Current.UniformName, umIgnore);
+    CustomFields.Add(Field.X3DName, Current);
+  end;
+  if (Current.Value <> nil) and
+     (Current.Value.ClassType = Field.ClassType) and
+     Current.Value.FastEqualsValue(Field) then
     Exit;
 
-  { The uniform is missing when the light's effects don't use it,
-    or the shader doesn't use the light's effects (like unlit shapes). }
-  AProgram.SetUniformFromField(Field.X3DName + IntToStr(Number), Field, umIgnore, false);
+  { the usual types through the uniform found once, others by name }
+  if Field is TSFFloat then
+    Current.Uniform.SetValue(TSFFloat(Field).Value)
+  else
+  if Field is TSFLong then
+    Current.Uniform.SetValue(TSFLong(Field).Value)
+  else
+  if Field is TSFBool then
+    Current.Uniform.SetValue(TSFBool(Field).Value)
+  else
+  if Field is TSFVec2f then
+    Current.Uniform.SetValue(TSFVec2f(Field).Value)
+  else
+  if Field is TSFVec3f then
+    Current.Uniform.SetValue(TSFVec3f(Field).Value)
+  else
+  if Field is TSFVec4f then
+    Current.Uniform.SetValue(TSFVec4f(Field).Value)
+  else
+  if Field is TSFMatrix3f then
+    Current.Uniform.SetValue(TSFMatrix3f(Field).Value)
+  else
+  if Field is TSFMatrix4f then
+    Current.Uniform.SetValue(TSFMatrix4f(Field).Value)
+  else
+    AProgram.SetUniformFromField(Current.UniformName, Field, umIgnore, false);
 
-  if (Current = nil) or (Current.ClassType <> Field.ClassType) then
+  if (Current.Value = nil) or (Current.Value.ClassType <> Field.ClassType) then
   begin
-    Current := TX3DFieldClass(Field.ClassType).CreateUndefined(nil, false, Field.X3DName);
-    CustomFields.AddOrSetValue(Field.X3DName, Current);
+    FreeAndNil(Current.Value);
+    Current.Value := TX3DFieldClass(Field.ClassType).CreateUndefined(nil, false, Field.X3DName);
   end;
-  Current.AssignValue(Field);
+  Current.Value.AssignValue(Field);
 end;
 
 procedure TLightUniforms.FindUniforms;
