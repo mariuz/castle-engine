@@ -159,6 +159,7 @@ uses
   TestToolFluidStudio,
   TestToolRagdollStudio,
   TestToolCommonUiStudio,
+  TestToolHlodStudio,
   TestCastleVulkanRHI;
 
 implementation

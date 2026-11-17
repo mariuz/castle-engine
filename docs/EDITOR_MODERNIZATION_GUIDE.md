@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–332** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–333** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3740,6 +3740,29 @@ Binder.PushViewModelToUi(MenuRoot, DesignOwner);
 
 ---
 
+## 66BF. World Partition Hierarchical LOD (HLOD) Spatial Cluster Baker & Draw-Call Merger Studio (Phase 333)
+
+Castle Game Engine provides World Partition-style spatial XZ grid prop clustering, single-draw-call merged low-poly proxy synthesis, and camera-distance hysteresis switching matching Unreal Engine 6.0+'s HLOD workflows:
+
+1. **Spatial HLOD Runtime (`src/scene/castlehlodbaker.pas`)**:
+   - `TCastleHlodClusterManager` partitions static props into `CellSizeMeters` XZ grid cells, synthesizes `csTransient` single-draw-call `TTriangleSetNode` cell proxies (`hpmClusteredBoxes`, `hpmMergedCellBounds`, `hpmOctagonalPrism`), swaps between source transforms and merged proxies via `EvaluateCameraDistanceSwap` (`HlodSwitchDistance ± HlodHysteresisMargin`), and restores full-detail editing via `RestoreAllFullDetailProps`.
+2. **HLOD Studio (`THlodStudioForm` & `THlodStudioHelper`)**:
+   - Open via the top-bar **`HLOD`** button, Hierarchy context menu, or **`Design -> World Partition HLOD Spatial Cluster & Draw-Call Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+THlodStudioHelper.SpawnCityDistrictHlodDemo(Viewport, DesignOwner, Mgr);
+Mgr.ProxyMode := hpmOctagonalPrism;
+Mgr.EvaluateCameraDistanceSwap(Vector3(0, 12, 120), Viewport.Items, DesignOwner);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Optimization](https://castle-engine.io/optimization) · [UE World Partition HLOD](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition---hierarchical-level-of-detail-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Large-World Optimization & Batching (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3860,4 +3883,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolfluidstudio.pas`](../tests/code/testcases/testtoolfluidstudio.pas) (`TTestToolFluidStudio` — 2 tests)**: Verifies Virtual-Pipe Hydrostatic exact water volume conservation (`< 0.1%` drift across `60` dam-break steps), downhill East-basin pooling, turbulent whitewater `Foam` & shoreline `Wetness` retention, `BakeTerrainBedFromWorld` `WorldRay` terrace elevation sampling, `+3.0 m^3/s` spring volume integration, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolragdollstudio.pas`](../tests/code/testcases/testtoolragdollstudio.pas) (`TTestToolRagdollStudio` — 2 tests)**: Verifies `ApplyPointHitImpulse` nearest-bone headshot selection (`rbiHead`), topological hop attenuation (`Head > SpineChest > Pelvis > 0`), critically-damped PD motor spring upright recovery (`MaxPoseDeviationMeters < 0.015m`), `KnockdownThreshold` transition to `prmFullLimpRagdoll` with floor clamping & PBD neck-length preservation, `BeginGetUpRecovery` smooth stand-up blend, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcommonuistudio.pas`](../tests/code/testcases/testtoolcommonuistudio.pas) (`TTestToolCommonUiStudio` — 2 tests)**: Verifies 2x2 cardinal D-Pad cone navigation (`cndRight`/`cndDown`/`cndLeft`/`cndUp`), `PushActivatableLayer` modal focus isolation & `PopActivatableLayer` prior-focus restoration, live `KB/Mouse` (`[Enter]`) -> `Xbox` (`(A)`) -> `DualSense` (`(Cross)`) prompt glyph updates, formatted/scaled `PushViewModelToUi` (`84.0px`, `'HP: 35%'`), two-way `PullUiToViewModel` (`Slider.Value`, `Checkbox.Checked`), and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolhlodstudio.pas`](../tests/code/testcases/testtoolhlodstudio.pas) (`TTestToolHlodStudio` — 2 tests)**: Verifies 4-quadrant `24m` spatial cell partitioning (`16` static props -> `4` cells with `HlodIgnore_HeroBeacon` excluded), near-camera Full Detail (`16` draws) vs. far-camera HLOD proxy collapse (`4` single-draw-call proxies, `-75%` draw calls), `[40..50m]` hysteresis deadband non-thrashing, `hpmClusteredBoxes`/`hpmMergedCellBounds`/`hpmOctagonalPrism` triangle counts, `RestoreAllFullDetailProps`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

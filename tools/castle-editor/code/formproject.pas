@@ -646,6 +646,7 @@ type
       MenuItemFluidStudio: TMenuItem;
       MenuItemRagdollStudio: TMenuItem;
       MenuItemCommonUiStudio: TMenuItem;
+      MenuItemHlodStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -712,6 +713,7 @@ type
     procedure MenuItemFluidStudioClick(Sender: TObject);
     procedure MenuItemRagdollStudioClick(Sender: TObject);
     procedure MenuItemCommonUiStudioClick(Sender: TObject);
+    procedure MenuItemHlodStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2566,6 +2568,11 @@ begin
   MenuItemCommonUiStudio.Caption := 'CommonUI Gamepad Focus, Prompt Glyphs & MVVM Studio...';
   MenuItemCommonUiStudio.OnClick := @MenuItemCommonUiStudioClick;
   MenuItemDesign.Add(MenuItemCommonUiStudio);
+
+  MenuItemHlodStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemHlodStudio.Caption := 'World Partition HLOD Spatial Cluster & Draw-Call Studio...';
+  MenuItemHlodStudio.OnClick := @MenuItemHlodStudioClick;
+  MenuItemDesign.Add(MenuItemHlodStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5818,6 +5825,12 @@ procedure TProjectForm.MenuItemCommonUiStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCommonUiStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemHlodStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowHlodStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
