@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="159">
+    <Units Count="161">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -877,6 +877,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormDataLayers"/>
       </Unit158>
+      <Unit159>
+        <Filename Value="../common-code/tooljigglebone.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolJiggleBone"/>
+      </Unit159>
+      <Unit160>
+        <Filename Value="code/formjigglebone.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormJiggleBone"/>
+      </Unit160>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

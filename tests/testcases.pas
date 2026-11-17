@@ -170,6 +170,7 @@ uses
   TestToolMegaLights,
   TestToolGameplayCue,
   TestToolDataLayers,
+  TestToolJiggleBone,
   TestCastleVulkanRHI;
 
 implementation

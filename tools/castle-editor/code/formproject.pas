@@ -657,6 +657,7 @@ type
       MenuItemMegaLights: TMenuItem;
       MenuItemGameplayCue: TMenuItem;
       MenuItemDataLayers: TMenuItem;
+      MenuItemJiggleBone: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -734,6 +735,7 @@ type
     procedure MenuItemMegaLightsClick(Sender: TObject);
     procedure MenuItemGameplayCueClick(Sender: TObject);
     procedure MenuItemDataLayersClick(Sender: TObject);
+    procedure MenuItemJiggleBoneClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2643,6 +2645,11 @@ begin
   MenuItemDataLayers.Caption := 'World Partition Runtime Data Layers Studio...';
   MenuItemDataLayers.OnClick := @MenuItemDataLayersClick;
   MenuItemDesign.Add(MenuItemDataLayers);
+
+  MenuItemJiggleBone := TMenuItem.Create(MenuItemDesign);
+  MenuItemJiggleBone.Caption := 'Secondary-Motion Jiggle Bone Springs Studio...';
+  MenuItemJiggleBone.OnClick := @MenuItemJiggleBoneClick;
+  MenuItemDesign.Add(MenuItemJiggleBone);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5961,6 +5968,12 @@ procedure TProjectForm.MenuItemDataLayersClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDataLayersDialog;
+end;
+
+procedure TProjectForm.MenuItemJiggleBoneClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowJiggleBoneDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

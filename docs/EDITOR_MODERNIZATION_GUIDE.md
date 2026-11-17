@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–343** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–344** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3997,6 +3997,29 @@ Mgr.ApplyDataLayersToWorld(Viewport.Items);
 
 ---
 
+## 66BQ. Secondary-Motion Jiggle Bone Springs & Spherical Limit Cone Studio (Phase 344)
+
+Castle Game Engine provides inertial world-space tip springs, under/critically-damped harmonic secondary motion, gravity sag, exact rod length projection, and spherical limit-cone clamping matching Unreal Engine 6.0+'s `AnimNode_SpringBone` rigging workflows:
+
+1. **Jiggle Bone Runtime (`src/scene/castlejigglebone.pas`)**:
+   - `TCastleJiggleBoneBehavior` integrates world-space inertial tip springs (`Stiffness`, `DampingRatio`, `GravityFactor`, `ParentInertiaScale`) at `<= 1/120s` sub-steps, enforces exact `BoneLength` & `ClampDirectionToCone` (`MaxConeAngleDeg`), and optionally drives child tip transforms (`DrivenTipTransformName`).
+2. **Jiggle Bone Studio (`TJiggleBoneForm` & `TJiggleBoneHelper`)**:
+   - Open via the top-bar **`Jiggle`** button, Hierarchy context menu, or **`Design -> Secondary-Motion Jiggle Bone Springs Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TJiggleBoneHelper.SpawnCharacterJiggleRigDemo(Viewport, DesignOwner, Carrier);
+TJiggleBoneHelper.JoltCarrierImpulse(Viewport, Vector3(1.2, 0.0, 0.0), 0.02);
+TJiggleBoneHelper.StepAllJiggleBones(Viewport, 0.03);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE Spring Controller (`AnimNode_SpringBone`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/animation-blueprint-spring-controller-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Character Animation & Procedural Behaviors (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Character Viewport](https://castle-engine.io/images/thumb_const_height_size/dragon_spine_game_view.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4128,4 +4151,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolmegalights.pas`](../tests/code/testcases/testtoolmegalights.pas) (`TTestToolMegaLights` — 2 tests)**: Verifies `16x8x16` 3D clustered light-grid binning across `32` cyberpunk alley point lights (`HotspotMaxLightsInAnyTile >= 2`, empty far-corner tiles), automatic `DistanceCullMeters` culling at `Z = 220m` & full restoration at `Z = 0m`, `lfpTorchCampfirePerlin` intensity modulation, `lgpWindowVenetianBlinds` / `lgpUnderwaterCaustics` gobo cookies, and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgameplaycue.pas`](../tests/code/testcases/testtoolgameplaycue.pas) (`TTestToolGameplayCue` — 2 tests)**: Verifies `GameplayCue.Damage.Critical` triggers `HitStopTimeScale = 0.05x` (`0.09s` duration) & `CameraPunchOffset` while unscaled `StepDirector` advances floating **`420 CRIT!`** popup arcs during the freeze and recovers `1.00x` time scale upon expiration, and verifies fixed-capacity `MaxPooledPopups = 12` oldest-slot recycling across `30` burst cues with `0` overflow plus `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldatalayers.pas`](../tests/code/testcases/testtooldatalayers.pas) (`TTestToolDataLayers` — 2 tests)**: Verifies hierarchical parent-to-child effective state inheritance (`CitySiege = Unloaded / LoadedHidden` cascading to `SiegeCatapults` & `BreachFires` despite `DesiredState = Activated`), 1-click scenario switching (`PeacetimeTown`, `ActiveSiegeBattle`, `PostWarRuins`), undefined layer tag diagnostics, Mermaid `flowchart TD` export, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooljigglebone.pas`](../tests/code/testcases/testtooljigglebone.pas) (`TTestToolJiggleBone` — 2 tests)**: Verifies `+5.0m` parent impulse whip with strict `MaxConeAngleDeg = 30°` spherical cone clamping & exact `0.80m` rod length preservation, under-damped (`zeta = 0.16`) ringing reversals vs. critically-damped (`zeta = 1.05`) smooth settling, horizontal tail `-Y` gravity sag, and JSON roundtrips (`0 unfreed memory blocks`).
 
