@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–344** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–345** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4020,6 +4020,29 @@ TJiggleBoneHelper.StepAllJiggleBones(Viewport, 0.03);
 
 ---
 
+## 66BR. Ambient Soundscape Biome Director & Acoustic Ray Occlusion Studio (Phase 345)
+
+Castle Game Engine provides context-reactive ambient biome palettes (`HourOfDay`, `ListenerAltitudeY`, `IndoorEnclosureRatio`), seeded 3D hemisphere spatial call scattering, and `WorldRay` listener-to-emitter acoustic wall occlusion gain/LPF muffling matching Unreal Engine 6.0+'s `USoundscapeSubsystem` workflows:
+
+1. **Soundscape Runtime (`src/scene/castlesoundscape.pas`)**:
+   - `TCastleSoundscapeDirector` evaluates biome weights (`slkForestDawnBirds`, `slkNocturnalCrickets`, `slkAlpineHowlingWind`, `slkCavernWaterDrips`), scatters seeded 3D hemisphere one-shots (`SpawnScatterCall`), and probes `WorldRay` acoustic occlusion (`ProbeAcousticOcclusion`) to attenuate occluded emitters (`OccludedGainMultiplier = 0.28x`, `OccludedLowPassHz = 950 Hz`).
+2. **Soundscape Studio (`TSoundscapeForm` & `TSoundscapeHelper`)**:
+   - Open via the top-bar **`SndScape`** button, Hierarchy context menu, or **`Design -> Ambient Soundscape Biome & Acoustic Occlusion Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TSoundscapeHelper.SpawnAcousticBiomeSoundscapeDemo(Viewport, DesignOwner, Director);
+Director.HourOfDay := 23.0; // Transitions from Forest Dawn Birds -> Nocturnal Crickets
+Director.StepSoundscape(Viewport.Items, Vector3(0, 1.7, 0), 0.50);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Sound Engine](https://castle-engine.io/sound) · [UE Soundscape Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/soundscape-overview-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Spatial Sound & Game Audio (YouTube)](https://www.youtube.com/watch?v=f35MP274-4k)
+- **Screenshots:** [CGE 3D Audio Scene](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4152,4 +4175,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolgameplaycue.pas`](../tests/code/testcases/testtoolgameplaycue.pas) (`TTestToolGameplayCue` — 2 tests)**: Verifies `GameplayCue.Damage.Critical` triggers `HitStopTimeScale = 0.05x` (`0.09s` duration) & `CameraPunchOffset` while unscaled `StepDirector` advances floating **`420 CRIT!`** popup arcs during the freeze and recovers `1.00x` time scale upon expiration, and verifies fixed-capacity `MaxPooledPopups = 12` oldest-slot recycling across `30` burst cues with `0` overflow plus `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldatalayers.pas`](../tests/code/testcases/testtooldatalayers.pas) (`TTestToolDataLayers` — 2 tests)**: Verifies hierarchical parent-to-child effective state inheritance (`CitySiege = Unloaded / LoadedHidden` cascading to `SiegeCatapults` & `BreachFires` despite `DesiredState = Activated`), 1-click scenario switching (`PeacetimeTown`, `ActiveSiegeBattle`, `PostWarRuins`), undefined layer tag diagnostics, Mermaid `flowchart TD` export, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooljigglebone.pas`](../tests/code/testcases/testtooljigglebone.pas) (`TTestToolJiggleBone` — 2 tests)**: Verifies `+5.0m` parent impulse whip with strict `MaxConeAngleDeg = 30°` spherical cone clamping & exact `0.80m` rod length preservation, under-damped (`zeta = 0.16`) ringing reversals vs. critically-damped (`zeta = 1.05`) smooth settling, horizontal tail `-Y` gravity sag, and JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsoundscape.pas`](../tests/code/testcases/testtoolsoundscape.pas) (`TTestToolSoundscape` — 2 tests)**: Verifies context-reactive biome switching (`ForestDawnBirds` -> `NocturnalCrickets` -> `AlpineHowlingWind` -> `CavernWaterDrips`), `WorldRay` stone-wall acoustic occlusion muffling (`20,000 Hz` clear LOS vs. `950 Hz` & `0.28x` gain behind bunker wall), seeded 3D hemisphere determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

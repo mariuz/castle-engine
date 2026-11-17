@@ -171,6 +171,7 @@ uses
   TestToolGameplayCue,
   TestToolDataLayers,
   TestToolJiggleBone,
+  TestToolSoundscape,
   TestCastleVulkanRHI;
 
 implementation

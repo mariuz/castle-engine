@@ -658,6 +658,7 @@ type
       MenuItemGameplayCue: TMenuItem;
       MenuItemDataLayers: TMenuItem;
       MenuItemJiggleBone: TMenuItem;
+      MenuItemSoundscape: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -736,6 +737,7 @@ type
     procedure MenuItemGameplayCueClick(Sender: TObject);
     procedure MenuItemDataLayersClick(Sender: TObject);
     procedure MenuItemJiggleBoneClick(Sender: TObject);
+    procedure MenuItemSoundscapeClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2650,6 +2652,11 @@ begin
   MenuItemJiggleBone.Caption := 'Secondary-Motion Jiggle Bone Springs Studio...';
   MenuItemJiggleBone.OnClick := @MenuItemJiggleBoneClick;
   MenuItemDesign.Add(MenuItemJiggleBone);
+
+  MenuItemSoundscape := TMenuItem.Create(MenuItemDesign);
+  MenuItemSoundscape.Caption := 'Ambient Soundscape Biome & Acoustic Occlusion Studio...';
+  MenuItemSoundscape.OnClick := @MenuItemSoundscapeClick;
+  MenuItemDesign.Add(MenuItemSoundscape);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5974,6 +5981,12 @@ procedure TProjectForm.MenuItemJiggleBoneClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowJiggleBoneDialog;
+end;
+
+procedure TProjectForm.MenuItemSoundscapeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSoundscapeDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

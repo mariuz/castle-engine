@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="161">
+    <Units Count="163">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -887,6 +887,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormJiggleBone"/>
       </Unit160>
+      <Unit161>
+        <Filename Value="../common-code/toolsoundscape.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSoundscape"/>
+      </Unit161>
+      <Unit162>
+        <Filename Value="code/formsoundscape.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSoundscape"/>
+      </Unit162>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
