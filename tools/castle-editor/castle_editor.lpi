@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="147">
+    <Units Count="149">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -817,6 +817,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormStateTree"/>
       </Unit146>
+      <Unit147>
+        <Filename Value="../common-code/toolcontrolrig.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolControlRig"/>
+      </Unit147>
+      <Unit148>
+        <Filename Value="code/formcontrolrig.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormControlRig"/>
+      </Unit148>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

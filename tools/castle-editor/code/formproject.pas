@@ -651,6 +651,7 @@ type
       MenuItemSettlementStudio: TMenuItem;
       MenuItemTelemetryInsights: TMenuItem;
       MenuItemStateTree: TMenuItem;
+      MenuItemControlRig: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -722,6 +723,7 @@ type
     procedure MenuItemSettlementStudioClick(Sender: TObject);
     procedure MenuItemTelemetryInsightsClick(Sender: TObject);
     procedure MenuItemStateTreeClick(Sender: TObject);
+    procedure MenuItemControlRigClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2601,6 +2603,11 @@ begin
   MenuItemStateTree.Caption := 'StateTree Hierarchical AI, Evaluators & Task Studio...';
   MenuItemStateTree.OnClick := @MenuItemStateTreeClick;
   MenuItemDesign.Add(MenuItemStateTree);
+
+  MenuItemControlRig := TMenuItem.Create(MenuItemDesign);
+  MenuItemControlRig.Caption := 'Control Rig Multi-Bone FABRIK, Twist & Wave Studio...';
+  MenuItemControlRig.OnClick := @MenuItemControlRigClick;
+  MenuItemDesign.Add(MenuItemControlRig);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5883,6 +5890,12 @@ procedure TProjectForm.MenuItemStateTreeClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowStateTreeDialog;
+end;
+
+procedure TProjectForm.MenuItemControlRigClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowControlRigDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

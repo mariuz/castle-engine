@@ -164,6 +164,7 @@ uses
   TestToolSettlementStudio,
   TestToolTelemetryInsights,
   TestToolStateTree,
+  TestToolControlRig,
   TestCastleVulkanRHI;
 
 implementation

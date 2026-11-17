@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–337** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–338** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3857,6 +3857,30 @@ Tree.StepTree(0.05); // ActiveStatePath = 'Root/Combat/MeleeEngage'
 
 ---
 
+## 66BK. Control Rig Multi-Bone FABRIK, Twist Distribution & Procedural Wave Studio (Phase 338)
+
+Castle Game Engine provides arbitrary `N`-joint Forward-And-Backward Reaching Inverse Kinematics (`FABRIK`), progressive anti-candy-wrapper forearm/spine twist roll distribution, and sinusoidal tail/tentacle wave rigs matching Unreal Engine 6.0+'s `UControlRig` workflows:
+
+1. **Control Rig Runtime (`src/scene/castlecontrolrig.pas`)**:
+   - `TCastleControlRigBehavior` solves arbitrary `N`-bone chains (`SolveFabrikToWorldTarget`, `SolveRig`) with exact segment-length preservation (`MaxSegmentLengthDrift < 0.0005m`), distributes `EndEffectorTwistDeg` linearly across joints (`ComputeProgressiveTwistDeg`), and drives procedural wave motion (`crpProceduralTailWave`).
+2. **Control Rig Studio (`TControlRigForm` & `TControlRigHelper`)**:
+   - Open via the top-bar **`CtrlRig`** button, Hierarchy context menu, or **`Design -> Control Rig Multi-Bone FABRIK, Twist & Wave Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TControlRigHelper.SpawnRoboticArmControlRigDemo(Viewport, DesignOwner, Host, Target, Rig);
+Rig.EndEffectorTwistDeg := 90.0;
+Target.Translation := Vector3(1.2, 2.0, 1.5);
+Rig.SolveRig(0.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Scene & Animations](https://castle-engine.io/manual_scene.php) · [UE Control Rig](https://dev.epicgames.com/documentation/en-us/unreal-engine/control-rig-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Procedural Animation & IK Rigs (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Character Viewport](https://castle-engine.io/images/thumb_const_height_size/transform_scene.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3982,4 +4006,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolsettlementstudio.pas`](../tests/code/testcases/testtoolsettlementstudio.pas) (`TTestToolSettlementStudio` — 2 tests)**: Verifies `pspCrossroadsHamlet`, `pspWalledMarketTown`, and `pspLinearHighwayOutpost` road graphs with strict zero pairwise building overlap (`CountOverlappingLotPairs = 0`) & zero road intrusion (`CountRoadIntrudingLots = 0`), seeded determinism, `WorldRay` downward foundation snapping onto an elevated `Y = 4.25m` plateau, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltelemetryinsights.pas`](../tests/code/testcases/testtooltelemetryinsights.pas) (`TTestToolTelemetryInsights` — 2 tests)**: Verifies ring-buffer oldest-frame eviction (`15` frames into `10`-slot ring retaining `FrameIndex 5..14`), nested `Depth 0..2` flame-graph spans, exact `P50 / P95 / P99` frame-time percentiles & `> 16.67ms` hitch-spike detection, valid Chrome/Perfetto `traceEvents` JSON export, unified **56-Studio Hub** Horizon 2–7 indexing, and the 15th MCP tool `cge_capture_telemetry_trace` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolstatetree.pas`](../tests/code/testcases/testtoolstatetree.pas) (`TTestToolStateTree` — 2 tests)**: Verifies `TCastleStateTreeBehavior` spatial `ThreatDistance` evaluator, nested selector drilldown (`Root/Patrol/WaypointWalk` -> `Root/Combat/RangedSuppress` -> `Root/Combat/MeleeEngage`), timed `stttOnStateCompleted` task cycling, **parent `Combat` transition preemption** of leaf `MeleeEngage` into `Root/FleeSurvival/RetreatCover` on critical HP, Boss/Medic presets, `ValidateTree`, nested Mermaid `stateDiagram-v2` export, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcontrolrig.pas`](../tests/code/testcases/testtoolcontrolrig.pas) (`TTestToolControlRig` — 2 tests)**: Verifies 6-joint (`4.00m`) `FABRIK` reachable tip convergence (`< 0.005m`) and out-of-reach straight-line extension (`(0, 0, 4.0)`) with exact `0.80m` segment length preservation (`MaxSegmentLengthDrift < 0.0005m`), progressive `0°..90°` forearm/spine twist distribution, 8-joint sinusoidal tail waves, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 
