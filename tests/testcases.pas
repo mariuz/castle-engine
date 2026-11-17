@@ -168,6 +168,7 @@ uses
   TestToolSpringArm,
   TestToolErosionStudio,
   TestToolMegaLights,
+  TestToolGameplayCue,
   TestCastleVulkanRHI;
 
 implementation

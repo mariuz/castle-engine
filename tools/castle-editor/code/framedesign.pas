@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -848,6 +848,8 @@ type
       MenuTreeViewItemErosionStudio: TMenuItem;
       ButtonMegaLights: TSpeedButton;
       MenuTreeViewItemMegaLights: TMenuItem;
+      ButtonGameplayCue: TSpeedButton;
+      MenuTreeViewItemGameplayCue: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1393,6 +1395,8 @@ type
     procedure MenuTreeViewItemErosionStudioClick(Sender: TObject);
     procedure ButtonMegaLightsClick(Sender: TObject);
     procedure MenuTreeViewItemMegaLightsClick(Sender: TObject);
+    procedure ButtonGameplayCueClick(Sender: TObject);
+    procedure MenuTreeViewItemGameplayCueClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2885,6 +2889,7 @@ type
     procedure ShowSpringArmDialog;
     procedure ShowErosionStudioDialog;
     procedure ShowMegaLightsDialog;
+    procedure ShowGameplayCueDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2906,7 +2911,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7761,6 +7766,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonMegaLights,
       PanelMiddleTop.GetControlIndex(ButtonErosionStudio) + 1);
 
+  ButtonGameplayCue := TSpeedButton.Create(Self);
+  ButtonGameplayCue.Caption := 'GameCue';
+  ButtonGameplayCue.Hint := 'Open Gameplay Cue, Hit-Stop & Floating Damage-Number Studio.' + NL +
+    'Trigger tag-routed combat cues, hit-stop freeze frames & zero-alloc damage popups.';
+  ButtonGameplayCue.ShowHint := true;
+  ButtonGameplayCue.AutoSize := true;
+  ButtonGameplayCue.Constraints.MinHeight := 33;
+  ButtonGameplayCue.Constraints.MinWidth := 68;
+  ButtonGameplayCue.BorderSpacing.Left := 2;
+  ButtonGameplayCue.OnClick := @ButtonGameplayCueClick;
+  ButtonGameplayCue.Parent := PanelMiddleTop;
+  if ButtonMegaLights.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonGameplayCue,
+      PanelMiddleTop.GetControlIndex(ButtonMegaLights) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10890,6 +10910,11 @@ begin
   MenuTreeViewItemMegaLights.Caption := 'MegaLights Clustered Light-Grid, Gobo && Flicker Studio...';
   MenuTreeViewItemMegaLights.OnClick := @MenuTreeViewItemMegaLightsClick;
   MenuTreeView.Items.Add(MenuTreeViewItemMegaLights);
+
+  MenuTreeViewItemGameplayCue := TMenuItem.Create(Self);
+  MenuTreeViewItemGameplayCue.Caption := 'Gameplay Cue, Hit-Stop && Floating Damage-Number Studio...';
+  MenuTreeViewItemGameplayCue.OnClick := @MenuTreeViewItemGameplayCueClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemGameplayCue);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -16232,6 +16257,8 @@ var
         Suffix := Suffix + ' ' + TCastleMegaLightsManager(NodeObj).MegaLightsSummaryBadge
       else if NodeObj is TCastleLightFunctionBehavior then
         Suffix := Suffix + ' ' + TCastleLightFunctionBehavior(NodeObj).LightFunctionSummaryBadge
+      else if NodeObj is TCastleGameplayCueDirector then
+        Suffix := Suffix + ' ' + TCastleGameplayCueDirector(NodeObj).GameplayCueSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -56487,6 +56514,7 @@ begin
   else if SameText(AStudioId, 'spring_arm') then ShowSpringArmDialog
   else if SameText(AStudioId, 'erosion_studio') then ShowErosionStudioDialog
   else if SameText(AStudioId, 'mega_lights') then ShowMegaLightsDialog
+  else if SameText(AStudioId, 'gameplay_cue') then ShowGameplayCueDialog
   else
     Result := False;
 end;
@@ -57191,6 +57219,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemMegaLightsClick(Sender: TObject);
 begin
   ShowMegaLightsDialog;
+end;
+
+procedure TDesignFrame.ShowGameplayCueDialog;
+var
+  Dlg: TGameplayCueForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TGameplayCueForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonGameplayCueClick(Sender: TObject);
+begin
+  ShowGameplayCueDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemGameplayCueClick(Sender: TObject);
+begin
+  ShowGameplayCueDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="155">
+    <Units Count="157">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -857,6 +857,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMegaLights"/>
       </Unit154>
+      <Unit155>
+        <Filename Value="../common-code/toolgameplaycue.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGameplayCue"/>
+      </Unit155>
+      <Unit156>
+        <Filename Value="code/formgameplaycue.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGameplayCue"/>
+      </Unit156>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

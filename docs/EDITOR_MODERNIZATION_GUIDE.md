@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–341** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–342** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3950,6 +3950,27 @@ TMegaLightsHelper.StepAllLightFunctions(Viewport, 0.10);
 - **Videos & Movies:** 🎬 [CGE Official Video — Dynamic Lighting & Shaders (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
 - **Screenshots:** [CGE Shader Showcase](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
 
+## 66BO. Gameplay Cue Combat Feedback, Hit-Stop & Floating Damage-Number Pool Studio (Phase 342)
+
+Castle Game Engine provides tag-routed combat impact cues, melee/critical Hit-Stop time-dilation freeze frames, damped camera punch, and a fixed-capacity zero-allocation floating damage/heal/parry popup pool matching Unreal Engine 6.0+'s `UGameplayCueManager` combat-feel workflows:
+
+1. **Gameplay Cue Runtime (`src/scene/castlegameplaycue.pas`)**:
+   - `TCastleGameplayCueDirector` routes `GameplayCue.*` tags (`Damage.MeleeSlash`, `Damage.Critical`, `Status.Heal`, `Combat.ShieldParry`) into a fixed-capacity `MaxPooledPopups` slot array (recycling the oldest active slot on burst overflow with zero heap allocation), drops `EffectiveWorldTimeScale` to `HitStopTimeScale` (`0.05x`), applies damped `CameraPunchOffset`, and advances popup ballistic arcs on unscaled `Dt` (`StepDirector`).
+2. **Gameplay Cue Studio (`TGameplayCueForm` & `TGameplayCueHelper`)**:
+   - Open via the top-bar **`GameCue`** button, Hierarchy context menu, or **`Design -> Gameplay Cue, Hit-Stop & Floating Damage-Number Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TGameplayCueHelper.SpawnCombatTrainingDummyCueDemo(Viewport, DesignOwner, Dummy, Director);
+Director.TriggerGameplayCue('GameplayCue.Damage.Critical', Vector3(0, 1.75, 0), 420.0);
+Director.StepDirector(0.04); // Advances popup arc while EffectiveWorldTimeScale = 0.05x
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE Gameplay Cues](https://dev.epicgames.com/documentation/en-us/unreal-engine/gameplay-cues-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Combat & Gameplay Behaviors (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Combat Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
 ---
 
 ## 67. Automated Unit Tests & Verification
@@ -4081,4 +4102,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolspringarm.pas`](../tests/code/testcases/testtoolspringarm.pas) (`TTestToolSpringArm` — 2 tests)**: Verifies 5-whisker `WorldRay` instant corridor-wall pull-in (`4.50m -> 1.75m` at `Z = 2.0m`), asymmetric smooth exponential ease-out recovery when cleared, off-center grazing pillar corner catch (`Center` clear while `+X` whisker hits), `PositionLagSpeed` chase smoothing, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolerosionstudio.pas`](../tests/code/testcases/testtoolerosionstudio.pas) (`TTestToolErosionStudio` — 2 tests)**: Verifies exact terrain volume conservation across `25` Olsen thermal talus passes on `etpMesaPlateauEscarpment` alongside `> 12°` cliff slope relaxation, verifies `1,200`-droplet Beyer hydraulic gully carving & alluvial deposition, exact `R + G + B + A = 255` RGBA splatmap partition of unity across every texel, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmegalights.pas`](../tests/code/testcases/testtoolmegalights.pas) (`TTestToolMegaLights` — 2 tests)**: Verifies `16x8x16` 3D clustered light-grid binning across `32` cyberpunk alley point lights (`HotspotMaxLightsInAnyTile >= 2`, empty far-corner tiles), automatic `DistanceCullMeters` culling at `Z = 220m` & full restoration at `Z = 0m`, `lfpTorchCampfirePerlin` intensity modulation, `lgpWindowVenetianBlinds` / `lgpUnderwaterCaustics` gobo cookies, and JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolgameplaycue.pas`](../tests/code/testcases/testtoolgameplaycue.pas) (`TTestToolGameplayCue` — 2 tests)**: Verifies `GameplayCue.Damage.Critical` triggers `HitStopTimeScale = 0.05x` (`0.09s` duration) & `CameraPunchOffset` while unscaled `StepDirector` advances floating **`420 CRIT!`** popup arcs during the freeze and recovers `1.00x` time scale upon expiration, and verifies fixed-capacity `MaxPooledPopups = 12` oldest-slot recycling across `30` burst cues with `0` overflow plus `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

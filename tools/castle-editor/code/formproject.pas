@@ -655,6 +655,7 @@ type
       MenuItemSpringArm: TMenuItem;
       MenuItemErosionStudio: TMenuItem;
       MenuItemMegaLights: TMenuItem;
+      MenuItemGameplayCue: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -730,6 +731,7 @@ type
     procedure MenuItemSpringArmClick(Sender: TObject);
     procedure MenuItemErosionStudioClick(Sender: TObject);
     procedure MenuItemMegaLightsClick(Sender: TObject);
+    procedure MenuItemGameplayCueClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2629,6 +2631,11 @@ begin
   MenuItemMegaLights.Caption := 'MegaLights Clustered Light-Grid, Gobo & Flicker Studio...';
   MenuItemMegaLights.OnClick := @MenuItemMegaLightsClick;
   MenuItemDesign.Add(MenuItemMegaLights);
+
+  MenuItemGameplayCue := TMenuItem.Create(MenuItemDesign);
+  MenuItemGameplayCue.Caption := 'Gameplay Cue, Hit-Stop & Floating Damage-Number Studio...';
+  MenuItemGameplayCue.OnClick := @MenuItemGameplayCueClick;
+  MenuItemDesign.Add(MenuItemGameplayCue);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5935,6 +5942,12 @@ procedure TProjectForm.MenuItemMegaLightsClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMegaLightsDialog;
+end;
+
+procedure TProjectForm.MenuItemGameplayCueClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowGameplayCueDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
