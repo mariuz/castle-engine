@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="205">
+    <Units Count="207">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1107,6 +1107,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormCollabPresence"/>
       </Unit204>
+      <Unit205>
+        <Filename Value="../common-code/toolsubstratestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSubstrateStudio"/>
+      </Unit205>
+      <Unit206>
+        <Filename Value="code/formsubstratestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSubstrateStudio"/>
+      </Unit206>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

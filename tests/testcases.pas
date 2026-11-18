@@ -193,6 +193,7 @@ uses
   TestToolWindStudio,
   TestToolPreloadStudio,
   TestToolCollabPresence,
+  TestToolSubstrateStudio,
   TestCastleVulkanRHI;
 
 implementation

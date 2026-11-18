@@ -680,6 +680,7 @@ type
       MenuItemWindStudio: TMenuItem;
       MenuItemPreloadStudio: TMenuItem;
       MenuItemCollabPresence: TMenuItem;
+      MenuItemSubstrateStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -780,6 +781,7 @@ type
     procedure MenuItemWindStudioClick(Sender: TObject);
     procedure MenuItemPreloadStudioClick(Sender: TObject);
     procedure MenuItemCollabPresenceClick(Sender: TObject);
+    procedure MenuItemSubstrateStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2804,6 +2806,11 @@ begin
   MenuItemCollabPresence.Caption := 'Multi-User Collaborative Presence & Locks Studio...';
   MenuItemCollabPresence.OnClick := @MenuItemCollabPresenceClick;
   MenuItemDesign.Add(MenuItemCollabPresence);
+
+  MenuItemSubstrateStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemSubstrateStudio.Caption := 'Substrate Multi-Slab Material Mixer Studio...';
+  MenuItemSubstrateStudio.OnClick := @MenuItemSubstrateStudioClick;
+  MenuItemDesign.Add(MenuItemSubstrateStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6260,6 +6267,12 @@ procedure TProjectForm.MenuItemCollabPresenceClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCollabPresenceDialog;
+end;
+
+procedure TProjectForm.MenuItemSubstrateStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSubstrateStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

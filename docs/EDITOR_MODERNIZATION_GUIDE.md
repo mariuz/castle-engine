@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–366** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–367** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4522,6 +4522,29 @@ Broker.AcquireSubtreeLock(Viewport, 'alice', 'Alice', 'CastleGate', 30.0, Confli
 
 ---
 
+## 66CN. Substrate Multi-Slab Layered Material Mixer & Energy Conservation Studio (Phase 367)
+
+Castle Game Engine provides an energy-conserving vertical multi-slab BRDF material stack with Beer-Lambert clear-coat absorption, Airy RGB thin-film interference, and Charlie-style microfiber velvet rim sheen matching Unreal Engine 6.0+'s Substrate (`USubstrateMaterial`) workflows:
+
+1. **Substrate Multi-Slab Runtime (`src/scene/castlesubstratematerial.pas`)**:
+   - `TCastleSubstrateMaterial` evaluates `EvaluateSlabAtCosTheta(CosThetaV)` with strict energy conservation (`Fuzz + ClearCoat * ThinFilm + (1 - Fuzz)*(1 - F_coat)*T_beer*Base <= 1.0`), `TopCoatThicknessMicrons` optical path absorption, `(650, 532, 460 nm)` `ThinFilmNanometers` iridescence, and `csTransient` shader-ball preview geometry.
+2. **Substrate Studio (`TSubstrateStudioForm` & `TSubstrateStudioHelper`)**:
+   - Open via the top-bar **`Substr`** button, Hierarchy context menu, or **`Design -> Substrate Multi-Slab Material Mixer Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TSubstrateStudioHelper.SpawnSubstrateShaderBallDemo(Viewport, DesignOwner, Mat);
+Mat.Preset := subpIridescentScarabCarapace;
+Sample := Mat.EvaluateSlabAtCosTheta(0.35);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Shaders & PBR](https://castle-engine.io/shaders) · [UE Substrate Materials (`USubstrateMaterial`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/substrate-materials-overview-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Physically Based Rendering, Shaders & Materials (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE PBR Material Viewport](https://castle-engine.io/images/thumb_const_height_size/dragon_spine_game_view.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4676,4 +4699,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolwindstudio.pas`](../tests/code/testcases/testtoolwindstudio.pas) (`TTestToolWindStudio` — 2 tests)**: Verifies quadratic $H^2$ cantilever trunk bend scaling (`6m` tree bends `> 3x` further than `2m` sapling), finite-speed radial shockwave propagation (`0 m/s` pre-arrival at `t=0s` -> `> 15 m/s` outward blast at `t=1.0s` when `R = 10m` -> automatic ring expiration at `t=3.0s`), `wbpHurricaneTempest` `90°` `+Z` wind alignment, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolpreloadstudio.pas`](../tests/code/testcases/testtoolpreloadstudio.pas) (`TTestToolPreloadStudio` — 2 tests)**: Verifies priority-sorted `Critical > HighVFX > Normal > Background` warmup with strict `2.5 ms/frame` hitch-free frame throttling (`2.2 ms` Frame 1 + `2.2 ms` Frame 2), pinned-handle protection (`paladin_body.gltf` never evicted) alongside least-recently-used unpinned `room_b.gltf` VRAM eviction under a `100 MB` budget, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcollabpresence.pas`](../tests/code/testcases/testtoolcollabpresence.pas) (`TTestToolCollabPresence` — 2 tests)**: Verifies bidirectional ancestor/descendant subtree lock conflict rejection (`CastleGate <-> GateHinge`) alongside concurrent sibling editing (`TavernSign`), heartbeat lease renewal vs. stale-lock auto-expiration (`ExpireStaleLocks`), JSON session roundtrips, the unified **86-Studio Hub** Horizon 2–10 catalog, and the 18th MCP tool `cge_manage_collab_locks` (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsubstratestudio.pas`](../tests/code/testcases/testtoolsubstratestudio.pas) (`TTestToolSubstrateStudio` — 2 tests)**: Verifies strict `<= 1.0` multi-slab energy conservation across all presets & extreme white/metallic/fuzz configurations, Beer-Lambert `5 um` vs. `90 um` clear-coat spectral absorption, Charlie-style velvet grazing rim amplification, `520 nm` Airy thin-film iridescent color shift across `CosThetaV`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 
