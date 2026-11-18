@@ -43,7 +43,7 @@ uses
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -896,6 +896,8 @@ type
       MenuTreeViewItemWindStudio: TMenuItem;
       ButtonPreloadStudio: TSpeedButton;
       MenuTreeViewItemPreloadStudio: TMenuItem;
+      ButtonCollabPresence: TSpeedButton;
+      MenuTreeViewItemCollabPresence: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1489,6 +1491,8 @@ type
     procedure MenuTreeViewItemWindStudioClick(Sender: TObject);
     procedure ButtonPreloadStudioClick(Sender: TObject);
     procedure MenuTreeViewItemPreloadStudioClick(Sender: TObject);
+    procedure ButtonCollabPresenceClick(Sender: TObject);
+    procedure MenuTreeViewItemCollabPresenceClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -3005,6 +3009,7 @@ type
     procedure ShowGameplayDebuggerDialog;
     procedure ShowWindStudioDialog;
     procedure ShowPreloadStudioDialog;
+    procedure ShowCollabPresenceDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -3026,7 +3031,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -8241,6 +8246,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonPreloadStudio,
       PanelMiddleTop.GetControlIndex(ButtonWindStudio) + 1);
 
+  ButtonCollabPresence := TSpeedButton.Create(Self);
+  ButtonCollabPresence.Caption := 'Collab';
+  ButtonCollabPresence.Hint := 'Open Multi-User Collaborative Presence & Sub-Scene Locks Studio.' + NL +
+    'Manage ancestor/descendant subtree reservation leases, heartbeats & 86-Studio Hub.';
+  ButtonCollabPresence.ShowHint := true;
+  ButtonCollabPresence.AutoSize := true;
+  ButtonCollabPresence.Constraints.MinHeight := 33;
+  ButtonCollabPresence.Constraints.MinWidth := 62;
+  ButtonCollabPresence.BorderSpacing.Left := 2;
+  ButtonCollabPresence.OnClick := @ButtonCollabPresenceClick;
+  ButtonCollabPresence.Parent := PanelMiddleTop;
+  if ButtonPreloadStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonCollabPresence,
+      PanelMiddleTop.GetControlIndex(ButtonPreloadStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -11490,6 +11510,11 @@ begin
   MenuTreeViewItemPreloadStudio.Caption := 'Async Asset Preloader & VRAM Residency Studio...';
   MenuTreeViewItemPreloadStudio.OnClick := @MenuTreeViewItemPreloadStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemPreloadStudio);
+
+  MenuTreeViewItemCollabPresence := TMenuItem.Create(Self);
+  MenuTreeViewItemCollabPresence.Caption := 'Multi-User Collaborative Presence & Locks Studio...';
+  MenuTreeViewItemCollabPresence.OnClick := @MenuTreeViewItemCollabPresenceClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemCollabPresence);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -57157,6 +57182,7 @@ begin
   else if SameText(AStudioId, 'gameplay_debugger') then ShowGameplayDebuggerDialog
   else if SameText(AStudioId, 'wind_studio') then ShowWindStudioDialog
   else if SameText(AStudioId, 'preload_studio') then ShowPreloadStudioDialog
+  else if SameText(AStudioId, 'collab_presence') then ShowCollabPresenceDialog
   else
     Result := False;
 end;
@@ -58509,6 +58535,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemPreloadStudioClick(Sender: TObject);
 begin
   ShowPreloadStudioDialog;
+end;
+
+procedure TDesignFrame.ShowCollabPresenceDialog;
+var
+  Dlg: TCollabPresenceForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TCollabPresenceForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonCollabPresenceClick(Sender: TObject);
+begin
+  ShowCollabPresenceDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemCollabPresenceClick(Sender: TObject);
+begin
+  ShowCollabPresenceDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

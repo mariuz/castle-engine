@@ -47,8 +47,8 @@ var
   Matches: TStudioCatalogEntryArray;
   Entry: TStudioCatalogEntry;
 begin
-  { Verify all 76 Horizon 2-9 studios are indexed across all 6 domain categories }
-  AssertEquals(76, TStudioHubManager.StudioCount);
+  { Verify all 86 Horizon 2-10 studios are indexed across all 6 domain categories }
+  AssertEquals(86, TStudioHubManager.StudioCount);
 
   for Cat in TStudioHubCategory do
   begin

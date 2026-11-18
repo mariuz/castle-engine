@@ -127,7 +127,10 @@ uses
   CastleSoundscape,
   CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt,
   CastleMover2, CastleCameraRigRail, CastleMeshletCluster, CastleTetSoftBody,
-  CastleMassTraffic;
+  CastleMassTraffic,
+  CastleSurfaceGi, CastleContextualAnim, CastleTargetingSystem,
+  CastleMutableCharacter, CastleRiverSpline, CastleOccluderFader,
+  CastleGameplayDebugger, CastleWindField, CastleAssetPreloader;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -455,6 +458,38 @@ begin
   Reg('live_cook_auditor', 'Live Coding RTTI State Broker & Release Package Cook Auditor Studio', 'CookLive',
     shcPerformanceQaDeploy, 356, 'live coding rtti hot reload snapshot rehydrate coreredirect alias package cook audit',
     'Live RTTI snapshot/rehydrate with field-rename aliases & Release Package Cook readiness gate.');
+
+  { Horizon 10 (Phases 357-366 — UE 6.0+ Surface GI SH2, Contextual Anim, Targeting Presets, Mutable Customizer, River Spline, Camera Cutaway, GameplayDebugger, Wind/Shockwave, Async Preloader & Collaborative Presence, +10 -> 86 studios) }
+  Reg('surface_gi', 'Lumen-Style Surface Cache SH2 GI Probes & Sky-Occlusion Studio', 'GI-SH2',
+    shcMaterialsVfxLighting, 357, 'lumen surface cache sh2 spherical harmonics gi irradiance probe sky occlusion color bleed',
+    '3D SH2 irradiance probe volume with WorldRay sky-occlusion baking & trilinear color bleed.');
+  Reg('contextual_anim', 'Contextual Anim Paired Finisher, Takedown & Co-Op Lift Studio', 'CtxAnim',
+    shcCharactersAiGas, 358, 'contextual animation paired finisher stealth takedown parry coop boost ik warp dock',
+    '2-actor relative docking slots, approach-cone & WorldRay wall gates, Hermite warp & IK sync.');
+  Reg('targeting_studio', 'Targeting System Preset Lock-On Cone, Magnetism & Threat Studio', 'LockOn',
+    shcCharactersAiGas, 359, 'targeting system preset lock on cone aim assist magnetism line of sight threat stick flick',
+    'Multi-stage Gather/Filter/Score lock-on pipeline, right-stick target flick & aim magnetism.');
+  Reg('mutable_studio', 'Mutable Modular Character Customizer, Morphs & Recipe Studio', 'Mutable',
+    shcCharactersAiGas, 360, 'mutable character customizer modular armor hair helm clip morph slider swatch recipe',
+    'Modular equipment slots, closed-helm hair exclusion, stature/bulk morphs & MUT1 recipe codes.');
+  Reg('river_studio', 'Spline Water River / Rapids Flow, Width/Depth & Drift Studio', 'River',
+    shcWorldEnvironment, 361, 'river spline water rapids waterfall gorge width depth continuity foam kayak drift',
+    'Catmull-Rom variable-width river splines, Q = A * v gorge speedup, whitewater foam & drift.');
+  Reg('occluder_fader', 'Smart Camera Occluder Cutaway / Dither Fade & Foliage Parting Studio', 'Cutaway',
+    shcCinematicsAudioInput, 362, 'camera occluder cutaway roof wall fade dither alpha foliage grass parting arpg',
+    '5-ray WorldRay wall/roof cutaway opacity fader & length-preserving radial tall-grass parting.');
+  Reg('gameplay_debugger', 'GameplayDebugger Live 3D HUD & Numpad 0..5 Channels Studio', 'GDebug',
+    shcPerformanceQaDeploy, 363, 'gameplay debugger hud numpad channel ai statetree targeting gas mover traffic gi snapshot',
+    'Toggleable Numpad 0..5 3D diagnostic overlay & JSON snapshot across AI, LockOn, GAS, Mover & GI.');
+  Reg('wind_studio', 'Procedural Foliage Wind Gust Field & Radial Shockwave Studio', 'WindFX',
+    shcWorldEnvironment, 364, 'wind directional gust beaufort pivot painter trunk branch leaf sway radial shockwave blast',
+    'Beaufort harmonic gusts, finite-speed radial blast shockwave rings & 3-tier trunk/branch sway.');
+  Reg('preload_studio', 'Async Asset Preloader, Frame-Budgeted Warmup & VRAM Studio', 'Preload',
+    shcPerformanceQaDeploy, 365, 'async asset preloader streamable warmup priority frame budget hitch free vram lru pinned',
+    'Priority warmup queue with strict ms/frame hitch prevention & pinned-aware LRU VRAM eviction.');
+  Reg('collab_presence', 'Multi-User Collaborative Presence Locks & Sub-Scene Conflict Studio', 'Collab',
+    shcPerformanceQaDeploy, 366, 'multi user collaborative presence subtree lock conflict ancestor descendant lease heartbeat',
+    'Hierarchical ancestor/descendant subtree reservation locks, lease heartbeats & 86-Studio Hub.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -628,6 +663,17 @@ var
     if (C is TCastleChooserTable) or (C is TCastleTraversalBehavior) or
        (C is TCastleMoverBehavior) or (C is TCastleMassTrafficManager) then
       BumpSub(shcCharactersAiGas);
+    if C is TCastleSurfaceGiGrid then
+      BumpSub(shcMaterialsVfxLighting);
+    if (C is TCastleContextualAnimScene) or (C is TCastleTargetingBehavior) or
+       (C is TCastleMutableCharacter) then
+      BumpSub(shcCharactersAiGas);
+    if (C is TCastleRiverSpline) or (C is TCastleWindFieldDirector) then
+      BumpSub(shcWorldEnvironment);
+    if C is TCastleCameraOccluderFader then
+      BumpSub(shcCinematicsAudioInput);
+    if (C is TCastleGameplayDebugger) or (C is TCastleAssetPreloadQueue) then
+      BumpSub(shcPerformanceQaDeploy);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

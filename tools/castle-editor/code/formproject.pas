@@ -679,6 +679,7 @@ type
       MenuItemGameplayDebugger: TMenuItem;
       MenuItemWindStudio: TMenuItem;
       MenuItemPreloadStudio: TMenuItem;
+      MenuItemCollabPresence: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -778,6 +779,7 @@ type
     procedure MenuItemGameplayDebuggerClick(Sender: TObject);
     procedure MenuItemWindStudioClick(Sender: TObject);
     procedure MenuItemPreloadStudioClick(Sender: TObject);
+    procedure MenuItemCollabPresenceClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2797,6 +2799,11 @@ begin
   MenuItemPreloadStudio.Caption := 'Async Asset Preloader & VRAM Residency Studio...';
   MenuItemPreloadStudio.OnClick := @MenuItemPreloadStudioClick;
   MenuItemDesign.Add(MenuItemPreloadStudio);
+
+  MenuItemCollabPresence := TMenuItem.Create(MenuItemDesign);
+  MenuItemCollabPresence.Caption := 'Multi-User Collaborative Presence & Locks Studio...';
+  MenuItemCollabPresence.OnClick := @MenuItemCollabPresenceClick;
+  MenuItemDesign.Add(MenuItemCollabPresence);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6247,6 +6254,12 @@ procedure TProjectForm.MenuItemPreloadStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowPreloadStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemCollabPresenceClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCollabPresenceDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

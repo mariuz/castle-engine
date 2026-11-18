@@ -68,7 +68,7 @@ begin
   FSavedSnapshot := nil;
   FLastCookScore := 100;
   FLastReadyToShip := True;
-  Caption := 'Live Coding RTTI Broker & Release Package Cook Auditor Studio — 76-Studio Hub (Phase 356)';
+  Caption := 'Live Coding RTTI Broker & Release Package Cook Auditor Studio — 86-Studio Hub (Phase 356)';
   Width := 980;
   Height := 620;
   Position := poScreenCenter;
@@ -104,7 +104,7 @@ begin
   Lbl.Align := alTop;
   Lbl.BorderSpacing.Around := 8;
   Lbl.Font.Style := [fsBold];
-  Lbl.Caption := 'UE 6.0+ Live Coding & Cook Parity — RTTI Hot-Reload Snapshot/Rehydrate, CoreRedirect Field Aliases & 76-Studio Release Cook Gate';
+  Lbl.Caption := 'UE 6.0+ Live Coding & Cook Parity — RTTI Hot-Reload Snapshot/Rehydrate, CoreRedirect Field Aliases & 86-Studio Release Cook Gate';
 
   TopRow := TPanel.Create(Self);
   TopRow.Parent := Self;

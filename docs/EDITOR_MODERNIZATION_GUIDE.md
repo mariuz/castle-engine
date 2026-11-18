@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–365** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–366** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4498,6 +4498,30 @@ StepRes := Queue.StepFrameWarmupBudget;
 
 ---
 
+## 66CM. Multi-User Collaborative Presence Locks, Sub-Scene Conflict Broker & 86-Studio Hub / 18-Tool MCP (Phase 366)
+
+Castle Game Engine provides a multi-user and multi-agent subtree edit reservation broker with bidirectional ancestor/descendant conflict protection, lease heartbeats, and automatic stale-lock expiration alongside the unified **86-Studio Hub** and **18th MCP Tool (`cge_manage_collab_locks`)** matching Unreal Engine 6.0+'s Multi-User Editing (`ConcertSync`) workflows:
+
+1. **Collaborative Presence & Subtree Lock Broker (`tools/common-code/toolcollabpresence.pas`)**:
+   - `TCollabPresenceBroker` grants timed subtree reservation leases (`AcquireSubtreeLock`), blocks conflicting edits on any ancestor or descendant of an already-locked subtree while allowing concurrent sibling edits, renews heartbeats (`RenewHeartbeat`), and reclaims expired stale leases (`ExpireStaleLocks`).
+2. **86-Studio Hub & 18th MCP Tool (`toolstudiohub.pas` & `toolmcpserver.pas`)**:
+   - `TStudioHubManager` indexes all **`86` specialized studios** across Horizons 2–10, and `TCastleMcpServer` exposes `cge_manage_collab_locks` (`18` total JSON-RPC 2.0 MCP tools) so multiple AI agents and human designers can safely lock disjoint scene subtrees in parallel.
+3. **Collaborative Presence Studio (`TCollabPresenceForm`)**:
+   - Open via the top-bar **`Collab`** button, Hierarchy context menu, or **`Design -> Multi-User Collaborative Presence & Locks Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TCollabPresenceBroker.SpawnCollaborativeKeepDemo(Viewport, DesignOwner);
+Broker.AcquireSubtreeLock(Viewport, 'alice', 'Alice', 'CastleGate', 30.0, ConflictReason);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Visual Editor](https://castle-engine.io/manual_editor.php) · [UE Multi-User Editing (`ConcertSync`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/multi-user-editing-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Visual Editor, Scene Hierarchy & Team Workflows (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE Editor Hierarchy & Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4564,7 +4588,7 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 ```
 
 In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 editor subsystems include dedicated automated test suites:
-- **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 17 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 18 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnprshaderstudio.pas`](../tests/code/testcases/testtoolnprshaderstudio.pas) (`TTestToolNprShaderStudio` — 2 tests)**: Verifies all 5 `TCastleStylizedShaderPreset` GLSL generators (`PLUG_lighting_apply`, `PLUG_material_light_diffuse`, `PLUG_fragment_modify`), X3D `TEffectNode` attach/enable/disable/remove lifecycle on `TCastleScene`, `.castle-transform` JSON serialization roundtrip, and `TLightShadowBudgetAuditor` multi-light overlap hotspot scoring, multi-shadow-volume conflict detection, `EnsureSingleShadowVolumeLight`, and `ClampUnboundedLightRadii` (`0 unfreed memory blocks`).
@@ -4651,4 +4675,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolgameplaydebugger.pas`](../tests/code/testcases/testtoolgameplaydebugger.pas) (`TTestToolGameplayDebugger` — 2 tests)**: Verifies 6-channel live multi-subsystem HUD & 3D marker aggregation across AI StateTree, Targeting Lock-On (`DebugBossTarget`), GAS (`Class.Paladin`), Mover 2.0, MassTraffic, and Surface GI, per-category `ToggleChannelByNumpadKey(0..5)` bitmask filtering, zero-overhead `OverlayActive = False` teardown, `ExportDiagnosticSnapshotJson`, and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolwindstudio.pas`](../tests/code/testcases/testtoolwindstudio.pas) (`TTestToolWindStudio` — 2 tests)**: Verifies quadratic $H^2$ cantilever trunk bend scaling (`6m` tree bends `> 3x` further than `2m` sapling), finite-speed radial shockwave propagation (`0 m/s` pre-arrival at `t=0s` -> `> 15 m/s` outward blast at `t=1.0s` when `R = 10m` -> automatic ring expiration at `t=3.0s`), `wbpHurricaneTempest` `90°` `+Z` wind alignment, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolpreloadstudio.pas`](../tests/code/testcases/testtoolpreloadstudio.pas) (`TTestToolPreloadStudio` — 2 tests)**: Verifies priority-sorted `Critical > HighVFX > Normal > Background` warmup with strict `2.5 ms/frame` hitch-free frame throttling (`2.2 ms` Frame 1 + `2.2 ms` Frame 2), pinned-handle protection (`paladin_body.gltf` never evicted) alongside least-recently-used unpinned `room_b.gltf` VRAM eviction under a `100 MB` budget, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcollabpresence.pas`](../tests/code/testcases/testtoolcollabpresence.pas) (`TTestToolCollabPresence` — 2 tests)**: Verifies bidirectional ancestor/descendant subtree lock conflict rejection (`CastleGate <-> GateHinge`) alongside concurrent sibling editing (`TavernSign`), heartbeat lease renewal vs. stale-lock auto-expiration (`ExpireStaleLocks`), JSON session roundtrips, the unified **86-Studio Hub** Horizon 2–10 catalog, and the 18th MCP tool `cge_manage_collab_locks` (`0 unfreed memory blocks`).
 

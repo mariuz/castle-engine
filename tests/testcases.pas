@@ -192,6 +192,7 @@ uses
   TestToolGameplayDebugger,
   TestToolWindStudio,
   TestToolPreloadStudio,
+  TestToolCollabPresence,
   TestCastleVulkanRHI;
 
 implementation

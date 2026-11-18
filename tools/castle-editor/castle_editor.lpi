@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="203">
+    <Units Count="205">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1097,6 +1097,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormPreloadStudio"/>
       </Unit202>
+      <Unit203>
+        <Filename Value="../common-code/toolcollabpresence.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCollabPresence"/>
+      </Unit203>
+      <Unit204>
+        <Filename Value="code/formcollabpresence.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCollabPresence"/>
+      </Unit204>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

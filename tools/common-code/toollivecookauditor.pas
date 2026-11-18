@@ -738,7 +738,7 @@ begin
       '| :--- | :--- |' + LineEnding +
       Format('| **Cook Readiness Score** | **`%d / 100`** (`ReadyToShip = %s`) |', [
         CookRep.CookReadinessScore, BoolToStr(CookRep.CookReadyToShip, True)]) + LineEnding +
-      Format('| **Unified Studio Hub Catalog** | **`%d` Studios** across `6` Domains (`17` MCP Tools) |', [
+      Format('| **Unified Studio Hub Catalog** | **`%d` Studios** across `6` Domains (`18` MCP Tools) |', [
         TStudioHubManager.StudioCount]) + LineEnding +
       Format('| **Cookable Components & Payload** | `%d` components (`~%d KB` cooked archive) |', [
         CookRep.TotalCookableComponents, CookRep.EstimatedCookedPayloadKB]) + LineEnding +

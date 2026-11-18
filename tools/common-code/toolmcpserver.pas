@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -983,7 +983,7 @@ begin
   P.Add('query', MakePropSchema('string', 'Optional multi-token case-insensitive keyword filter (e.g. "ackermann", "gauntlet", "phase 325").'));
   P.Add('category', MakePropSchema('integer', 'Optional studio domain index (-1 = all 6 domains, 0..5 = specific TStudioHubCategory).'));
   AddToolDef('cge_list_studios',
-    'Search and list all 76 specialized Castle Game Engine Horizon 2-9 editor studios across 6 domains.',
+    'Search and list all 86 specialized Castle Game Engine Horizon 2-10 editor studios across 6 domains.',
     P, []);
 
   AddToolDef('cge_audit_world_readiness',
@@ -1007,7 +1007,16 @@ begin
   P := TJSONObject.Create;
   P.Add('checkDiskUrls', MakePropSchema('boolean', 'When true, also checks URIFileExists on disk for every non-empty asset URL property (default false).'));
   AddToolDef('cge_audit_package_cook',
-    'Run the Release Package Cook Readiness Auditor across the open design (broken/traversal URLs, ChooserTable validation, Tetrahedral Soft-Body inversions, MassTraffic safety, and 76-Studio World Readiness).',
+    'Run the Release Package Cook Readiness Auditor across the open design (broken/traversal URLs, ChooserTable validation, Tetrahedral Soft-Body inversions, MassTraffic safety, and 86-Studio World Readiness).',
+    P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Collaborative lock command: "list", "acquire", "release", "heartbeat", or "expire" (default "list").'));
+  P.Add('userId', MakePropSchema('string', 'Collaborator or AI agent identifier (e.g. "agent-alpha" or "alice").'));
+  P.Add('subtree', MakePropSchema('string', 'Target component subtree root name in the open design (e.g. "CastleGate").'));
+  P.Add('leaseSec', MakePropSchema('number', 'Lease reservation duration in seconds before stale auto-expiration (default 30).'));
+  AddToolDef('cge_manage_collab_locks',
+    'Coordinate multi-user / multi-agent subtree edit reservation locks with ancestor/descendant conflict rejection and lease heartbeats.',
     P, []);
 end;
 
@@ -1124,6 +1133,9 @@ var
   DetSeed: Integer;
   CookRep: TCookAuditReport;
   CheckDiskUrls: Boolean;
+  CollabLeaseSec: Double;
+  CollabOk: Boolean;
+  CollabLock: TCollabSubtreeLock;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -1828,6 +1840,69 @@ begin
       FreeAndNil(LinesArr);
       FreeAndNil(OutPayload);
       FreeAndNil(CookRep);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_manage_collab_locks' then
+  begin
+    ActionName := 'list';
+    BaseName := '';
+    CompName := '';
+    CollabLeaseSec := 30.0;
+    if ArgsObj <> nil then
+    begin
+      ActionName := LowerCase(Trim(ArgsObj.Get('action', 'list')));
+      BaseName := Trim(ArgsObj.Get('userId', ''));
+      CompName := Trim(ArgsObj.Get('subtree', ''));
+      CollabLeaseSec := ArgsObj.Get('leaseSec', 30.0);
+    end;
+    if SameText(ActionName, 'list') then
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    ErrMsg := '';
+    CollabOk := True;
+    if SameText(ActionName, 'acquire') then
+      CollabOk := TCollabPresenceBroker.SharedBroker.AcquireSubtreeLock(
+        DesignRoot, BaseName, BaseName, CompName, CollabLeaseSec, ErrMsg)
+    else if SameText(ActionName, 'release') then
+      CollabOk := TCollabPresenceBroker.SharedBroker.ReleaseSubtreeLock(BaseName, CompName)
+    else if SameText(ActionName, 'heartbeat') then
+      CollabOk := TCollabPresenceBroker.SharedBroker.RenewHeartbeat(BaseName, CompName, CollabLeaseSec)
+    else if SameText(ActionName, 'expire') then
+      TCollabPresenceBroker.SharedBroker.ExpireStaleLocks;
+
+    OutPayload := TJSONObject.Create;
+    TargetsArr := TJSONArray.Create;
+    try
+      for I := 0 to TCollabPresenceBroker.SharedBroker.ActiveLockCount - 1 do
+      begin
+        CollabLock := TCollabPresenceBroker.SharedBroker.GetLock(I);
+        StudioItemObj := TJSONObject.Create;
+        StudioItemObj.Add('lockId', CollabLock.LockId);
+        StudioItemObj.Add('userId', CollabLock.UserId);
+        StudioItemObj.Add('subtree', CollabLock.SubtreeRootName);
+        StudioItemObj.Add('leaseExpiresAtSec', CollabLock.LeaseExpiresAtSec);
+        StudioItemObj.Add('heartbeats', CollabLock.HeartbeatCount);
+        TargetsArr.Add(StudioItemObj);
+      end;
+      OutPayload.Add('ok', CollabOk);
+      OutPayload.Add('action', ActionName);
+      OutPayload.Add('conflictReason', ErrMsg);
+      OutPayload.Add('activeLockCount', TCollabPresenceBroker.SharedBroker.ActiveLockCount);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('locks', TargetsArr);
+      TargetsArr := nil;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(TargetsArr);
+      FreeAndNil(OutPayload);
     end;
     Exit;
   end;
