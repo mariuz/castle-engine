@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="167">
+    <Units Count="169">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -917,6 +917,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormChooserTable"/>
       </Unit166>
+      <Unit167>
+        <Filename Value="../common-code/toolgroomstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGroomStudio"/>
+      </Unit167>
+      <Unit168>
+        <Filename Value="code/formgroomstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGroomStudio"/>
+      </Unit168>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

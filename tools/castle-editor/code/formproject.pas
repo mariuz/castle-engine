@@ -661,6 +661,7 @@ type
       MenuItemSoundscape: TMenuItem;
       MenuItemRegressionHarness: TMenuItem;
       MenuItemChooserTable: TMenuItem;
+      MenuItemGroomStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -742,6 +743,7 @@ type
     procedure MenuItemSoundscapeClick(Sender: TObject);
     procedure MenuItemRegressionHarnessClick(Sender: TObject);
     procedure MenuItemChooserTableClick(Sender: TObject);
+    procedure MenuItemGroomStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2671,6 +2673,11 @@ begin
   MenuItemChooserTable.Caption := 'Chooser Tables Context-Driven Asset Selector Studio...';
   MenuItemChooserTable.OnClick := @MenuItemChooserTableClick;
   MenuItemDesign.Add(MenuItemChooserTable);
+
+  MenuItemGroomStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemGroomStudio.Caption := 'Groom Strand Hair & Fur Clump Cards Studio...';
+  MenuItemGroomStudio.OnClick := @MenuItemGroomStudioClick;
+  MenuItemDesign.Add(MenuItemGroomStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6013,6 +6020,12 @@ procedure TProjectForm.MenuItemChooserTableClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowChooserTableDialog;
+end;
+
+procedure TProjectForm.MenuItemGroomStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowGroomStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

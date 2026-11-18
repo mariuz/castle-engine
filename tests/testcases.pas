@@ -174,6 +174,7 @@ uses
   TestToolSoundscape,
   TestToolRegressionHarness,
   TestToolChooserTable,
+  TestToolGroomStudio,
   TestCastleVulkanRHI;
 
 implementation
