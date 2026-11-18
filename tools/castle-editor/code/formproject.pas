@@ -682,6 +682,7 @@ type
       MenuItemCollabPresence: TMenuItem;
       MenuItemSubstrateStudio: TMenuItem;
       MenuItemSmartObjectSlots: TMenuItem;
+      MenuItemAeroFoil: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -784,6 +785,7 @@ type
     procedure MenuItemCollabPresenceClick(Sender: TObject);
     procedure MenuItemSubstrateStudioClick(Sender: TObject);
     procedure MenuItemSmartObjectSlotsClick(Sender: TObject);
+    procedure MenuItemAeroFoilClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2818,6 +2820,11 @@ begin
   MenuItemSmartObjectSlots.Caption := 'Multi-Slot SmartObject Queue & Cooldown Studio...';
   MenuItemSmartObjectSlots.OnClick := @MenuItemSmartObjectSlotsClick;
   MenuItemDesign.Add(MenuItemSmartObjectSlots);
+
+  MenuItemAeroFoil := TMenuItem.Create(MenuItemDesign);
+  MenuItemAeroFoil.Caption := 'Aerodynamic Wing/Sail Lift-Drag & Stall Studio...';
+  MenuItemAeroFoil.OnClick := @MenuItemAeroFoilClick;
+  MenuItemDesign.Add(MenuItemAeroFoil);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6286,6 +6293,12 @@ procedure TProjectForm.MenuItemSmartObjectSlotsClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSmartObjectSlotsDialog;
+end;
+
+procedure TProjectForm.MenuItemAeroFoilClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowAeroFoilDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

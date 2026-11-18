@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–368** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–369** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4568,6 +4568,28 @@ Station.StepSlotsAndPromoteQueue(2.5);
 
 ---
 
+## 66CP. Aerodynamic Wing / Sail Foil Polar ($C_L, C_D$), Critical Stall & Thermal Studio (Phase 369)
+
+Castle Game Engine provides a Prandtl finite-aspect-ratio airfoil and sail behavior solving lift/induced-drag polars, post-stall flow separation, and thermal updraft soaring matching Unreal Engine 6.0+'s Flight/Sail Aerodynamics workflows:
+
+1. **Aerodynamic Foil Runtime (`src/scene/castleaerofoil.pas`)**:
+   - `TCastleAeroFoilBehavior` evaluates $C_L(\alpha)$ and $C_D(\alpha) = C_{D0} + \frac{C_L^2}{\pi e AR}$ (`EvaluatePolarAtAlphaDeg`), separates into post-stall vortex drag above `CriticalStallAngleDeg`, and integrates 3D glider/sail forces plus thermal updraft columns (`StepGliderFlight`).
+2. **Aero Foil Studio (`TAeroFoilForm` & `TAeroFoilHelper`)**:
+   - Open via the top-bar **`AeroFoil`** button, Hierarchy context menu, or **`Design -> Aerodynamic Wing/Sail Lift-Drag & Stall Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TAeroFoilHelper.SpawnGliderThermalCanyonDemo(Viewport, DesignOwner, Glider, Foil);
+Foil.StepGliderFlight(GliderPos, GliderVel, 0.0, TVector3.Zero, 0.05);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Physics & Vehicles](https://castle-engine.io/physics) · [UE Vehicles & Aerodynamics](https://dev.epicgames.com/documentation/en-us/unreal-engine/vehicles-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Physics, Vehicles & Flight Gameplay (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Sky & Canyon Viewport](https://castle-engine.io/images/thumb_const_height_size/mountains_of_fire_screen_1.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4724,4 +4746,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolcollabpresence.pas`](../tests/code/testcases/testtoolcollabpresence.pas) (`TTestToolCollabPresence` — 2 tests)**: Verifies bidirectional ancestor/descendant subtree lock conflict rejection (`CastleGate <-> GateHinge`) alongside concurrent sibling editing (`TavernSign`), heartbeat lease renewal vs. stale-lock auto-expiration (`ExpireStaleLocks`), JSON session roundtrips, the unified **86-Studio Hub** Horizon 2–10 catalog, and the 18th MCP tool `cge_manage_collab_locks` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsubstratestudio.pas`](../tests/code/testcases/testtoolsubstratestudio.pas) (`TTestToolSubstrateStudio` — 2 tests)**: Verifies strict `<= 1.0` multi-slab energy conservation across all presets & extreme white/metallic/fuzz configurations, Beer-Lambert `5 um` vs. `90 um` clear-coat spectral absorption, Charlie-style velvet grazing rim amplification, `520 nm` Airy thin-film iridescent color shift across `CosThetaV`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsmartobjectslots.pas`](../tests/code/testcases/testtoolsmartobjectslots.pas) (`TTestToolSmartObjectSlots` — 2 tests)**: Verifies 4-seat saturation, FIFO wait-queue ordering (`Npc_5` ahead of `Npc_6`), `4.0s` cooldown blocking premature promotion followed by automatic FIFO promotion on expiry, hierarchical `Role.Blacksmith.Master` tag matching vs. untrained `Role.Farmer` rejection without queue pollution, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolaerofoil.pas`](../tests/code/testcases/testtoolaerofoil.pas) (`TTestToolAeroFoil` — 2 tests)**: Verifies Prandtl high-aspect soaring glide (`L/D > 14.0` at `8°`) vs. `28°` post-stall flow separation (`CL` drop `< 70%` of peak & `> 4x` separated form drag surge), `+4.0 m/s` thermal updraft altitude climb above launch height vs. calm-air descent, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
