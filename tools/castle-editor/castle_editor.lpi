@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="191">
+    <Units Count="193">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1037,6 +1037,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormTargetingStudio"/>
       </Unit190>
+      <Unit191>
+        <Filename Value="../common-code/toolmutablestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMutableStudio"/>
+      </Unit191>
+      <Unit192>
+        <Filename Value="code/formmutablestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMutableStudio"/>
+      </Unit192>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

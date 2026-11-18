@@ -673,6 +673,7 @@ type
       MenuItemSurfaceGiStudio: TMenuItem;
       MenuItemContextualAnim: TMenuItem;
       MenuItemTargetingStudio: TMenuItem;
+      MenuItemMutableStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -766,6 +767,7 @@ type
     procedure MenuItemSurfaceGiStudioClick(Sender: TObject);
     procedure MenuItemContextualAnimClick(Sender: TObject);
     procedure MenuItemTargetingStudioClick(Sender: TObject);
+    procedure MenuItemMutableStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2755,6 +2757,11 @@ begin
   MenuItemTargetingStudio.Caption := 'Targeting System Preset Lock-On & Aim-Assist Studio...';
   MenuItemTargetingStudio.OnClick := @MenuItemTargetingStudioClick;
   MenuItemDesign.Add(MenuItemTargetingStudio);
+
+  MenuItemMutableStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemMutableStudio.Caption := 'Mutable Modular Character Customizer Studio...';
+  MenuItemMutableStudio.OnClick := @MenuItemMutableStudioClick;
+  MenuItemDesign.Add(MenuItemMutableStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6169,6 +6176,12 @@ procedure TProjectForm.MenuItemTargetingStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowTargetingStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemMutableStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMutableStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

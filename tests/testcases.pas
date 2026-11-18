@@ -186,6 +186,7 @@ uses
   TestToolSurfaceGi,
   TestToolContextualAnim,
   TestToolTargetingStudio,
+  TestToolMutableStudio,
   TestCastleVulkanRHI;
 
 implementation

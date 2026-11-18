@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–359** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–360** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4363,6 +4363,29 @@ NextTarget := Targeting.SwitchLockedTargetHorizontal(1.0, Vector3(0, 1.25, 0), V
 
 ---
 
+## 66CG. Mutable-Style Modular Character Customizer, Morphs & Recipe Studio (Phase 360)
+
+Castle Game Engine provides a modular RPG character customizer with closed-helm hair anti-clipping exclusion, parametric stature/shoulder/build morphs, single-draw-call merged geometry, and compact `MUT1:...` recipe codes matching Unreal Engine 6.0+'s Mutable (`UCustomizableObject`) workflows:
+
+1. **Mutable Character Runtime (`src/scene/castlemutablecharacter.pas`)**:
+   - `TCastleMutableCharacter` merges modular equipment & hair slots into a single `csTransient` draw call (`RebuildMergedCharacterMesh`), enforces closed-helm hair hiding (`IsHairAutoHiddenByHelm`), scales parametric body morphs (`HeightScale`, `ShoulderBulkMorph`, `BuildMuscularityMorph`), and exports/imports compact recipe codes (`ExportRecipeCode`, `ImportRecipeCode`).
+2. **Mutable Studio (`TMutableStudioForm` & `TMutableStudioHelper`)**:
+   - Open via the top-bar **`Mutable`** button, Hierarchy context menu, or **`Design -> Mutable Modular Character Customizer Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TMutableStudioHelper.SpawnMutableTurntablePedestal(Viewport, DesignOwner, Hero);
+Code := Hero.ExportRecipeCode;
+Hero.ImportRecipeCode(Code);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Viewports & Scenes](https://castle-engine.io/viewport_and_scenes) · [UE Mutable Character Customization](https://dev.epicgames.com/documentation/en-us/unreal-engine/mutable-overview-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Characters, Skins & Modular Equipment (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Character Viewport](https://castle-engine.io/images/thumb_const_height_size/dragon_spine_game_view.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4510,4 +4533,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolsurfacegi.pas`](../tests/code/testcases/testtoolsurfacegi.pas) (`TTestToolSurfaceGi` — 2 tests)**: Verifies `WorldRay` sky-occlusion shadowing beneath an indoor bunker roof vs. open courtyard sky, Cornell Red West Wall (`-X`) vs. Blue East Wall (`+X`) directional `L0+L1` SH2 color bleeding (`SampleIrradianceAtWorld`), `BounceIntensity` gain scaling, `sgpIndoorOutdoorCourtyard` (`50` probes), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcontextualanim.pas`](../tests/code/testcases/testtoolcontextualanim.pas) (`TTestToolContextualAnim` — 2 tests)**: Verifies front-approach rejection on rear stealth takedowns (`APPROACH_ANGLE_MISMATCH`), `WorldRay` waist-height wall-collision rejection (`OBSTACLE_BLOCKS_DOCK_SLOT`), exact `(0, 0, +1.05)` Hermite warp alignment & contact sync window, `capCoOpWallBoostLift` `+2.10m` vertical partner lift, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltargetingstudio.pas`](../tests/code/testcases/testtooltargetingstudio.pas) (`TTestToolTargetingStudio` — 2 tests)**: Verifies `tpkMeleeSoulsHardLockOn` high-threat Boss lock-on (`EnemyWarlordBoss`), `WorldRay` cover-wall rejection (`BLOCKED_LINE_OF_SIGHT`), Left/Right horizontal stick-flick switching (`EnemyGruntLeft` / `EnemySniperRight`), `tpkHealerFriendlyLowestHp` critical-HP friendly triage (`18% HP`), aim-assist magnetism pull, and JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmutablestudio.pas`](../tests/code/testcases/testtoolmutablestudio.pas) (`TTestToolMutableStudio` — 2 tests)**: Verifies closed-greathelm automatic hair hiding (`IsHairAutoHiddenByHelm`) vs. open-circlet hair inclusion (`+1` merged part / `+12` tris), `ShoulderBulkMorph` & `HeightScale` stature scaling, lossless `MUT1:...` compact recipe export/import, seeded randomization determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 
