@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="187">
+    <Units Count="189">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1017,6 +1017,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSurfaceGiStudio"/>
       </Unit186>
+      <Unit187>
+        <Filename Value="../common-code/toolcontextualanim.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolContextualAnim"/>
+      </Unit187>
+      <Unit188>
+        <Filename Value="code/formcontextualanim.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormContextualAnim"/>
+      </Unit188>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

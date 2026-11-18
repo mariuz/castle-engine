@@ -184,6 +184,7 @@ uses
   TestToolMassTraffic,
   TestToolLiveCookAuditor,
   TestToolSurfaceGi,
+  TestToolContextualAnim,
   TestCastleVulkanRHI;
 
 implementation

@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–357** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–358** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4317,6 +4317,29 @@ Irrad := GiGrid.SampleIrradianceAtWorld(Vector3(-3.2, 1.2, 1.5), Vector3(-1, 0, 
 
 ---
 
+## 66CE. Contextual Paired Animation, Docking & Wall-Safe Clearance Studio (Phase 358)
+
+Castle Game Engine provides a 2-actor contextual animation synchronizer for stealth rear takedowns, front parry finishers, co-op wall boosts, and dual-key interactions matching Unreal Engine 6.0+'s `UContextualAnimSceneAsset` workflows:
+
+1. **Contextual Paired Anim Runtime (`src/scene/castlecontextualanim.pas`)**:
+   - `TCastleContextualAnimScene` evaluates distance + approach-cone + `WorldRay` waist-height obstacle clearance (`EvaluateDockingEligibility`), warps the instigator into exact relative dock pose (`BeginSynchronizedScene`, `StepSynchronizedScene`), and tracks shared IK contact sockets.
+2. **Contextual Anim Studio (`TContextualAnimForm` & `TContextualAnimHelper`)**:
+   - Open via the top-bar **`CtxAnim`** button, Hierarchy context menu, or **`Design -> Contextual Paired Animation & Docking Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TContextualAnimHelper.SpawnContextualPairedDojo(Viewport, DesignOwner, CtxScene, Hero, Guard, Wall);
+if CtxScene.BeginSynchronizedScene(Hero, Guard, Viewport.Items) then
+  Pose := CtxScene.StepSynchronizedScene(0.20);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE Contextual Animation](https://dev.epicgames.com/documentation/en-us/unreal-engine/contextual-animation-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Character Animation, Motion & Gameplay (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Character Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4462,4 +4485,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolmasstraffic.pas`](../tests/code/testcases/testtoolmasstraffic.pas) (`TTestToolMassTraffic` — 2 tests)**: Verifies conflict-free NEMA 4-way signal interlocks (`SignalConflictCount = 0`), East-West red-light stop-line queue braking upstream of `51.0m` while North-South flows on Green, `RearEndOverlapCount = 0` across `24` and `40` Rush-Hour vehicles over multi-stage phase cycles, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoollivecookauditor.pas`](../tests/code/testcases/testtoollivecookauditor.pas) (`TTestToolLiveCookAuditor` — 2 tests)**: Verifies `TLiveCodingCookBroker.CaptureLiveRttiSnapshot` & `RehydrateLiveRttiSnapshot` restoring scrambled vector/string/scalar properties + `CoreRedirect`-style `'LegacyCruiseSpeed' -> 'DesiredSpeedMps'` field-alias migration, `AuditPackageCookReadiness` blocking traversal-unsafe URLs & empty `TCastleChooserTable` matrices and reaching `100/100` upon remediation, the unified **76-Studio Hub** Horizon 2–9 catalog, and the 17th MCP tool `cge_audit_package_cook` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsurfacegi.pas`](../tests/code/testcases/testtoolsurfacegi.pas) (`TTestToolSurfaceGi` — 2 tests)**: Verifies `WorldRay` sky-occlusion shadowing beneath an indoor bunker roof vs. open courtyard sky, Cornell Red West Wall (`-X`) vs. Blue East Wall (`+X`) directional `L0+L1` SH2 color bleeding (`SampleIrradianceAtWorld`), `BounceIntensity` gain scaling, `sgpIndoorOutdoorCourtyard` (`50` probes), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcontextualanim.pas`](../tests/code/testcases/testtoolcontextualanim.pas) (`TTestToolContextualAnim` — 2 tests)**: Verifies front-approach rejection on rear stealth takedowns (`APPROACH_ANGLE_MISMATCH`), `WorldRay` waist-height wall-collision rejection (`OBSTACLE_BLOCKS_DOCK_SLOT`), exact `(0, 0, +1.05)` Hermite warp alignment & contact sync window, `capCoOpWallBoostLift` `+2.10m` vertical partner lift, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 
