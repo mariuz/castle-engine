@@ -664,6 +664,7 @@ type
       MenuItemGroomStudio: TMenuItem;
       MenuItemTraversalStudio: TMenuItem;
       MenuItemRvtStudio: TMenuItem;
+      MenuItemMoverStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -748,6 +749,7 @@ type
     procedure MenuItemGroomStudioClick(Sender: TObject);
     procedure MenuItemTraversalStudioClick(Sender: TObject);
     procedure MenuItemRvtStudioClick(Sender: TObject);
+    procedure MenuItemMoverStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2692,6 +2694,11 @@ begin
   MenuItemRvtStudio.Caption := 'Runtime Virtual Texture & Snow/Mud Trail Studio...';
   MenuItemRvtStudio.OnClick := @MenuItemRvtStudioClick;
   MenuItemDesign.Add(MenuItemRvtStudio);
+
+  MenuItemMoverStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemMoverStudio.Caption := 'Chaos Mover 2.0 Rollback Character Modes Studio...';
+  MenuItemMoverStudio.OnClick := @MenuItemMoverStudioClick;
+  MenuItemDesign.Add(MenuItemMoverStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6052,6 +6059,12 @@ procedure TProjectForm.MenuItemRvtStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowRvtStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemMoverStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMoverStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

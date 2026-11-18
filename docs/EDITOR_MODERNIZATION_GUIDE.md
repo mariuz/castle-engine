@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–350** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–351** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4158,6 +4158,29 @@ Rvt.StepThermalSnowfillRecovery(1.0);
 
 ---
 
+## 66BX. Chaos Mover 2.0 Rollback-Ready Character Modes Studio (Phase 351)
+
+Castle Game Engine provides a pure stateless `TMoverSyncState` character locomotion engine across 6 modes (`GroundWalk`, `AirFalling`, `CrouchSlide`, `WallRun`, `BuoyantSwim`, `GrappleZip`) backed by a 128-tick rollback ring buffer matching Unreal Engine 6.0+'s `UMoverComponent` workflows:
+
+1. **Mover 2.0 Runtime (`src/scene/castlemover2.pas`)**:
+   - `TCastleMoverBehavior` evaluates pure `EvaluateStep(InputCmd, PrevSyncState, Dt) -> NextSyncState`, records 128 ticks of `(InputCmd, BeforeState, AfterState)` history (`AdvanceTick`), and supports bit-exact netcode/replay rewind & resimulation (`RewindAndResimulateFromTick`).
+2. **Mover 2.0 Studio (`TMoverStudioForm` & `TMoverStudioHelper`)**:
+   - Open via the top-bar **`Mover2`** button, Hierarchy context menu, or **`Design -> Chaos Mover 2.0 Rollback Character Modes Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TMoverStudioHelper.SpawnMover2ArenaDemo(Viewport, DesignOwner, Actor, Mover);
+Mover.AdvanceTick(TMoverInputCmd.WalkForward(Vector3(0, 0, -1)), 1.0 / 60.0);
+Mover.RewindAndResimulateFromTick(5, JumpCmd, 1.0 / 60.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE Chaos Mover 2.0 (`UMoverComponent`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/mover-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Character Movement & Multiplayer Architecture (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Character Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4296,4 +4319,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolgroomstudio.pas`](../tests/code/testcases/testtoolgroomstudio.pas) (`TTestToolGroomStudio` — 2 tests)**: Verifies progressive `ClumpTightness` root-to-tip child strand convergence (`0.0` loose vs. `1.0` exact tip lock), lateral `+X` wind tip deflection with strict scalp-sphere anti-clipping clearance (`MinDistanceFromScalpCenter >= ScalpRadius`), `gspCurlyRinglets` / `gspWolfManeFur` card triangle counts, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltraversalstudio.pas`](../tests/code/testcases/testtooltraversalstudio.pas) (`TTestToolTraversalStudio` — 2 tests)**: Verifies all 5 parkour `WorldRay` classifications (`0.40m` Curb `takStepUp`, `1.05m x 0.45m` Fence `takThinVaultOver` onto far floor, `1.20m x 2.60m` Crate `takLowMantleOnto` onto top, `2.20m` Ledge `takHighLedgeClimb`, `3.80m` Tower `takBlockedSheerWall`), low-ceiling headroom rejection (`BlockedByLowCeiling`), Bezier root-motion warp execution, and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolrvtstudio.pas`](../tests/code/testcases/testtoolrvtstudio.pas) (`TTestToolRvtStudio` — 2 tests)**: Verifies strict LRU virtual-page hit/miss/eviction ordering (`Tile (0,0)` hit-refreshed so `Tile (1,0)` is evicted on 5th load into 4-slot cache), footprint bowl sinkage (`< -0.20m`) + displaced rim berms (`> +0.03m`), exponential snowfill recovery, 8-bit grayscale displacement heightmap export, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmoverstudio.pas`](../tests/code/testcases/testtoolmoverstudio.pas) (`TTestToolMoverStudio` — 2 tests)**: Verifies pure stateless Mover 2.0 locomotion across `mlmCrouchSlide` speed boost, `mlmWallRun` `0.20g` reduced-gravity glide, `mlmBuoyantSwim` Archimedes flotation, and `mlmGrappleZip` tower arrival/release, plus 128-tick rollback `RewindAndResimulateFromTick` (`0.0000m` identical replay parity & retroactive airborne jump divergence at `Tick 15`) and JSON roundtrips (`0 unfreed memory blocks`).
 

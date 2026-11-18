@@ -177,6 +177,7 @@ uses
   TestToolGroomStudio,
   TestToolTraversalStudio,
   TestToolRvtStudio,
+  TestToolMoverStudio,
   TestCastleVulkanRHI;
 
 implementation

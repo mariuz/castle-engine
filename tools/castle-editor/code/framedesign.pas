@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt, CastleMover2,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -866,6 +866,8 @@ type
       MenuTreeViewItemTraversalStudio: TMenuItem;
       ButtonRvtStudio: TSpeedButton;
       MenuTreeViewItemRvtStudio: TMenuItem;
+      ButtonMoverStudio: TSpeedButton;
+      MenuTreeViewItemMoverStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1429,6 +1431,8 @@ type
     procedure MenuTreeViewItemTraversalStudioClick(Sender: TObject);
     procedure ButtonRvtStudioClick(Sender: TObject);
     procedure MenuTreeViewItemRvtStudioClick(Sender: TObject);
+    procedure ButtonMoverStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemMoverStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2930,6 +2934,7 @@ type
     procedure ShowGroomStudioDialog;
     procedure ShowTraversalStudioDialog;
     procedure ShowRvtStudioDialog;
+    procedure ShowMoverStudioDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2951,7 +2956,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7941,6 +7946,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonRvtStudio,
       PanelMiddleTop.GetControlIndex(ButtonTraversalStudio) + 1);
 
+  ButtonMoverStudio := TSpeedButton.Create(Self);
+  ButtonMoverStudio.Caption := 'Mover2';
+  ButtonMoverStudio.Hint := 'Open Chaos Mover 2.0 Rollback Character Modes Studio.' + NL +
+    'Simulate Walk, Slide, WallRun, Swim & GrappleZip with 128-tick rollback rewind.';
+  ButtonMoverStudio.ShowHint := true;
+  ButtonMoverStudio.AutoSize := true;
+  ButtonMoverStudio.Constraints.MinHeight := 33;
+  ButtonMoverStudio.Constraints.MinWidth := 62;
+  ButtonMoverStudio.BorderSpacing.Left := 2;
+  ButtonMoverStudio.OnClick := @ButtonMoverStudioClick;
+  ButtonMoverStudio.Parent := PanelMiddleTop;
+  if ButtonRvtStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonMoverStudio,
+      PanelMiddleTop.GetControlIndex(ButtonRvtStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -11115,6 +11135,11 @@ begin
   MenuTreeViewItemRvtStudio.Caption := 'Runtime Virtual Texture && Snow/Mud Trail Studio...';
   MenuTreeViewItemRvtStudio.OnClick := @MenuTreeViewItemRvtStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemRvtStudio);
+
+  MenuTreeViewItemMoverStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemMoverStudio.Caption := 'Chaos Mover 2.0 Rollback Character Modes Studio...';
+  MenuTreeViewItemMoverStudio.OnClick := @MenuTreeViewItemMoverStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMoverStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -16475,6 +16500,8 @@ var
         Suffix := Suffix + ' ' + TCastleTraversalBehavior(NodeObj).TraversalSummaryBadge
       else if NodeObj is TCastleRuntimeVirtualTexture then
         Suffix := Suffix + ' ' + TCastleRuntimeVirtualTexture(NodeObj).RvtSummaryBadge
+      else if NodeObj is TCastleMoverBehavior then
+        Suffix := Suffix + ' ' + TCastleMoverBehavior(NodeObj).MoverSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -56739,6 +56766,7 @@ begin
   else if SameText(AStudioId, 'groom_studio') then ShowGroomStudioDialog
   else if SameText(AStudioId, 'traversal_studio') then ShowTraversalStudioDialog
   else if SameText(AStudioId, 'rvt_studio') then ShowRvtStudioDialog
+  else if SameText(AStudioId, 'mover_studio') then ShowMoverStudioDialog
   else
     Result := False;
 end;
@@ -57686,6 +57714,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemRvtStudioClick(Sender: TObject);
 begin
   ShowRvtStudioDialog;
+end;
+
+procedure TDesignFrame.ShowMoverStudioDialog;
+var
+  Dlg: TMoverStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TMoverStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonMoverStudioClick(Sender: TObject);
+begin
+  ShowMoverStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMoverStudioClick(Sender: TObject);
+begin
+  ShowMoverStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

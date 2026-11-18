@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="173">
+    <Units Count="175">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -947,6 +947,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormRvtStudio"/>
       </Unit172>
+      <Unit173>
+        <Filename Value="../common-code/toolmoverstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMoverStudio"/>
+      </Unit173>
+      <Unit174>
+        <Filename Value="code/formmoverstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMoverStudio"/>
+      </Unit174>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
