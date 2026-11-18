@@ -198,6 +198,7 @@ uses
   TestToolAeroFoil,
   TestToolCreviceClutter,
   TestToolCameraShake,
+  TestToolFireGrid2D,
   TestCastleVulkanRHI;
 
 implementation

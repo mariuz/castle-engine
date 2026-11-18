@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–371** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–372** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4635,6 +4635,28 @@ Offset := Director.StepCameraShakes(0.02);
 
 ---
 
+## 66CS. Niagara-Style Grid2D Cellular Fire Spread, Firebreak & Rain Studio (Phase 372)
+
+Castle Game Engine provides a 2D fuel/temperature/wetness cellular combustion grid with wind-driven directional flame advection, stone firebreak containment, charred ash burnout, and monsoon rain extinguishing matching Unreal Engine 6.0+'s Niagara `Grid2DCollection` workflows:
+
+1. **Grid2D Combustion Runtime (`src/scene/castlefiregrid2d.pas`)**:
+   - `TCastleFireSpreadGrid` steps double-buffered 8-neighbor heat transfer (`StepCombustion`), accelerating downwind propagation along `WindDirectionDeg` / `WindSpeedMps`, blocking fire across `fcsNonFlammableStone` trenches (`PaintStoneFirebreakColumn`), and extinguishing flames via `RainIntensity` or `DouseWaterSplash`.
+2. **Grid2D Fire Studio (`TFireGrid2DForm` & `TFireGrid2DHelper`)**:
+   - Open via the top-bar **`Fire2D`** button, Hierarchy context menu, or **`Design -> Niagara Grid2D Cellular Fire Spread Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TFireGrid2DHelper.SpawnPrairieFireGridDemo(Viewport, DesignOwner, Grid);
+Grid.StepCombustion(0.25);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Shaders & VFX](https://castle-engine.io/shaders) · [UE Niagara Grid2D Simulation Stages](https://dev.epicgames.com/documentation/en-us/unreal-engine/simulation-stages-in-niagara-for-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Real-Time VFX, Shaders & Simulation (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Fire & Environment Viewport](https://castle-engine.io/images/thumb_const_height_size/mountains_of_fire_screen_1.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4794,4 +4816,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolaerofoil.pas`](../tests/code/testcases/testtoolaerofoil.pas) (`TTestToolAeroFoil` — 2 tests)**: Verifies Prandtl high-aspect soaring glide (`L/D > 14.0` at `8°`) vs. `28°` post-stall flow separation (`CL` drop `< 70%` of peak & `> 4x` separated form drag surge), `+4.0 m/s` thermal updraft altitude climb above launch height vs. calm-air descent, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcreviceclutter.pas`](../tests/code/testcases/testtoolcreviceclutter.pas) (`TTestToolCreviceClutter` — 2 tests)**: Verifies 8-compass `WorldRay` wall-seam accumulation (`> 12` items), multi-wall concave L-corner detection (`WallHitDirs >= 4`), `0` stray clutter in the open South-East courtyard, seeded determinism, `2.10m` vs. `1.20m` skirt scaling, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcamerashake.pas`](../tests/code/testcases/testtoolcamerashake.pas) (`TTestToolCameraShake` — 2 tests)**: Verifies C1 Hermite explosion distance falloff (`0.0` at `40m > 28m`, `0.50` at `16m`, `1.00` at `2m`), directional shotgun pitch/FOV recoil kick (`+3.5°` pitch & `+3.0°` FOV) and decay to zero rest, `8`-blast `MaxPitchRollCapDeg` clamping, `GlobalShakeScale = 0.0` motion-sickness suppression, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolfiregrid2d.pas`](../tests/code/testcases/testtoolfiregrid2d.pas) (`TTestToolFireGrid2D` — 2 tests)**: Verifies `+X` downwind flame-front acceleration (`> 2x` burned area vs. upwind `-X`), origin fuel exhaustion to `fcsCharredAsh`, `100%` containment across a non-flammable `IX = 9` stone firebreak trench, `DouseWaterSplash` + monsoon `RainIntensity = 1.0` extinguishing, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

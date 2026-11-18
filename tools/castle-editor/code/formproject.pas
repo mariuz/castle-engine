@@ -685,6 +685,7 @@ type
       MenuItemAeroFoil: TMenuItem;
       MenuItemCreviceClutter: TMenuItem;
       MenuItemCameraShake: TMenuItem;
+      MenuItemFireGrid2D: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -790,6 +791,7 @@ type
     procedure MenuItemAeroFoilClick(Sender: TObject);
     procedure MenuItemCreviceClutterClick(Sender: TObject);
     procedure MenuItemCameraShakeClick(Sender: TObject);
+    procedure MenuItemFireGrid2DClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2839,6 +2841,11 @@ begin
   MenuItemCameraShake.Caption := 'Cinematic Camera Shake, Recoil & FOV Kick Studio...';
   MenuItemCameraShake.OnClick := @MenuItemCameraShakeClick;
   MenuItemDesign.Add(MenuItemCameraShake);
+
+  MenuItemFireGrid2D := TMenuItem.Create(MenuItemDesign);
+  MenuItemFireGrid2D.Caption := 'Niagara Grid2D Cellular Fire Spread Studio...';
+  MenuItemFireGrid2D.OnClick := @MenuItemFireGrid2DClick;
+  MenuItemDesign.Add(MenuItemFireGrid2D);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6325,6 +6332,12 @@ procedure TProjectForm.MenuItemCameraShakeClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCameraShakeDialog;
+end;
+
+procedure TProjectForm.MenuItemFireGrid2DClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowFireGrid2DDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

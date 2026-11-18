@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="215">
+    <Units Count="217">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1157,6 +1157,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormCameraShake"/>
       </Unit214>
+      <Unit215>
+        <Filename Value="../common-code/toolfiregrid2d.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFireGrid2D"/>
+      </Unit215>
+      <Unit216>
+        <Filename Value="code/formfiregrid2d.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFireGrid2D"/>
+      </Unit216>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
