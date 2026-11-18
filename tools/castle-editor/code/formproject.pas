@@ -676,6 +676,7 @@ type
       MenuItemMutableStudio: TMenuItem;
       MenuItemRiverStudio: TMenuItem;
       MenuItemOccluderFader: TMenuItem;
+      MenuItemGameplayDebugger: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -772,6 +773,7 @@ type
     procedure MenuItemMutableStudioClick(Sender: TObject);
     procedure MenuItemRiverStudioClick(Sender: TObject);
     procedure MenuItemOccluderFaderClick(Sender: TObject);
+    procedure MenuItemGameplayDebuggerClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2776,6 +2778,11 @@ begin
   MenuItemOccluderFader.Caption := 'Smart Camera Occluder Cutaway & Foliage Parting Studio...';
   MenuItemOccluderFader.OnClick := @MenuItemOccluderFaderClick;
   MenuItemDesign.Add(MenuItemOccluderFader);
+
+  MenuItemGameplayDebugger := TMenuItem.Create(MenuItemDesign);
+  MenuItemGameplayDebugger.Caption := 'GameplayDebugger Live 3D HUD & Hotkey Channels Studio...';
+  MenuItemGameplayDebugger.OnClick := @MenuItemGameplayDebuggerClick;
+  MenuItemDesign.Add(MenuItemGameplayDebugger);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6208,6 +6215,12 @@ procedure TProjectForm.MenuItemOccluderFaderClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowOccluderFaderDialog;
+end;
+
+procedure TProjectForm.MenuItemGameplayDebuggerClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowGameplayDebuggerDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

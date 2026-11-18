@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–362** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–363** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4430,6 +4430,29 @@ Fader.StepOccluderAndFoliage(Viewport.Items, Vector3(0, 2.5, 10), Hero.Translati
 
 ---
 
+## 66CJ. GameplayDebugger Live 3D HUD Overlay & Hotkey Channels Studio (Phase 363)
+
+Castle Game Engine provides a unified multi-subsystem 3D HUD overlay and world-space diagnostic beacon inspector across Numpad `0..5` bitmask channels matching Unreal Engine 6.0+'s `AGameplayDebugger` workflows:
+
+1. **GameplayDebugger Runtime (`src/scene/castlegameplaydebugger.pas`)**:
+   - `TCastleGameplayDebugger` aggregates live AI StateTree paths, Targeting lock-on reticles, GAS attributes/tags, Mover 2.0 locomotion velocity/ticks, MassTraffic intersections, and Surface GI SH2 irradiance probes (`CollectSnapshotFromWorld`), toggled per-category via `ToggleChannelByNumpadKey(0..5)` and exportable via `ExportDiagnosticSnapshotJson`.
+2. **GameplayDebugger Studio (`TGameplayDebuggerForm` & `TGameplayDebuggerHelper`)**:
+   - Open via the top-bar **`GDebug`** button, Hierarchy context menu, or **`Design -> GameplayDebugger Live 3D HUD & Hotkey Channels Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TGameplayDebuggerHelper.SpawnMultiSubsystemDebugSandbox(Viewport, DesignOwner, Debugger, Hero);
+Debugger.ToggleChannelByNumpadKey(4); // Toggle [4] MassTraffic channel
+Debugger.CollectSnapshotFromWorld(Viewport.Items);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Optimization & Profiling](https://castle-engine.io/optimization) · [UE Gameplay Debugger (`AGameplayDebugger`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/using-the-gameplay-debugger-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Debugging, Optimization & Gameplay Systems (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Debug Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4580,4 +4603,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolmutablestudio.pas`](../tests/code/testcases/testtoolmutablestudio.pas) (`TTestToolMutableStudio` — 2 tests)**: Verifies closed-greathelm automatic hair hiding (`IsHairAutoHiddenByHelm`) vs. open-circlet hair inclusion (`+1` merged part / `+12` tris), `ShoulderBulkMorph` & `HeightScale` stature scaling, lossless `MUT1:...` compact recipe export/import, seeded randomization determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolriverstudio.pas`](../tests/code/testcases/testtoolriverstudio.pas) (`TTestToolRiverStudio` — 2 tests)**: Verifies $Q = A \cdot v$ continuity flow acceleration (`> 3x` faster in the `2.2m` gorge than the `9.0m` headwater & `10.0m` outflow basin) with whitewater foam generation, kayak downstream advection & elevation descent, steep waterfall `SlopeSin` foam boost, out-of-bank dry-land rejection, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooloccluderfader.pas`](../tests/code/testcases/testtooloccluderfader.pas) (`TTestToolOccluderFader` — 2 tests)**: Verifies camera-to-target `WorldRay` wall cutaway fade (`CastleFrontWallOccluder -> 18%` alpha) with non-blocking side-pillar & hero isolation plus full `100%` opacity recovery on clear overhead sightlines, exact `1.35m` length-preserving radial grass parting (`> 35°` near bend vs. `0°` far stillness), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolgameplaydebugger.pas`](../tests/code/testcases/testtoolgameplaydebugger.pas) (`TTestToolGameplayDebugger` — 2 tests)**: Verifies 6-channel live multi-subsystem HUD & 3D marker aggregation across AI StateTree, Targeting Lock-On (`DebugBossTarget`), GAS (`Class.Paladin`), Mover 2.0, MassTraffic, and Surface GI, per-category `ToggleChannelByNumpadKey(0..5)` bitmask filtering, zero-overhead `OverlayActive = False` teardown, `ExportDiagnosticSnapshotJson`, and JSON roundtrips (`0 unfreed memory blocks`).
 

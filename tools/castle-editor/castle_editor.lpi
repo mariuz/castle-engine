@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="197">
+    <Units Count="199">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1067,6 +1067,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormOccluderFader"/>
       </Unit196>
+      <Unit197>
+        <Filename Value="../common-code/toolgameplaydebugger.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGameplayDebugger"/>
+      </Unit197>
+      <Unit198>
+        <Filename Value="code/formgameplaydebugger.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGameplayDebugger"/>
+      </Unit198>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
