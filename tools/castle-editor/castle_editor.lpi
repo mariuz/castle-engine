@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="211">
+    <Units Count="213">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1137,6 +1137,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormAeroFoil"/>
       </Unit210>
+      <Unit211>
+        <Filename Value="../common-code/toolcreviceclutter.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCreviceClutter"/>
+      </Unit211>
+      <Unit212>
+        <Filename Value="code/formcreviceclutter.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCreviceClutter"/>
+      </Unit212>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

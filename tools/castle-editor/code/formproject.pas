@@ -683,6 +683,7 @@ type
       MenuItemSubstrateStudio: TMenuItem;
       MenuItemSmartObjectSlots: TMenuItem;
       MenuItemAeroFoil: TMenuItem;
+      MenuItemCreviceClutter: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -786,6 +787,7 @@ type
     procedure MenuItemSubstrateStudioClick(Sender: TObject);
     procedure MenuItemSmartObjectSlotsClick(Sender: TObject);
     procedure MenuItemAeroFoilClick(Sender: TObject);
+    procedure MenuItemCreviceClutterClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2825,6 +2827,11 @@ begin
   MenuItemAeroFoil.Caption := 'Aerodynamic Wing/Sail Lift-Drag & Stall Studio...';
   MenuItemAeroFoil.OnClick := @MenuItemAeroFoilClick;
   MenuItemDesign.Add(MenuItemAeroFoil);
+
+  MenuItemCreviceClutter := TMenuItem.Create(MenuItemDesign);
+  MenuItemCreviceClutter.Caption := 'Wall-Crevice & Seam Micro-Clutter Studio...';
+  MenuItemCreviceClutter.OnClick := @MenuItemCreviceClutterClick;
+  MenuItemDesign.Add(MenuItemCreviceClutter);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6299,6 +6306,12 @@ procedure TProjectForm.MenuItemAeroFoilClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowAeroFoilDialog;
+end;
+
+procedure TProjectForm.MenuItemCreviceClutterClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCreviceClutterDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
