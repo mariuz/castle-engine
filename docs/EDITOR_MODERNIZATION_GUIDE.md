@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–351** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–352** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4181,6 +4181,29 @@ Mover.RewindAndResimulateFromTick(5, JumpCmd, 1.0 / 60.0);
 
 ---
 
+## 66BY. Camera Rig Rail Auto-Dolly, Deadzone Framing & Co-Op Director Studio (Phase 352)
+
+Castle Game Engine provides Catmull-Rom open/closed camera rails with closest-point auto-dolly projection, velocity look-ahead, screen-plane deadzone framing, and 2-player co-op FOV widening & split/merge hysteresis matching Unreal Engine 6.0+'s `ACameraRig_Rail` workflows:
+
+1. **Camera Rig Rail Runtime (`src/scene/castlecamerarigrail.pas`)**:
+   - `TCastleCameraRigRail` solves `FindClosestRailParam` (`64` coarse samples + `14` ternary refinements), predicts velocity lead (`LookAheadTimeSec`), clamps micro-jitter inside `DeadzoneHalfWidthMeters` x `DeadzoneHalfHeightMeters`, and manages hysteretic 2-player split-screen transitions (`SplitDistanceMeters` / `MergeDistanceMeters`).
+2. **Camera Rail Studio (`TCameraRailForm` & `TCameraRailHelper`)**:
+   - Open via the top-bar **`CamRail`** button, Hierarchy context menu, or **`Design -> Camera Rig Rail Auto-Dolly & Co-Op Framing Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TCameraRailHelper.SpawnCameraRailDemoArena(Viewport, DesignOwner, Rail, Player1, Player2);
+Res := Rail.EvaluateAndStepRig(Player1.WorldTranslation, Vector3(6, 0, 0),
+  Player2.WorldTranslation, True, 1.0 / 60.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Viewports & Cameras](https://castle-engine.io/viewport_and_scenes) · [UE Camera Rig Rail](https://dev.epicgames.com/documentation/en-us/unreal-engine/cinematic-camera-rig-rail-actors-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Cameras, Viewports & 3D Cinematics (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Camera Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4320,4 +4343,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtooltraversalstudio.pas`](../tests/code/testcases/testtooltraversalstudio.pas) (`TTestToolTraversalStudio` — 2 tests)**: Verifies all 5 parkour `WorldRay` classifications (`0.40m` Curb `takStepUp`, `1.05m x 0.45m` Fence `takThinVaultOver` onto far floor, `1.20m x 2.60m` Crate `takLowMantleOnto` onto top, `2.20m` Ledge `takHighLedgeClimb`, `3.80m` Tower `takBlockedSheerWall`), low-ceiling headroom rejection (`BlockedByLowCeiling`), Bezier root-motion warp execution, and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolrvtstudio.pas`](../tests/code/testcases/testtoolrvtstudio.pas) (`TTestToolRvtStudio` — 2 tests)**: Verifies strict LRU virtual-page hit/miss/eviction ordering (`Tile (0,0)` hit-refreshed so `Tile (1,0)` is evicted on 5th load into 4-slot cache), footprint bowl sinkage (`< -0.20m`) + displaced rim berms (`> +0.03m`), exponential snowfill recovery, 8-bit grayscale displacement heightmap export, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmoverstudio.pas`](../tests/code/testcases/testtoolmoverstudio.pas) (`TTestToolMoverStudio` — 2 tests)**: Verifies pure stateless Mover 2.0 locomotion across `mlmCrouchSlide` speed boost, `mlmWallRun` `0.20g` reduced-gravity glide, `mlmBuoyantSwim` Archimedes flotation, and `mlmGrappleZip` tower arrival/release, plus 128-tick rollback `RewindAndResimulateFromTick` (`0.0000m` identical replay parity & retroactive airborne jump divergence at `Tick 15`) and JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcamerarail.pas`](../tests/code/testcases/testtoolcamerarail.pas) (`TTestToolCameraRail` — 2 tests)**: Verifies `FindClosestRailParam` auto-dolly projection, `+6.0 m/s` velocity look-ahead (`+2.40m` lead), rock-steady inner-deadzone stillness (`< 0.001m` aim drift on `+0.35m` nudge), 2-player co-op dynamic FOV widening (`> 70°` pre-split) & hysteretic `[10m..14m]` split/merge anti-flicker gating, closed orbital ring projection, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

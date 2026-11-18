@@ -665,6 +665,7 @@ type
       MenuItemTraversalStudio: TMenuItem;
       MenuItemRvtStudio: TMenuItem;
       MenuItemMoverStudio: TMenuItem;
+      MenuItemCameraRail: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -750,6 +751,7 @@ type
     procedure MenuItemTraversalStudioClick(Sender: TObject);
     procedure MenuItemRvtStudioClick(Sender: TObject);
     procedure MenuItemMoverStudioClick(Sender: TObject);
+    procedure MenuItemCameraRailClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2699,6 +2701,11 @@ begin
   MenuItemMoverStudio.Caption := 'Chaos Mover 2.0 Rollback Character Modes Studio...';
   MenuItemMoverStudio.OnClick := @MenuItemMoverStudioClick;
   MenuItemDesign.Add(MenuItemMoverStudio);
+
+  MenuItemCameraRail := TMenuItem.Create(MenuItemDesign);
+  MenuItemCameraRail.Caption := 'Camera Rig Rail Auto-Dolly & Co-Op Framing Studio...';
+  MenuItemCameraRail.OnClick := @MenuItemCameraRailClick;
+  MenuItemDesign.Add(MenuItemCameraRail);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6065,6 +6072,12 @@ procedure TProjectForm.MenuItemMoverStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMoverStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemCameraRailClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCameraRailDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

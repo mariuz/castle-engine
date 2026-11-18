@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="175">
+    <Units Count="177">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -957,6 +957,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMoverStudio"/>
       </Unit174>
+      <Unit175>
+        <Filename Value="../common-code/toolcamerarail.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCameraRail"/>
+      </Unit175>
+      <Unit176>
+        <Filename Value="code/formcamerarail.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCameraRail"/>
+      </Unit176>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

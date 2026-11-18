@@ -178,6 +178,7 @@ uses
   TestToolTraversalStudio,
   TestToolRvtStudio,
   TestToolMoverStudio,
+  TestToolCameraRail,
   TestCastleVulkanRHI;
 
 implementation
