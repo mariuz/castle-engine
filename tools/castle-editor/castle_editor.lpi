@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="179">
+    <Units Count="181">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -977,6 +977,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMeshletStudio"/>
       </Unit178>
+      <Unit179>
+        <Filename Value="../common-code/tooltetsoftbody.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTetSoftBody"/>
+      </Unit179>
+      <Unit180>
+        <Filename Value="code/formtetsoftbody.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTetSoftBody"/>
+      </Unit180>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

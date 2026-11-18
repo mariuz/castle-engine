@@ -667,6 +667,7 @@ type
       MenuItemMoverStudio: TMenuItem;
       MenuItemCameraRail: TMenuItem;
       MenuItemMeshletStudio: TMenuItem;
+      MenuItemTetSoftBody: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -754,6 +755,7 @@ type
     procedure MenuItemMoverStudioClick(Sender: TObject);
     procedure MenuItemCameraRailClick(Sender: TObject);
     procedure MenuItemMeshletStudioClick(Sender: TObject);
+    procedure MenuItemTetSoftBodyClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2713,6 +2715,11 @@ begin
   MenuItemMeshletStudio.Caption := 'Nanite Meshlet Cluster & Normal-Cone Culler Studio...';
   MenuItemMeshletStudio.OnClick := @MenuItemMeshletStudioClick;
   MenuItemDesign.Add(MenuItemMeshletStudio);
+
+  MenuItemTetSoftBody := TMenuItem.Create(MenuItemDesign);
+  MenuItemTetSoftBody.Caption := 'Chaos Flesh Tetrahedral Volume-XPBD Soft-Body Studio...';
+  MenuItemTetSoftBody.OnClick := @MenuItemTetSoftBodyClick;
+  MenuItemDesign.Add(MenuItemTetSoftBody);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6091,6 +6098,12 @@ procedure TProjectForm.MenuItemMeshletStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMeshletStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemTetSoftBodyClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowTetSoftBodyDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

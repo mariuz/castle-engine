@@ -180,6 +180,7 @@ uses
   TestToolMoverStudio,
   TestToolCameraRail,
   TestToolMeshletStudio,
+  TestToolTetSoftBody,
   TestCastleVulkanRHI;
 
 implementation

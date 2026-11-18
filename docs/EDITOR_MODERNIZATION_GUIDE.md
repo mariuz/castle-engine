@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–353** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–354** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4226,6 +4226,29 @@ Stats := Clusterer.EvaluateViewMeshletCulling(Vector3(0, 0, 12.0), 1080, 60.0);
 
 ---
 
+## 66CA. Chaos Flesh Tetrahedral Volume-Preserving XPBD Soft-Body Studio (Phase 354)
+
+Castle Game Engine provides 3D alternating 5-tet-per-cell volumetric soft-body lattices solved with substepped Gauss-Seidel XPBD edge compliance and exact analytical signed-volume $6V$ constraints (`0` tetrahedral inversions under heavy impacts) matching Unreal Engine 6.0+'s Chaos Flesh (`UDeformableTetrahedralComponent`) workflows:
+
+1. **Tetrahedral XPBD Runtime (`src/scene/castletetsoftbody.pas`)**:
+   - `TCastleTetSoftBody` builds conformal 5-tetrahedra-per-cell lattices (`3x3x3 -> 135` tets), projects exact analytical signed-volume $6V$ gradients (`StepSimulation`), supports radial impact impulses (`ApplyRadialImpactImpulse`) and top-face tendon pinning (`PinTopFace`), and renders strain-shaded `csTransient` boundary meshes.
+2. **Chaos Flesh Studio (`TTetSoftBodyForm` & `TTetSoftBodyHelper`)**:
+   - Open via the top-bar **`TetFlesh`** button, Hierarchy context menu, or **`Design -> Chaos Flesh Tetrahedral Volume-XPBD Soft-Body Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TTetSoftBodyHelper.SpawnTetSoftBodyArena(Viewport, DesignOwner, Body);
+Body.StepSimulation(1.0 / 60.0);
+Body.ApplyRadialImpactImpulse(Vector3(0, 2.0, 0), 1.8, Vector3(0, -14.0, 0));
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Physics](https://castle-engine.io/physics) · [UE Chaos Flesh Simulation](https://dev.epicgames.com/documentation/en-us/unreal-engine/flesh-simulation-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Real-Time 3D Physics & Deformable Meshes (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Physics Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4367,4 +4390,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolmoverstudio.pas`](../tests/code/testcases/testtoolmoverstudio.pas) (`TTestToolMoverStudio` — 2 tests)**: Verifies pure stateless Mover 2.0 locomotion across `mlmCrouchSlide` speed boost, `mlmWallRun` `0.20g` reduced-gravity glide, `mlmBuoyantSwim` Archimedes flotation, and `mlmGrappleZip` tower arrival/release, plus 128-tick rollback `RewindAndResimulateFromTick` (`0.0000m` identical replay parity & retroactive airborne jump divergence at `Tick 15`) and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcamerarail.pas`](../tests/code/testcases/testtoolcamerarail.pas) (`TTestToolCameraRail` — 2 tests)**: Verifies `FindClosestRailParam` auto-dolly projection, `+6.0 m/s` velocity look-ahead (`+2.40m` lead), rock-steady inner-deadzone stillness (`< 0.001m` aim drift on `+0.35m` nudge), 2-player co-op dynamic FOV widening (`> 70°` pre-split) & hysteretic `[10m..14m]` split/merge anti-flicker gating, closed orbital ring projection, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmeshletstudio.pas`](../tests/code/testcases/testtoolmeshletstudio.pas) (`TTestToolMeshletStudio` — 2 tests)**: Verifies lossless `1,536`-triangle UV sphere partitioning into `<= 64v / <= 124t` spatial meshlets, exact perspective normal-cone backface cluster rejection on far-hemisphere (`-Z`) clusters with zero false-positive front-hemisphere (`+Z`) culls, screen-space pixel-error `LOD 0` vs. `LOD 2` selection, `mspTwistedTorusRing`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooltetsoftbody.pas`](../tests/code/testcases/testtooltetsoftbody.pas) (`TTestToolTetSoftBody` — 2 tests)**: Verifies `3x3x3 -> 135` positively oriented tetrahedra (`8.000 m^3` rest volume), `InvertedTetCount = 0` + `[88%..112%]` volume preservation under floor drop & `-14 m/s` radial hammer slam, top-pinned hanging tendon elastic stretch (`tsbpHangingFleshPillar`), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

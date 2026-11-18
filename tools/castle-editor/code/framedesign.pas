@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt, CastleMover2, CastleCameraRigRail, CastleMeshletCluster,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt, CastleMover2, CastleCameraRigRail, CastleMeshletCluster, CastleTetSoftBody,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -872,6 +872,8 @@ type
       MenuTreeViewItemCameraRail: TMenuItem;
       ButtonMeshletStudio: TSpeedButton;
       MenuTreeViewItemMeshletStudio: TMenuItem;
+      ButtonTetSoftBody: TSpeedButton;
+      MenuTreeViewItemTetSoftBody: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1441,6 +1443,8 @@ type
     procedure MenuTreeViewItemCameraRailClick(Sender: TObject);
     procedure ButtonMeshletStudioClick(Sender: TObject);
     procedure MenuTreeViewItemMeshletStudioClick(Sender: TObject);
+    procedure ButtonTetSoftBodyClick(Sender: TObject);
+    procedure MenuTreeViewItemTetSoftBodyClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2945,6 +2949,7 @@ type
     procedure ShowMoverStudioDialog;
     procedure ShowCameraRailDialog;
     procedure ShowMeshletStudioDialog;
+    procedure ShowTetSoftBodyDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2966,7 +2971,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -8001,6 +8006,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonMeshletStudio,
       PanelMiddleTop.GetControlIndex(ButtonCameraRail) + 1);
 
+  ButtonTetSoftBody := TSpeedButton.Create(Self);
+  ButtonTetSoftBody.Caption := 'TetFlesh';
+  ButtonTetSoftBody.Hint := 'Open Chaos Flesh Tetrahedral Volume-Preserving XPBD Soft-Body Studio.' + NL +
+    'Simulate 5-tet-per-cell 3D deformable bodies with exact signed-volume 6V constraints.';
+  ButtonTetSoftBody.ShowHint := true;
+  ButtonTetSoftBody.AutoSize := true;
+  ButtonTetSoftBody.Constraints.MinHeight := 33;
+  ButtonTetSoftBody.Constraints.MinWidth := 62;
+  ButtonTetSoftBody.BorderSpacing.Left := 2;
+  ButtonTetSoftBody.OnClick := @ButtonTetSoftBodyClick;
+  ButtonTetSoftBody.Parent := PanelMiddleTop;
+  if ButtonMeshletStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonTetSoftBody,
+      PanelMiddleTop.GetControlIndex(ButtonMeshletStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -11190,6 +11210,11 @@ begin
   MenuTreeViewItemMeshletStudio.Caption := 'Nanite Meshlet Cluster & Normal-Cone Culler Studio...';
   MenuTreeViewItemMeshletStudio.OnClick := @MenuTreeViewItemMeshletStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemMeshletStudio);
+
+  MenuTreeViewItemTetSoftBody := TMenuItem.Create(Self);
+  MenuTreeViewItemTetSoftBody.Caption := 'Chaos Flesh Tetrahedral Volume-XPBD Soft-Body Studio...';
+  MenuTreeViewItemTetSoftBody.OnClick := @MenuTreeViewItemTetSoftBodyClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemTetSoftBody);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -16556,6 +16581,8 @@ var
         Suffix := Suffix + ' ' + TCastleCameraRigRail(NodeObj).RailSummaryBadge
       else if NodeObj is TCastleMeshletClusterer then
         Suffix := Suffix + ' ' + TCastleMeshletClusterer(NodeObj).MeshletSummaryBadge
+      else if NodeObj is TCastleTetSoftBody then
+        Suffix := Suffix + ' ' + TCastleTetSoftBody(NodeObj).TetSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -56823,6 +56850,7 @@ begin
   else if SameText(AStudioId, 'mover_studio') then ShowMoverStudioDialog
   else if SameText(AStudioId, 'camera_rail') then ShowCameraRailDialog
   else if SameText(AStudioId, 'meshlet_studio') then ShowMeshletStudioDialog
+  else if SameText(AStudioId, 'tet_softbody') then ShowTetSoftBodyDialog
   else
     Result := False;
 end;
@@ -57851,6 +57879,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemMeshletStudioClick(Sender: TObject);
 begin
   ShowMeshletStudioDialog;
+end;
+
+procedure TDesignFrame.ShowTetSoftBodyDialog;
+var
+  Dlg: TTetSoftBodyForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TTetSoftBodyForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonTetSoftBodyClick(Sender: TObject);
+begin
+  ShowTetSoftBodyDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemTetSoftBodyClick(Sender: TObject);
+begin
+  ShowTetSoftBodyDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);
