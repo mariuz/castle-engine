@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="189">
+    <Units Count="191">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1027,6 +1027,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormContextualAnim"/>
       </Unit188>
+      <Unit189>
+        <Filename Value="../common-code/tooltargetingstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTargetingStudio"/>
+      </Unit189>
+      <Unit190>
+        <Filename Value="code/formtargetingstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTargetingStudio"/>
+      </Unit190>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

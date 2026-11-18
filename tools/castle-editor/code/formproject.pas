@@ -672,6 +672,7 @@ type
       MenuItemLiveCookAuditor: TMenuItem;
       MenuItemSurfaceGiStudio: TMenuItem;
       MenuItemContextualAnim: TMenuItem;
+      MenuItemTargetingStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -764,6 +765,7 @@ type
     procedure MenuItemLiveCookAuditorClick(Sender: TObject);
     procedure MenuItemSurfaceGiStudioClick(Sender: TObject);
     procedure MenuItemContextualAnimClick(Sender: TObject);
+    procedure MenuItemTargetingStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2748,6 +2750,11 @@ begin
   MenuItemContextualAnim.Caption := 'Contextual Paired Animation & Docking Studio...';
   MenuItemContextualAnim.OnClick := @MenuItemContextualAnimClick;
   MenuItemDesign.Add(MenuItemContextualAnim);
+
+  MenuItemTargetingStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemTargetingStudio.Caption := 'Targeting System Preset Lock-On & Aim-Assist Studio...';
+  MenuItemTargetingStudio.OnClick := @MenuItemTargetingStudioClick;
+  MenuItemDesign.Add(MenuItemTargetingStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6156,6 +6163,12 @@ procedure TProjectForm.MenuItemContextualAnimClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowContextualAnimDialog;
+end;
+
+procedure TProjectForm.MenuItemTargetingStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowTargetingStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

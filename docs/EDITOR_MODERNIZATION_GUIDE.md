@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–358** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–359** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4340,6 +4340,29 @@ if CtxScene.BeginSynchronizedScene(Hero, Guard, Viewport.Items) then
 
 ---
 
+## 66CF. Targeting System Preset Stack (Lock-On, Aim Magnetism & Stick-Flick) Studio (Phase 359)
+
+Castle Game Engine provides a multi-stage `UTargetingPreset`-style combat and healer targeting behavior supporting faction/range/cone/`WorldRay` Line-of-Sight filtering, weighted threat & low-HP scoring, aim magnetism, and horizontal right-stick target switching:
+
+1. **Targeting System Runtime (`src/scene/castletargetingsystem.pas`)**:
+   - `TCastleTargetingBehavior` and `TCastleTargetableBehavior` execute `EvaluateTargetingStack`, horizontal right-stick switching (`SwitchLockedTargetHorizontal`), and aim-assist pull (`ComputeMagnetizedAimDir`) across `tpkMeleeSoulsHardLockOn`, `tpkRangedAimMagnetism`, and `tpkHealerFriendlyLowestHp`.
+2. **Targeting Studio (`TTargetingStudioForm` & `TTargetingStudioHelper`)**:
+   - Open via the top-bar **`LockOn`** button, Hierarchy context menu, or **`Design -> Targeting System Preset Lock-On & Aim-Assist Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TTargetingStudioHelper.SpawnTargetingCombatRange(Viewport, DesignOwner, Player, Targeting);
+Locked := Targeting.EvaluateTargetingStack(Vector3(0, 1.25, 0), Vector3(0, 0, -1), Viewport.Items);
+NextTarget := Targeting.SwitchLockedTargetHorizontal(1.0, Vector3(0, 1.25, 0), Vector3(0, 0, -1), Viewport.Items);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE Targeting System (`UTargetingPreset`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/targeting-system-overview-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Combat, Raycasting & Gameplay Systems (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Combat Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4486,4 +4509,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoollivecookauditor.pas`](../tests/code/testcases/testtoollivecookauditor.pas) (`TTestToolLiveCookAuditor` — 2 tests)**: Verifies `TLiveCodingCookBroker.CaptureLiveRttiSnapshot` & `RehydrateLiveRttiSnapshot` restoring scrambled vector/string/scalar properties + `CoreRedirect`-style `'LegacyCruiseSpeed' -> 'DesiredSpeedMps'` field-alias migration, `AuditPackageCookReadiness` blocking traversal-unsafe URLs & empty `TCastleChooserTable` matrices and reaching `100/100` upon remediation, the unified **76-Studio Hub** Horizon 2–9 catalog, and the 17th MCP tool `cge_audit_package_cook` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsurfacegi.pas`](../tests/code/testcases/testtoolsurfacegi.pas) (`TTestToolSurfaceGi` — 2 tests)**: Verifies `WorldRay` sky-occlusion shadowing beneath an indoor bunker roof vs. open courtyard sky, Cornell Red West Wall (`-X`) vs. Blue East Wall (`+X`) directional `L0+L1` SH2 color bleeding (`SampleIrradianceAtWorld`), `BounceIntensity` gain scaling, `sgpIndoorOutdoorCourtyard` (`50` probes), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcontextualanim.pas`](../tests/code/testcases/testtoolcontextualanim.pas) (`TTestToolContextualAnim` — 2 tests)**: Verifies front-approach rejection on rear stealth takedowns (`APPROACH_ANGLE_MISMATCH`), `WorldRay` waist-height wall-collision rejection (`OBSTACLE_BLOCKS_DOCK_SLOT`), exact `(0, 0, +1.05)` Hermite warp alignment & contact sync window, `capCoOpWallBoostLift` `+2.10m` vertical partner lift, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooltargetingstudio.pas`](../tests/code/testcases/testtooltargetingstudio.pas) (`TTestToolTargetingStudio` — 2 tests)**: Verifies `tpkMeleeSoulsHardLockOn` high-threat Boss lock-on (`EnemyWarlordBoss`), `WorldRay` cover-wall rejection (`BLOCKED_LINE_OF_SIGHT`), Left/Right horizontal stick-flick switching (`EnemyGruntLeft` / `EnemySniperRight`), `tpkHealerFriendlyLowestHp` critical-HP friendly triage (`18% HP`), aim-assist magnetism pull, and JSON roundtrips (`0 unfreed memory blocks`).
 

@@ -185,6 +185,7 @@ uses
   TestToolLiveCookAuditor,
   TestToolSurfaceGi,
   TestToolContextualAnim,
+  TestToolTargetingStudio,
   TestCastleVulkanRHI;
 
 implementation
