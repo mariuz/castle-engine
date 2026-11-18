@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="221">
+    <Units Count="223">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1187,6 +1187,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormOctahedralImpostor"/>
       </Unit220>
+      <Unit221>
+        <Filename Value="../common-code/toolposesnapshot.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPoseSnapshot"/>
+      </Unit221>
+      <Unit222>
+        <Filename Value="code/formposesnapshot.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPoseSnapshot"/>
+      </Unit222>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

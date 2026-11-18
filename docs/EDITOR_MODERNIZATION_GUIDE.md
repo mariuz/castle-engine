@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–374** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–375** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4687,6 +4687,13 @@ Phase 374 adds Unreal Engine 6.0+ Ryan Brucks-style **Octahedral Impostor** uppe
 - **Bijective Hemi-Octahedral Projection (`EncodeHemiOctahedralUv` / `DecodeHemiOctahedralDir`)**: Projects any upper-hemisphere view vector `(DirX, DirY >= 0, DirZ)` onto `[0..1]^2` with zero wasted texels and machine-precision reversibility.
 - **3-Tile Simplex Barycentric Blend (`SampleAtlasBarycentric`)**: Subdivides each `NxN` grid cell along `Fx = Fy` to blend the 3 nearest atlas views (`Weight0 + Weight1 + Weight2 = 1.0`, exact Kronecker `1.0` on grid nodes) and switches between source geometry and camera-facing proxy cards at `SwitchDistanceMeters`.
 
+## 66CV. Phase 375: Skeletal Pose Snapshot, Dash Ghost Afterimage Trail & Petrified Statue Freeze Studio
+
+Phase 375 adds Unreal Engine 6.0+ `FPoseSnapshot`-style **Skeletal Pose Snapshot & Dash Ghost Afterimage Trails** via `TCastlePoseSnapshotTrail` (`src/scene/castleposesnapshot.pas`), `TPoseSnapshotHelper` (`tools/common-code/toolposesnapshot.pas`), and `TPoseSnapshotForm` (`tools/castle-editor/code/formposesnapshot.pas`), accessible from **`PoseSnap`** in the top viewport toolbar, **`Design -> Skeletal Pose Snapshot & Dash Ghost Studio...`**, or `LaunchStudioById('pose_snapshot')`.
+
+- **Zero-Allocation Ring Buffer (`CaptureDashAfterimage` & `StepGhostDecay`)**: Stores up to `MaxGhostCount` (`1..16`) character pose snapshots in a fixed circular array with linear alpha/lifetime decay and spectral cyan/violet silhouette rendering.
+- **Petrified Stone Statue Lock (`FreezeStatuePose` / `UnfreezeStatuePose`)**: Locks a frozen stone statue pose in world space while rejecting new dash afterimage captures until unfrozen.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4849,4 +4856,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolfiregrid2d.pas`](../tests/code/testcases/testtoolfiregrid2d.pas) (`TTestToolFireGrid2D` — 2 tests)**: Verifies `+X` downwind flame-front acceleration (`> 2x` burned area vs. upwind `-X`), origin fuel exhaustion to `fcsCharredAsh`, `100%` containment across a non-flammable `IX = 9` stone firebreak trench, `DouseWaterSplash` + monsoon `RainIntensity = 1.0` extinguishing, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgameplaymessenger.pas`](../tests/code/testcases/testtoolgameplaymessenger.pas) (`TTestToolGameplayMessenger` — 2 tests)**: Verifies strict dot-boundary hierarchical vs. exact channel pub/sub routing (`Combat.Dam` never falsely matching `Combat.Damage.Critical`), `bpCriticalEmergency` mid-sentence bark preemption over `bpAmbientChatter`, per-tag anti-spam cooldown blocking & post-expiry restoration, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooloctahedralimpostor.pas`](../tests/code/testcases/testtooloctahedralimpostor.pas) (`TTestToolOctahedralImpostor` — 2 tests)**: Verifies bijective upper-hemisphere hemi-octahedral `EncodeHemiOctahedralUv` / `DecodeHemiOctahedralDir` reversibility (`< 1e-4`), exact Kronecker delta `1.0` on grid vertices, 3-tile barycentric weight summation (`W0 + W1 + W2 = 1.0`), distance LOD switchover, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolposesnapshot.pas`](../tests/code/testcases/testtoolposesnapshot.pas) (`TTestToolPoseSnapshot` — 2 tests)**: Verifies fixed-capacity ring-buffer eviction (`6` dash captures in `MaxGhostCount = 4` overwriting oldest slots without heap growth), linear alpha/lifetime decay & expiration, petrified statue pose lock rejecting new dash captures, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

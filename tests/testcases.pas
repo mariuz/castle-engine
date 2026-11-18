@@ -201,6 +201,7 @@ uses
   TestToolFireGrid2D,
   TestToolGameplayMessenger,
   TestToolOctahedralImpostor,
+  TestToolPoseSnapshot,
   TestCastleVulkanRHI;
 
 implementation

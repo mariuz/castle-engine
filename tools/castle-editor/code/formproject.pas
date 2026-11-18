@@ -688,6 +688,7 @@ type
       MenuItemFireGrid2D: TMenuItem;
       MenuItemGameplayMessenger: TMenuItem;
       MenuItemOctahedralImpostor: TMenuItem;
+      MenuItemPoseSnapshot: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -796,6 +797,7 @@ type
     procedure MenuItemFireGrid2DClick(Sender: TObject);
     procedure MenuItemGameplayMessengerClick(Sender: TObject);
     procedure MenuItemOctahedralImpostorClick(Sender: TObject);
+    procedure MenuItemPoseSnapshotClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2860,6 +2862,11 @@ begin
   MenuItemOctahedralImpostor.Caption := 'Octahedral Billboard Impostor Studio...';
   MenuItemOctahedralImpostor.OnClick := @MenuItemOctahedralImpostorClick;
   MenuItemDesign.Add(MenuItemOctahedralImpostor);
+
+  MenuItemPoseSnapshot := TMenuItem.Create(MenuItemDesign);
+  MenuItemPoseSnapshot.Caption := 'Skeletal Pose Snapshot & Dash Ghost Studio...';
+  MenuItemPoseSnapshot.OnClick := @MenuItemPoseSnapshotClick;
+  MenuItemDesign.Add(MenuItemPoseSnapshot);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6364,6 +6371,12 @@ procedure TProjectForm.MenuItemOctahedralImpostorClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowOctahedralImpostorDialog;
+end;
+
+procedure TProjectForm.MenuItemPoseSnapshotClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPoseSnapshotDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
