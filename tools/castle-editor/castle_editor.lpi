@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="185">
+    <Units Count="187">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1007,6 +1007,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormLiveCookAuditor"/>
       </Unit184>
+      <Unit185>
+        <Filename Value="../common-code/toolsurfacegi.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSurfaceGi"/>
+      </Unit185>
+      <Unit186>
+        <Filename Value="code/formsurfacegistudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSurfaceGiStudio"/>
+      </Unit186>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

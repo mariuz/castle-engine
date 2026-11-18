@@ -183,6 +183,7 @@ uses
   TestToolTetSoftBody,
   TestToolMassTraffic,
   TestToolLiveCookAuditor,
+  TestToolSurfaceGi,
   TestCastleVulkanRHI;
 
 implementation

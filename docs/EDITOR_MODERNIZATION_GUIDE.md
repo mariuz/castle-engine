@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–356** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–357** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4295,6 +4295,28 @@ CookRep := TLiveCodingCookBroker.AuditPackageCookReadiness(Viewport, DesignOwner
 
 ---
 
+## 66CD. Lumen-Style Surface Cache SH2 GI Probes & Sky-Occlusion Studio (Phase 357)
+
+Castle Game Engine provides a 3D Spherical Harmonics (`SH2` L0+L1) irradiance probe grid baking `WorldRay` sky occlusion and colored wall bounce albedo matching Unreal Engine 6.0+'s Lumen Surface Cache / Irradiance Volume workflows:
+
+1. **Surface Cache SH2 GI Runtime (`src/scene/castlesurfacegi.pas`)**:
+   - `TCastleSurfaceGiGrid` casts Fibonacci sphere `WorldRay` rays per probe (`BakeIrradianceProbes`) to compute `SkyVisibility` and L0+L1 RGB Spherical Harmonics coefficients, and evaluates trilinearly interpolated surface irradiance along any normal (`SampleIrradianceAtWorld`).
+2. **Surface GI Studio (`TSurfaceGiStudioForm` & `TSurfaceGiHelper`)**:
+   - Open via the top-bar **`GI-SH2`** button, Hierarchy context menu, or **`Design -> Lumen Surface Cache SH2 GI Probes & Sky-Occlusion Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TSurfaceGiHelper.SpawnCornellBounceAndRoofDemo(Viewport, DesignOwner, GiGrid);
+Irrad := GiGrid.SampleIrradianceAtWorld(Vector3(-3.2, 1.2, 1.5), Vector3(-1, 0, 0));
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Lighting](https://castle-engine.io/x3d_implementation_lighting.php) · [UE Lumen Global Illumination](https://dev.epicgames.com/documentation/en-us/unreal-engine/lumen-global-illumination-and-reflections-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Physically Based Rendering, Lighting & Shaders (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Lighting Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4439,4 +4461,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtooltetsoftbody.pas`](../tests/code/testcases/testtooltetsoftbody.pas) (`TTestToolTetSoftBody` — 2 tests)**: Verifies `3x3x3 -> 135` positively oriented tetrahedra (`8.000 m^3` rest volume), `InvertedTetCount = 0` + `[88%..112%]` volume preservation under floor drop & `-14 m/s` radial hammer slam, top-pinned hanging tendon elastic stretch (`tsbpHangingFleshPillar`), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmasstraffic.pas`](../tests/code/testcases/testtoolmasstraffic.pas) (`TTestToolMassTraffic` — 2 tests)**: Verifies conflict-free NEMA 4-way signal interlocks (`SignalConflictCount = 0`), East-West red-light stop-line queue braking upstream of `51.0m` while North-South flows on Green, `RearEndOverlapCount = 0` across `24` and `40` Rush-Hour vehicles over multi-stage phase cycles, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoollivecookauditor.pas`](../tests/code/testcases/testtoollivecookauditor.pas) (`TTestToolLiveCookAuditor` — 2 tests)**: Verifies `TLiveCodingCookBroker.CaptureLiveRttiSnapshot` & `RehydrateLiveRttiSnapshot` restoring scrambled vector/string/scalar properties + `CoreRedirect`-style `'LegacyCruiseSpeed' -> 'DesiredSpeedMps'` field-alias migration, `AuditPackageCookReadiness` blocking traversal-unsafe URLs & empty `TCastleChooserTable` matrices and reaching `100/100` upon remediation, the unified **76-Studio Hub** Horizon 2–9 catalog, and the 17th MCP tool `cge_audit_package_cook` (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsurfacegi.pas`](../tests/code/testcases/testtoolsurfacegi.pas) (`TTestToolSurfaceGi` — 2 tests)**: Verifies `WorldRay` sky-occlusion shadowing beneath an indoor bunker roof vs. open courtyard sky, Cornell Red West Wall (`-X`) vs. Blue East Wall (`+X`) directional `L0+L1` SH2 color bleeding (`SampleIrradianceAtWorld`), `BounceIntensity` gain scaling, `sgpIndoorOutdoorCourtyard` (`50` probes), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

@@ -670,6 +670,7 @@ type
       MenuItemTetSoftBody: TMenuItem;
       MenuItemMassTraffic: TMenuItem;
       MenuItemLiveCookAuditor: TMenuItem;
+      MenuItemSurfaceGiStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -760,6 +761,7 @@ type
     procedure MenuItemTetSoftBodyClick(Sender: TObject);
     procedure MenuItemMassTrafficClick(Sender: TObject);
     procedure MenuItemLiveCookAuditorClick(Sender: TObject);
+    procedure MenuItemSurfaceGiStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2734,6 +2736,11 @@ begin
   MenuItemLiveCookAuditor.Caption := 'Live Coding RTTI Broker & Release Cook Auditor Studio...';
   MenuItemLiveCookAuditor.OnClick := @MenuItemLiveCookAuditorClick;
   MenuItemDesign.Add(MenuItemLiveCookAuditor);
+
+  MenuItemSurfaceGiStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemSurfaceGiStudio.Caption := 'Lumen Surface Cache SH2 GI Probes & Sky-Occlusion Studio...';
+  MenuItemSurfaceGiStudio.OnClick := @MenuItemSurfaceGiStudioClick;
+  MenuItemDesign.Add(MenuItemSurfaceGiStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6130,6 +6137,12 @@ procedure TProjectForm.MenuItemLiveCookAuditorClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowLiveCookAuditorDialog;
+end;
+
+procedure TProjectForm.MenuItemSurfaceGiStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSurfaceGiStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
