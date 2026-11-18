@@ -179,6 +179,7 @@ uses
   TestToolRvtStudio,
   TestToolMoverStudio,
   TestToolCameraRail,
+  TestToolMeshletStudio,
   TestCastleVulkanRHI;
 
 implementation

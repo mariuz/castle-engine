@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–352** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–353** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4204,6 +4204,28 @@ Res := Rail.EvaluateAndStepRig(Player1.WorldTranslation, Vector3(6, 0, 0),
 
 ---
 
+## 66BZ. Nanite-Style Meshlet Cluster & Normal-Cone Culler Studio (Phase 353)
+
+Castle Game Engine provides spatially coherent `64v / 124t` meshlet partitioning, bounding spheres, exact perspective normal-cone backface cluster rejection, and screen-space pixel-error DAG tier diagnostics matching Unreal Engine 6.0+'s Nanite cluster workflows:
+
+1. **Meshlet Clusterer Runtime (`src/scene/castlemeshletcluster.pas`)**:
+   - `TCastleMeshletClusterer` sorts triangles by spatial cell + normal octant, builds `MaxVerticesPerMeshlet <= 64` and `MaxTrianglesPerMeshlet <= 124` clusters, computes tight bounding spheres and normal cones (`ConeSinCutoff`), rejects far-hemisphere backface clusters in `O(1)` (`EvaluateViewMeshletCulling`), and computes `MaxProjectedPixelError` / `RecommendedLodTier`.
+2. **Meshlet Studio (`TMeshletStudioForm` & `TMeshletStudioHelper`)**:
+   - Open via the top-bar **`Meshlet`** button, Hierarchy context menu, or **`Design -> Nanite Meshlet Cluster & Normal-Cone Culler Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TMeshletStudioHelper.SpawnMeshletClusterDemo(Viewport, DesignOwner, Clusterer);
+Stats := Clusterer.EvaluateViewMeshletCulling(Vector3(0, 0, 12.0), 1080, 60.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE 3D Rendering](https://castle-engine.io/x3d_implementation_rendering.php) · [UE Nanite Virtualized Geometry](https://dev.epicgames.com/documentation/en-us/unreal-engine/nanite-virtualized-geometry-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Rendering Optimization, Batching & Shaders (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4344,4 +4366,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolrvtstudio.pas`](../tests/code/testcases/testtoolrvtstudio.pas) (`TTestToolRvtStudio` — 2 tests)**: Verifies strict LRU virtual-page hit/miss/eviction ordering (`Tile (0,0)` hit-refreshed so `Tile (1,0)` is evicted on 5th load into 4-slot cache), footprint bowl sinkage (`< -0.20m`) + displaced rim berms (`> +0.03m`), exponential snowfill recovery, 8-bit grayscale displacement heightmap export, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmoverstudio.pas`](../tests/code/testcases/testtoolmoverstudio.pas) (`TTestToolMoverStudio` — 2 tests)**: Verifies pure stateless Mover 2.0 locomotion across `mlmCrouchSlide` speed boost, `mlmWallRun` `0.20g` reduced-gravity glide, `mlmBuoyantSwim` Archimedes flotation, and `mlmGrappleZip` tower arrival/release, plus 128-tick rollback `RewindAndResimulateFromTick` (`0.0000m` identical replay parity & retroactive airborne jump divergence at `Tick 15`) and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcamerarail.pas`](../tests/code/testcases/testtoolcamerarail.pas) (`TTestToolCameraRail` — 2 tests)**: Verifies `FindClosestRailParam` auto-dolly projection, `+6.0 m/s` velocity look-ahead (`+2.40m` lead), rock-steady inner-deadzone stillness (`< 0.001m` aim drift on `+0.35m` nudge), 2-player co-op dynamic FOV widening (`> 70°` pre-split) & hysteretic `[10m..14m]` split/merge anti-flicker gating, closed orbital ring projection, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmeshletstudio.pas`](../tests/code/testcases/testtoolmeshletstudio.pas) (`TTestToolMeshletStudio` — 2 tests)**: Verifies lossless `1,536`-triangle UV sphere partitioning into `<= 64v / <= 124t` spatial meshlets, exact perspective normal-cone backface cluster rejection on far-hemisphere (`-Z`) clusters with zero false-positive front-hemisphere (`+Z`) culls, screen-space pixel-error `LOD 0` vs. `LOD 2` selection, `mspTwistedTorusRing`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

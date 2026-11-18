@@ -666,6 +666,7 @@ type
       MenuItemRvtStudio: TMenuItem;
       MenuItemMoverStudio: TMenuItem;
       MenuItemCameraRail: TMenuItem;
+      MenuItemMeshletStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -752,6 +753,7 @@ type
     procedure MenuItemRvtStudioClick(Sender: TObject);
     procedure MenuItemMoverStudioClick(Sender: TObject);
     procedure MenuItemCameraRailClick(Sender: TObject);
+    procedure MenuItemMeshletStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2706,6 +2708,11 @@ begin
   MenuItemCameraRail.Caption := 'Camera Rig Rail Auto-Dolly & Co-Op Framing Studio...';
   MenuItemCameraRail.OnClick := @MenuItemCameraRailClick;
   MenuItemDesign.Add(MenuItemCameraRail);
+
+  MenuItemMeshletStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemMeshletStudio.Caption := 'Nanite Meshlet Cluster & Normal-Cone Culler Studio...';
+  MenuItemMeshletStudio.OnClick := @MenuItemMeshletStudioClick;
+  MenuItemDesign.Add(MenuItemMeshletStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6078,6 +6085,12 @@ procedure TProjectForm.MenuItemCameraRailClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCameraRailDialog;
+end;
+
+procedure TProjectForm.MenuItemMeshletStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMeshletStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
