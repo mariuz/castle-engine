@@ -176,6 +176,7 @@ uses
   TestToolChooserTable,
   TestToolGroomStudio,
   TestToolTraversalStudio,
+  TestToolRvtStudio,
   TestCastleVulkanRHI;
 
 implementation

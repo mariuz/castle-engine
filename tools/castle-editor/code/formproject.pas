@@ -663,6 +663,7 @@ type
       MenuItemChooserTable: TMenuItem;
       MenuItemGroomStudio: TMenuItem;
       MenuItemTraversalStudio: TMenuItem;
+      MenuItemRvtStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -746,6 +747,7 @@ type
     procedure MenuItemChooserTableClick(Sender: TObject);
     procedure MenuItemGroomStudioClick(Sender: TObject);
     procedure MenuItemTraversalStudioClick(Sender: TObject);
+    procedure MenuItemRvtStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2685,6 +2687,11 @@ begin
   MenuItemTraversalStudio.Caption := 'Parkour Traversal Vault, Mantle & Warp Studio...';
   MenuItemTraversalStudio.OnClick := @MenuItemTraversalStudioClick;
   MenuItemDesign.Add(MenuItemTraversalStudio);
+
+  MenuItemRvtStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemRvtStudio.Caption := 'Runtime Virtual Texture & Snow/Mud Trail Studio...';
+  MenuItemRvtStudio.OnClick := @MenuItemRvtStudioClick;
+  MenuItemDesign.Add(MenuItemRvtStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6039,6 +6046,12 @@ procedure TProjectForm.MenuItemTraversalStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowTraversalStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemRvtStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowRvtStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

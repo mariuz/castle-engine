@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–349** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–350** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4135,6 +4135,29 @@ Trav.BeginTraversalWarp(Runner.Translation, Probe);
 
 ---
 
+## 66BW. Runtime Virtual Texture (RVT) LRU Tile Cache & Snow/Mud Trail Studio (Phase 350)
+
+Castle Game Engine provides an LRU physical Virtual-Texture page cache and persistent deformable snow/mud/sand trail heightfields with raised rim berms and snowfall recovery matching Unreal Engine 6.0+'s `URuntimeVirtualTexture` and deformable snow workflows:
+
+1. **Runtime Virtual Texture (`src/scene/castleruntimevt.pas`)**:
+   - `TCastleRuntimeVirtualTexture` manages `PhysicalCacheSlots` LRU page residency (`RequestVirtualTile`, `RequestWorldTile`), carves boot/tire sinkage bowls with displaced outer rim berms (`StampFootprintOrTire`), heals tracks exponentially (`StepThermalSnowfillRecovery`), and exports 8-bit PNG displacement heightmaps (`ExportDisplacementGrayscaleImage`).
+2. **RVT & Snow Trail Studio (`TRvtStudioForm` & `TRvtStudioHelper`)**:
+   - Open via the top-bar **`RVT/Snow`** button, Hierarchy context menu, or **`Design -> Runtime Virtual Texture & Snow/Mud Trail Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TRvtStudioHelper.SpawnAlpineSnowfieldRvtDemo(Viewport, DesignOwner, Rvt);
+Rvt.StampFootprintOrTire(0.0, 0.0, 0.55, 0.24);
+Rvt.StepThermalSnowfillRecovery(1.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Terrain & Images](https://castle-engine.io/terrain) · [UE Runtime Virtual Texturing](https://dev.epicgames.com/documentation/en-us/unreal-engine/runtime-virtual-texturing-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Terrain, Materials & Shaders (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Terrain Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4272,4 +4295,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolchoosertable.pas`](../tests/code/testcases/testtoolchoosertable.pas) (`TTestToolChooserTable` — 2 tests)**: Verifies hierarchical GameplayTag prefix matching (`'Surface.Stone'` matching `'Surface.Stone.Wet'`), numeric speed/HP range gates, airborne boolean gates, wildcard fallback resolution, `3 : 2 : 1` seeded weighted tie-breaking across equal-priority AI barks, `ValidateRows` inverted-range detection, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgroomstudio.pas`](../tests/code/testcases/testtoolgroomstudio.pas) (`TTestToolGroomStudio` — 2 tests)**: Verifies progressive `ClumpTightness` root-to-tip child strand convergence (`0.0` loose vs. `1.0` exact tip lock), lateral `+X` wind tip deflection with strict scalp-sphere anti-clipping clearance (`MinDistanceFromScalpCenter >= ScalpRadius`), `gspCurlyRinglets` / `gspWolfManeFur` card triangle counts, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltraversalstudio.pas`](../tests/code/testcases/testtooltraversalstudio.pas) (`TTestToolTraversalStudio` — 2 tests)**: Verifies all 5 parkour `WorldRay` classifications (`0.40m` Curb `takStepUp`, `1.05m x 0.45m` Fence `takThinVaultOver` onto far floor, `1.20m x 2.60m` Crate `takLowMantleOnto` onto top, `2.20m` Ledge `takHighLedgeClimb`, `3.80m` Tower `takBlockedSheerWall`), low-ceiling headroom rejection (`BlockedByLowCeiling`), Bezier root-motion warp execution, and JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolrvtstudio.pas`](../tests/code/testcases/testtoolrvtstudio.pas) (`TTestToolRvtStudio` — 2 tests)**: Verifies strict LRU virtual-page hit/miss/eviction ordering (`Tile (0,0)` hit-refreshed so `Tile (1,0)` is evicted on 5th load into 4-slot cache), footprint bowl sinkage (`< -0.20m`) + displaced rim berms (`> +0.03m`), exponential snowfill recovery, 8-bit grayscale displacement heightmap export, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 
