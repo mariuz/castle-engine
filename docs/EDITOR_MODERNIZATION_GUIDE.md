@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–370** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–371** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4612,6 +4612,29 @@ Volume.BakeCreviceClutterFromWorld(Viewport.Items);
 
 ---
 
+## 66CR. Cinematic Camera Shake, Directional Recoil & FOV Kickback Studio (Phase 371)
+
+Castle Game Engine provides an additive multi-layer camera shake, directional weapon recoil, and concussive FOV kickback director with Hermite distance falloff and accessibility motion-sickness scaling matching Unreal Engine 6.0+'s `UCameraShakeBase` workflows:
+
+1. **Camera Shake Director Runtime (`src/scene/castlecamerashake.pas`)**:
+   - `TCastleCameraShakeDirector` layers `Trauma^2` harmonic oscillations, directional weapon muzzle kicks (`TriggerDirectionalRecoil`), FOV punches (`FovDeltaDegrees`), C1 smoothstep inner/outer blast falloff (`TriggerWorldExplosionShake`), `MaxPitchRollCapDeg` clamping, and `GlobalShakeScale` accessibility gating.
+2. **Camera Shake Studio (`TCameraShakeForm` & `TCameraShakeHelper`)**:
+   - Open via the top-bar **`CamShake`** button, Hierarchy context menu, or **`Design -> Cinematic Camera Shake, Recoil & FOV Kick Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TCameraShakeHelper.SpawnFiringRangeShakeDemo(Viewport, DesignOwner, Director);
+Director.TriggerDirectionalRecoil(6.0, -1.5, 4.5, 0.40);
+Offset := Director.StepCameraShakes(0.02);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Cameras & Viewports](https://castle-engine.io/viewport_and_scenes) · [UE Camera Shakes (`UCameraShakeBase`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/camera-shakes-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Cameras, FPS Weapons & Cinematics (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D FPS Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4770,4 +4793,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolsmartobjectslots.pas`](../tests/code/testcases/testtoolsmartobjectslots.pas) (`TTestToolSmartObjectSlots` — 2 tests)**: Verifies 4-seat saturation, FIFO wait-queue ordering (`Npc_5` ahead of `Npc_6`), `4.0s` cooldown blocking premature promotion followed by automatic FIFO promotion on expiry, hierarchical `Role.Blacksmith.Master` tag matching vs. untrained `Role.Farmer` rejection without queue pollution, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolaerofoil.pas`](../tests/code/testcases/testtoolaerofoil.pas) (`TTestToolAeroFoil` — 2 tests)**: Verifies Prandtl high-aspect soaring glide (`L/D > 14.0` at `8°`) vs. `28°` post-stall flow separation (`CL` drop `< 70%` of peak & `> 4x` separated form drag surge), `+4.0 m/s` thermal updraft altitude climb above launch height vs. calm-air descent, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcreviceclutter.pas`](../tests/code/testcases/testtoolcreviceclutter.pas) (`TTestToolCreviceClutter` — 2 tests)**: Verifies 8-compass `WorldRay` wall-seam accumulation (`> 12` items), multi-wall concave L-corner detection (`WallHitDirs >= 4`), `0` stray clutter in the open South-East courtyard, seeded determinism, `2.10m` vs. `1.20m` skirt scaling, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcamerashake.pas`](../tests/code/testcases/testtoolcamerashake.pas) (`TTestToolCameraShake` — 2 tests)**: Verifies C1 Hermite explosion distance falloff (`0.0` at `40m > 28m`, `0.50` at `16m`, `1.00` at `2m`), directional shotgun pitch/FOV recoil kick (`+3.5°` pitch & `+3.0°` FOV) and decay to zero rest, `8`-blast `MaxPitchRollCapDeg` clamping, `GlobalShakeScale = 0.0` motion-sickness suppression, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

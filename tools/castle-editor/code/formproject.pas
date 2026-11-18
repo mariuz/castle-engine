@@ -684,6 +684,7 @@ type
       MenuItemSmartObjectSlots: TMenuItem;
       MenuItemAeroFoil: TMenuItem;
       MenuItemCreviceClutter: TMenuItem;
+      MenuItemCameraShake: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -788,6 +789,7 @@ type
     procedure MenuItemSmartObjectSlotsClick(Sender: TObject);
     procedure MenuItemAeroFoilClick(Sender: TObject);
     procedure MenuItemCreviceClutterClick(Sender: TObject);
+    procedure MenuItemCameraShakeClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2832,6 +2834,11 @@ begin
   MenuItemCreviceClutter.Caption := 'Wall-Crevice & Seam Micro-Clutter Studio...';
   MenuItemCreviceClutter.OnClick := @MenuItemCreviceClutterClick;
   MenuItemDesign.Add(MenuItemCreviceClutter);
+
+  MenuItemCameraShake := TMenuItem.Create(MenuItemDesign);
+  MenuItemCameraShake.Caption := 'Cinematic Camera Shake, Recoil & FOV Kick Studio...';
+  MenuItemCameraShake.OnClick := @MenuItemCameraShakeClick;
+  MenuItemDesign.Add(MenuItemCameraShake);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6312,6 +6319,12 @@ procedure TProjectForm.MenuItemCreviceClutterClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCreviceClutterDialog;
+end;
+
+procedure TProjectForm.MenuItemCameraShakeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCameraShakeDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

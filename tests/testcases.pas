@@ -197,6 +197,7 @@ uses
   TestToolSmartObjectSlots,
   TestToolAeroFoil,
   TestToolCreviceClutter,
+  TestToolCameraShake,
   TestCastleVulkanRHI;
 
 implementation

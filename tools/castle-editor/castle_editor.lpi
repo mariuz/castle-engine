@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="213">
+    <Units Count="215">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1147,6 +1147,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormCreviceClutter"/>
       </Unit212>
+      <Unit213>
+        <Filename Value="../common-code/toolcamerashake.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCameraShake"/>
+      </Unit213>
+      <Unit214>
+        <Filename Value="code/formcamerashake.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCameraShake"/>
+      </Unit214>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
