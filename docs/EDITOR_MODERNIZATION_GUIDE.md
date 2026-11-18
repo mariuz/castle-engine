@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–361** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–362** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4408,6 +4408,28 @@ River.StepFloatingBodyAlongRiver(KayakPos, KayakVel, 4.0, 0.10);
 
 ---
 
+## 66CI. Smart Camera Collision Occluder Cutaway / Dither Fade & Foliage Parting Studio (Phase 362)
+
+Castle Game Engine provides a 5-ray camera-to-target capsule corridor `WorldRay` cutaway fader for obstructing roofs/walls alongside length-preserving radial character foliage parting matching Unreal Engine 6.0+'s ARPG Camera Occluder & Pivot-Painter Foliage workflows:
+
+1. **Camera Occluder & Foliage Parting Runtime (`src/scene/castleoccluderfader.pas`)**:
+   - `TCastleCameraOccluderFader` marches 5 parallel sightline rays (`CorridorProbeRadius`) between camera and target (`StepOccluderAndFoliage`), smoothly fading obstructing walls to `CutawayMinOpacity` (`0.18`) and restoring `1.0` opacity once cleared, while `EvaluateBladePartingTip` bends nearby grass blades radially outward without stretching blade length.
+2. **Cutaway & Foliage Studio (`TOccluderFaderForm` & `TOccluderFaderHelper`)**:
+   - Open via the top-bar **`Cutaway`** button, Hierarchy context menu, or **`Design -> Smart Camera Occluder Cutaway & Foliage Parting Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TOccluderFaderHelper.SpawnArpgCourtyardCutawayDemo(Viewport, DesignOwner, Fader, Hero, Wall, Pillar);
+Fader.StepOccluderAndFoliage(Viewport.Items, Vector3(0, 2.5, 10), Hero.Translation, [Hero.Translation], 0.15);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Cameras & Raycasting](https://castle-engine.io/viewport_and_scenes) · [UE Pivot Painter 2.0 Foliage](https://dev.epicgames.com/documentation/en-us/unreal-engine/pivot-painter-tool-2.0-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Cameras, Raycasting & 3D Gameplay (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D ARPG Viewport](https://castle-engine.io/images/thumb_const_height_size/dragon_spine_game_view.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4557,4 +4579,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtooltargetingstudio.pas`](../tests/code/testcases/testtooltargetingstudio.pas) (`TTestToolTargetingStudio` — 2 tests)**: Verifies `tpkMeleeSoulsHardLockOn` high-threat Boss lock-on (`EnemyWarlordBoss`), `WorldRay` cover-wall rejection (`BLOCKED_LINE_OF_SIGHT`), Left/Right horizontal stick-flick switching (`EnemyGruntLeft` / `EnemySniperRight`), `tpkHealerFriendlyLowestHp` critical-HP friendly triage (`18% HP`), aim-assist magnetism pull, and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmutablestudio.pas`](../tests/code/testcases/testtoolmutablestudio.pas) (`TTestToolMutableStudio` — 2 tests)**: Verifies closed-greathelm automatic hair hiding (`IsHairAutoHiddenByHelm`) vs. open-circlet hair inclusion (`+1` merged part / `+12` tris), `ShoulderBulkMorph` & `HeightScale` stature scaling, lossless `MUT1:...` compact recipe export/import, seeded randomization determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolriverstudio.pas`](../tests/code/testcases/testtoolriverstudio.pas) (`TTestToolRiverStudio` — 2 tests)**: Verifies $Q = A \cdot v$ continuity flow acceleration (`> 3x` faster in the `2.2m` gorge than the `9.0m` headwater & `10.0m` outflow basin) with whitewater foam generation, kayak downstream advection & elevation descent, steep waterfall `SlopeSin` foam boost, out-of-bank dry-land rejection, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooloccluderfader.pas`](../tests/code/testcases/testtooloccluderfader.pas) (`TTestToolOccluderFader` — 2 tests)**: Verifies camera-to-target `WorldRay` wall cutaway fade (`CastleFrontWallOccluder -> 18%` alpha) with non-blocking side-pillar & hero isolation plus full `100%` opacity recovery on clear overhead sightlines, exact `1.35m` length-preserving radial grass parting (`> 35°` near bend vs. `0°` far stillness), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

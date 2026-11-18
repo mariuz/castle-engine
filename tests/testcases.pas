@@ -188,6 +188,7 @@ uses
   TestToolTargetingStudio,
   TestToolMutableStudio,
   TestToolRiverStudio,
+  TestToolOccluderFader,
   TestCastleVulkanRHI;
 
 implementation

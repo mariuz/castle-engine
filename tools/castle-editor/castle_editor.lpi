@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="195">
+    <Units Count="197">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1057,6 +1057,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormRiverStudio"/>
       </Unit194>
+      <Unit195>
+        <Filename Value="../common-code/tooloccluderfader.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolOccluderFader"/>
+      </Unit195>
+      <Unit196>
+        <Filename Value="code/formoccluderfader.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormOccluderFader"/>
+      </Unit196>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

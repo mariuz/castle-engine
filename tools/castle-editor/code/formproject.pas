@@ -675,6 +675,7 @@ type
       MenuItemTargetingStudio: TMenuItem;
       MenuItemMutableStudio: TMenuItem;
       MenuItemRiverStudio: TMenuItem;
+      MenuItemOccluderFader: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -770,6 +771,7 @@ type
     procedure MenuItemTargetingStudioClick(Sender: TObject);
     procedure MenuItemMutableStudioClick(Sender: TObject);
     procedure MenuItemRiverStudioClick(Sender: TObject);
+    procedure MenuItemOccluderFaderClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2769,6 +2771,11 @@ begin
   MenuItemRiverStudio.Caption := 'River Spline Rapids, Width/Depth & Drift Studio...';
   MenuItemRiverStudio.OnClick := @MenuItemRiverStudioClick;
   MenuItemDesign.Add(MenuItemRiverStudio);
+
+  MenuItemOccluderFader := TMenuItem.Create(MenuItemDesign);
+  MenuItemOccluderFader.Caption := 'Smart Camera Occluder Cutaway & Foliage Parting Studio...';
+  MenuItemOccluderFader.OnClick := @MenuItemOccluderFaderClick;
+  MenuItemDesign.Add(MenuItemOccluderFader);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6195,6 +6202,12 @@ procedure TProjectForm.MenuItemRiverStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowRiverStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemOccluderFaderClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowOccluderFaderDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
