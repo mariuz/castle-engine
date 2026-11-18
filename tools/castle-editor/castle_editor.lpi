@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="193">
+    <Units Count="195">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1047,6 +1047,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMutableStudio"/>
       </Unit192>
+      <Unit193>
+        <Filename Value="../common-code/toolriverstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolRiverStudio"/>
+      </Unit193>
+      <Unit194>
+        <Filename Value="code/formriverstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormRiverStudio"/>
+      </Unit194>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -187,6 +187,7 @@ uses
   TestToolContextualAnim,
   TestToolTargetingStudio,
   TestToolMutableStudio,
+  TestToolRiverStudio,
   TestCastleVulkanRHI;
 
 implementation

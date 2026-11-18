@@ -674,6 +674,7 @@ type
       MenuItemContextualAnim: TMenuItem;
       MenuItemTargetingStudio: TMenuItem;
       MenuItemMutableStudio: TMenuItem;
+      MenuItemRiverStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -768,6 +769,7 @@ type
     procedure MenuItemContextualAnimClick(Sender: TObject);
     procedure MenuItemTargetingStudioClick(Sender: TObject);
     procedure MenuItemMutableStudioClick(Sender: TObject);
+    procedure MenuItemRiverStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2762,6 +2764,11 @@ begin
   MenuItemMutableStudio.Caption := 'Mutable Modular Character Customizer Studio...';
   MenuItemMutableStudio.OnClick := @MenuItemMutableStudioClick;
   MenuItemDesign.Add(MenuItemMutableStudio);
+
+  MenuItemRiverStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemRiverStudio.Caption := 'River Spline Rapids, Width/Depth & Drift Studio...';
+  MenuItemRiverStudio.OnClick := @MenuItemRiverStudioClick;
+  MenuItemDesign.Add(MenuItemRiverStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6182,6 +6189,12 @@ procedure TProjectForm.MenuItemMutableStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMutableStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemRiverStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowRiverStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–360** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–361** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4386,6 +4386,28 @@ Hero.ImportRecipeCode(Code);
 
 ---
 
+## 66CH. Spline Water River / Rapids Flow Spline, Variable Width & Whitewater Studio (Phase 361)
+
+Castle Game Engine provides a spline-guided river, gorge rapids, and waterfall cascade system with discharge continuity acceleration, variable width/depth cross-sections, whitewater foam, and buoyant kayak/raft advection matching Unreal Engine 6.0+'s `AWaterBodyRiver` workflows:
+
+1. **River Spline Runtime (`src/scene/castleriverspline.pas`)**:
+   - `TCastleRiverSpline` evaluates Catmull-Rom 3D knots with variable bank widths and bed depths, accelerating flow through narrow gorges via $v = Q / A + k\sqrt{\sin\theta}$ (`SampleRiverAtParam`), computing `WhitewaterFoamFactor`, testing channel bank bounds (`SampleRiverFlowAtWorldPoint`), and advecting floating bodies downstream (`StepFloatingBodyAlongRiver`).
+2. **River Studio (`TRiverStudioForm` & `TRiverStudioHelper`)**:
+   - Open via the top-bar **`River`** button, Hierarchy context menu, or **`Design -> River Spline Rapids, Width/Depth & Drift Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TRiverStudioHelper.SpawnMountainGorgeRiverDemo(Viewport, DesignOwner, River, Kayak);
+River.StepFloatingBodyAlongRiver(KayakPos, KayakVel, 4.0, 0.10);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Shaders & Water](https://castle-engine.io/shaders) · [UE Water System (`AWaterBodyRiver`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/water-system-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Water, Shaders & 3D Environments (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Environment Viewport](https://castle-engine.io/images/thumb_const_height_size/mountains_of_fire_screen_1.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4534,4 +4556,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolcontextualanim.pas`](../tests/code/testcases/testtoolcontextualanim.pas) (`TTestToolContextualAnim` — 2 tests)**: Verifies front-approach rejection on rear stealth takedowns (`APPROACH_ANGLE_MISMATCH`), `WorldRay` waist-height wall-collision rejection (`OBSTACLE_BLOCKS_DOCK_SLOT`), exact `(0, 0, +1.05)` Hermite warp alignment & contact sync window, `capCoOpWallBoostLift` `+2.10m` vertical partner lift, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltargetingstudio.pas`](../tests/code/testcases/testtooltargetingstudio.pas) (`TTestToolTargetingStudio` — 2 tests)**: Verifies `tpkMeleeSoulsHardLockOn` high-threat Boss lock-on (`EnemyWarlordBoss`), `WorldRay` cover-wall rejection (`BLOCKED_LINE_OF_SIGHT`), Left/Right horizontal stick-flick switching (`EnemyGruntLeft` / `EnemySniperRight`), `tpkHealerFriendlyLowestHp` critical-HP friendly triage (`18% HP`), aim-assist magnetism pull, and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmutablestudio.pas`](../tests/code/testcases/testtoolmutablestudio.pas) (`TTestToolMutableStudio` — 2 tests)**: Verifies closed-greathelm automatic hair hiding (`IsHairAutoHiddenByHelm`) vs. open-circlet hair inclusion (`+1` merged part / `+12` tris), `ShoulderBulkMorph` & `HeightScale` stature scaling, lossless `MUT1:...` compact recipe export/import, seeded randomization determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolriverstudio.pas`](../tests/code/testcases/testtoolriverstudio.pas) (`TTestToolRiverStudio` — 2 tests)**: Verifies $Q = A \cdot v$ continuity flow acceleration (`> 3x` faster in the `2.2m` gorge than the `9.0m` headwater & `10.0m` outflow basin) with whitewater foam generation, kayak downstream advection & elevation descent, steep waterfall `SlopeSin` foam boost, out-of-bank dry-land rejection, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 
