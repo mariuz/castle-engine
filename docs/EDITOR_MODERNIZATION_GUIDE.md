@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–354** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–355** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4249,6 +4249,28 @@ Body.ApplyRadialImpactImpulse(Vector3(0, 2.0, 0), 1.8, Vector3(0, -14.0, 0));
 
 ---
 
+## 66CB. MassTraffic Multi-Lane Road Network, Signal Phases & IDM Headway Studio (Phase 355)
+
+Castle Game Engine provides an 8-lane directed crossroads road network with a conflict-free 6-stage NEMA signal controller and Intelligent Driver Model (`IDM`) safe headway braking matching Unreal Engine 6.0+'s City Sample `MassTraffic` workflows:
+
+1. **MassTraffic Runtime (`src/scene/castlemasstraffic.pas`)**:
+   - `TCastleMassTrafficManager` runs 8 directed urban lanes governed by `tspNorthSouthGreen -> tspNorthSouthYellow -> tspAllRedClearance1 -> tspEastWestGreen -> tspEastWestYellow -> tspAllRedClearance2` (`SignalConflictCount = 0`) and IDM time-headway car-following + virtual red-light stop-line obstacles (`RearEndOverlapCount = 0`).
+2. **MassTraffic Studio (`TMassTrafficForm` & `TMassTrafficHelper`)**:
+   - Open via the top-bar **`Traffic`** button, Hierarchy context menu, or **`Design -> MassTraffic Multi-Lane Signal & IDM Headway Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TMassTrafficHelper.SpawnMassTrafficCrossroads(Viewport, DesignOwner, Traffic);
+Traffic.StepTraffic(0.20);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE AI & Behaviors](https://castle-engine.io/behaviors) · [UE City Sample `MassTraffic`](https://dev.epicgames.com/documentation/en-us/unreal-engine/city-sample-project-unreal-engine-demonstration)
+- **Videos & Movies:** 🎬 [CGE Official Video — Large-Scale 3D Worlds, Vehicles & AI Agents (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D City Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4391,4 +4413,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolcamerarail.pas`](../tests/code/testcases/testtoolcamerarail.pas) (`TTestToolCameraRail` — 2 tests)**: Verifies `FindClosestRailParam` auto-dolly projection, `+6.0 m/s` velocity look-ahead (`+2.40m` lead), rock-steady inner-deadzone stillness (`< 0.001m` aim drift on `+0.35m` nudge), 2-player co-op dynamic FOV widening (`> 70°` pre-split) & hysteretic `[10m..14m]` split/merge anti-flicker gating, closed orbital ring projection, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmeshletstudio.pas`](../tests/code/testcases/testtoolmeshletstudio.pas) (`TTestToolMeshletStudio` — 2 tests)**: Verifies lossless `1,536`-triangle UV sphere partitioning into `<= 64v / <= 124t` spatial meshlets, exact perspective normal-cone backface cluster rejection on far-hemisphere (`-Z`) clusters with zero false-positive front-hemisphere (`+Z`) culls, screen-space pixel-error `LOD 0` vs. `LOD 2` selection, `mspTwistedTorusRing`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltetsoftbody.pas`](../tests/code/testcases/testtooltetsoftbody.pas) (`TTestToolTetSoftBody` — 2 tests)**: Verifies `3x3x3 -> 135` positively oriented tetrahedra (`8.000 m^3` rest volume), `InvertedTetCount = 0` + `[88%..112%]` volume preservation under floor drop & `-14 m/s` radial hammer slam, top-pinned hanging tendon elastic stretch (`tsbpHangingFleshPillar`), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmasstraffic.pas`](../tests/code/testcases/testtoolmasstraffic.pas) (`TTestToolMassTraffic` — 2 tests)**: Verifies conflict-free NEMA 4-way signal interlocks (`SignalConflictCount = 0`), East-West red-light stop-line queue braking upstream of `51.0m` while North-South flows on Green, `RearEndOverlapCount = 0` across `24` and `40` Rush-Hour vehicles over multi-stage phase cycles, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

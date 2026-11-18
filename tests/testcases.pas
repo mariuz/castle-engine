@@ -181,6 +181,7 @@ uses
   TestToolCameraRail,
   TestToolMeshletStudio,
   TestToolTetSoftBody,
+  TestToolMassTraffic,
   TestCastleVulkanRHI;
 
 implementation

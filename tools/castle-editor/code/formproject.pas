@@ -668,6 +668,7 @@ type
       MenuItemCameraRail: TMenuItem;
       MenuItemMeshletStudio: TMenuItem;
       MenuItemTetSoftBody: TMenuItem;
+      MenuItemMassTraffic: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -756,6 +757,7 @@ type
     procedure MenuItemCameraRailClick(Sender: TObject);
     procedure MenuItemMeshletStudioClick(Sender: TObject);
     procedure MenuItemTetSoftBodyClick(Sender: TObject);
+    procedure MenuItemMassTrafficClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2720,6 +2722,11 @@ begin
   MenuItemTetSoftBody.Caption := 'Chaos Flesh Tetrahedral Volume-XPBD Soft-Body Studio...';
   MenuItemTetSoftBody.OnClick := @MenuItemTetSoftBodyClick;
   MenuItemDesign.Add(MenuItemTetSoftBody);
+
+  MenuItemMassTraffic := TMenuItem.Create(MenuItemDesign);
+  MenuItemMassTraffic.Caption := 'MassTraffic Multi-Lane Signal & IDM Headway Studio...';
+  MenuItemMassTraffic.OnClick := @MenuItemMassTrafficClick;
+  MenuItemDesign.Add(MenuItemMassTraffic);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6104,6 +6111,12 @@ procedure TProjectForm.MenuItemTetSoftBodyClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowTetSoftBodyDialog;
+end;
+
+procedure TProjectForm.MenuItemMassTrafficClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMassTrafficDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

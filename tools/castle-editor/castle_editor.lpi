@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="181">
+    <Units Count="183">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -987,6 +987,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormTetSoftBody"/>
       </Unit180>
+      <Unit181>
+        <Filename Value="../common-code/toolmasstraffic.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMassTraffic"/>
+      </Unit181>
+      <Unit182>
+        <Filename Value="code/formmasstraffic.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMassTraffic"/>
+      </Unit182>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
