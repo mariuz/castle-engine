@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="165">
+    <Units Count="167">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -907,6 +907,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormRegressionHarness"/>
       </Unit164>
+      <Unit165>
+        <Filename Value="../common-code/toolchoosertable.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolChooserTable"/>
+      </Unit165>
+      <Unit166>
+        <Filename Value="code/formchoosertable.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormChooserTable"/>
+      </Unit166>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

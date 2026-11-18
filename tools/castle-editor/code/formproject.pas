@@ -660,6 +660,7 @@ type
       MenuItemJiggleBone: TMenuItem;
       MenuItemSoundscape: TMenuItem;
       MenuItemRegressionHarness: TMenuItem;
+      MenuItemChooserTable: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -740,6 +741,7 @@ type
     procedure MenuItemJiggleBoneClick(Sender: TObject);
     procedure MenuItemSoundscapeClick(Sender: TObject);
     procedure MenuItemRegressionHarnessClick(Sender: TObject);
+    procedure MenuItemChooserTableClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2664,6 +2666,11 @@ begin
   MenuItemRegressionHarness.Caption := 'Deterministic Golden-Snapshot & Drift Auditor Studio...';
   MenuItemRegressionHarness.OnClick := @MenuItemRegressionHarnessClick;
   MenuItemDesign.Add(MenuItemRegressionHarness);
+
+  MenuItemChooserTable := TMenuItem.Create(MenuItemDesign);
+  MenuItemChooserTable.Caption := 'Chooser Tables Context-Driven Asset Selector Studio...';
+  MenuItemChooserTable.OnClick := @MenuItemChooserTableClick;
+  MenuItemDesign.Add(MenuItemChooserTable);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6000,6 +6007,12 @@ procedure TProjectForm.MenuItemRegressionHarnessClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowRegressionHarnessDialog;
+end;
+
+procedure TProjectForm.MenuItemChooserTableClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowChooserTableDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -173,6 +173,7 @@ uses
   TestToolJiggleBone,
   TestToolSoundscape,
   TestToolRegressionHarness,
+  TestToolChooserTable,
   TestCastleVulkanRHI;
 
 implementation

@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–346** across Horizons 1–8), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–347** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4065,6 +4065,29 @@ Golden := TDeterminismRegressionHarness.CaptureWorldSnapshot(Viewport, DesignOwn
 
 ---
 
+## 66BT. Chooser Tables Context-Driven Multi-Column Asset, Montage & Audio Selector Studio (Phase 347)
+
+Castle Game Engine provides data-driven multi-column Chooser Tables evaluating hierarchical GameplayTag prefixes, numeric `[Min..Max]` parameter ranges, boolean state flags, priority tiers, and seeded weighted random tie-breaking matching Unreal Engine 6.0+'s `UChooserTable` workflows:
+
+1. **Chooser Table Runtime (`src/scene/castlechoosertable.pas`)**:
+   - `TCastleChooserTable` evaluates `TChooserContextQuery` across `RequiredTagA`/`RequiredTagB` dot-prefix hierarchies, numeric bounds, boolean flags, highest-`Priority` tier selection, and seeded `Weight` tie-breaking (`EvaluateChooser`), with built-in presets (`chpFootstepSurfaceStance`, `chpMeleeComboMontage`, `chpAiCombatBarkSelector`) and `ValidateRows`.
+2. **Chooser Table Studio (`TChooserTableForm` & `TChooserTableHelper`)**:
+   - Open via the top-bar **`Chooser`** button, Hierarchy context menu, or **`Design -> Chooser Tables Context-Driven Asset Selector Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TChooserTableHelper.SpawnFootstepAndBarkChooserDemo(Viewport, DesignOwner, Table);
+AssetUrl := Table.EvaluateChooser(
+  TChooserContextQuery.Create('Surface.Stone.Wet', 'Stance.Sprint', 6.2, 0.0, True), Chosen);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE Chooser Tables](https://dev.epicgames.com/documentation/en-us/unreal-engine/chooser-tables-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Data-Driven Gameplay & Animation Workflows (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE Component Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE 3D Gameplay Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4199,4 +4222,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtooljigglebone.pas`](../tests/code/testcases/testtooljigglebone.pas) (`TTestToolJiggleBone` — 2 tests)**: Verifies `+5.0m` parent impulse whip with strict `MaxConeAngleDeg = 30°` spherical cone clamping & exact `0.80m` rod length preservation, under-damped (`zeta = 0.16`) ringing reversals vs. critically-damped (`zeta = 1.05`) smooth settling, horizontal tail `-Y` gravity sag, and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsoundscape.pas`](../tests/code/testcases/testtoolsoundscape.pas) (`TTestToolSoundscape` — 2 tests)**: Verifies context-reactive biome switching (`ForestDawnBirds` -> `NocturnalCrickets` -> `AlpineHowlingWind` -> `CavernWaterDrips`), `WorldRay` stone-wall acoustic occlusion muffling (`20,000 Hz` clear LOS vs. `950 Hz` & `0.28x` gain behind bunker wall), seeded 3D hemisphere determinism, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolregressionharness.pas`](../tests/code/testcases/testtoolregressionharness.pas) (`TTestToolRegressionHarness` — 2 tests)**: Verifies canonically sorted 64-bit FNV-1a world-state hashing across multi-subsystem Horizon 8 scenes, dual-pass 24-frame seeded replay bit-exact determinism with non-destructive world restoration, per-actor `TRANSFORM_DRIFT` (`0.35m`) & `VISIBILITY_DRIFT` diff pinpointing, Golden JSON reload roundtrips, the unified **66-Studio Hub** Horizon 2–8 catalog, and the 16th MCP tool `cge_verify_determinism_hash` (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolchoosertable.pas`](../tests/code/testcases/testtoolchoosertable.pas) (`TTestToolChooserTable` — 2 tests)**: Verifies hierarchical GameplayTag prefix matching (`'Surface.Stone'` matching `'Surface.Stone.Wet'`), numeric speed/HP range gates, airborne boolean gates, wildcard fallback resolution, `3 : 2 : 1` seeded weighted tie-breaking across equal-priority AI barks, `ValidateRows` inverted-range detection, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
