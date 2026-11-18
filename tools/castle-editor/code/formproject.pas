@@ -678,6 +678,7 @@ type
       MenuItemOccluderFader: TMenuItem;
       MenuItemGameplayDebugger: TMenuItem;
       MenuItemWindStudio: TMenuItem;
+      MenuItemPreloadStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -776,6 +777,7 @@ type
     procedure MenuItemOccluderFaderClick(Sender: TObject);
     procedure MenuItemGameplayDebuggerClick(Sender: TObject);
     procedure MenuItemWindStudioClick(Sender: TObject);
+    procedure MenuItemPreloadStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2790,6 +2792,11 @@ begin
   MenuItemWindStudio.Caption := 'Procedural Foliage Wind Gust Field & Shockwave Studio...';
   MenuItemWindStudio.OnClick := @MenuItemWindStudioClick;
   MenuItemDesign.Add(MenuItemWindStudio);
+
+  MenuItemPreloadStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemPreloadStudio.Caption := 'Async Asset Preloader & VRAM Residency Studio...';
+  MenuItemPreloadStudio.OnClick := @MenuItemPreloadStudioClick;
+  MenuItemDesign.Add(MenuItemPreloadStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6234,6 +6241,12 @@ procedure TProjectForm.MenuItemWindStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowWindStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemPreloadStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPreloadStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

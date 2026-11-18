@@ -191,6 +191,7 @@ uses
   TestToolOccluderFader,
   TestToolGameplayDebugger,
   TestToolWindStudio,
+  TestToolPreloadStudio,
   TestCastleVulkanRHI;
 
 implementation

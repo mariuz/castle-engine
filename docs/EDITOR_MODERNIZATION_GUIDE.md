@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–364** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–365** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4476,6 +4476,28 @@ Director.StepWindField(1.0);
 
 ---
 
+## 66CL. Async Asset Preloader, Hitch-Free Warmup Queue & VRAM Residency Studio (Phase 365)
+
+Castle Game Engine provides a priority-sorted streamable asset warmup queue with strict per-frame millisecond throttling (`MaxBudgetMsPerFrame`) and pinned-handle-preserving LRU VRAM residency eviction matching Unreal Engine 6.0+'s `FStreamableManager` workflows:
+
+1. **Asset Preloader Runtime (`src/scene/castleassetpreloader.pas`)**:
+   - `TCastleAssetPreloadQueue` drains `Critical > HighVFX > Normal > Background` warmup requests up to `MaxBudgetMsPerFrame` (`StepFrameWarmupBudget`) while evicting oldest unpinned `LastTouchTick` LRU entries whenever resident memory exceeds `MaxVramBudgetMB` (never evicting `PinnedHandle = True` assets).
+2. **Preloader & VRAM Studio (`TPreloadStudioForm` & `TPreloadStudioHelper`)**:
+   - Open via the top-bar **`Preload`** button, Hierarchy context menu, or **`Design -> Async Asset Preloader & VRAM Residency Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TPreloadStudioHelper.SpawnBossAirlockPreloadDemo(Viewport, DesignOwner, Queue);
+StepRes := Queue.StepFrameWarmupBudget;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Optimization & Memory](https://castle-engine.io/optimization) · [UE Asynchronous Asset Loading (`FStreamableManager`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/asynchronous-asset-loading-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Asset Loading, Memory & Optimization (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Streaming Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4628,4 +4650,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtooloccluderfader.pas`](../tests/code/testcases/testtooloccluderfader.pas) (`TTestToolOccluderFader` — 2 tests)**: Verifies camera-to-target `WorldRay` wall cutaway fade (`CastleFrontWallOccluder -> 18%` alpha) with non-blocking side-pillar & hero isolation plus full `100%` opacity recovery on clear overhead sightlines, exact `1.35m` length-preserving radial grass parting (`> 35°` near bend vs. `0°` far stillness), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgameplaydebugger.pas`](../tests/code/testcases/testtoolgameplaydebugger.pas) (`TTestToolGameplayDebugger` — 2 tests)**: Verifies 6-channel live multi-subsystem HUD & 3D marker aggregation across AI StateTree, Targeting Lock-On (`DebugBossTarget`), GAS (`Class.Paladin`), Mover 2.0, MassTraffic, and Surface GI, per-category `ToggleChannelByNumpadKey(0..5)` bitmask filtering, zero-overhead `OverlayActive = False` teardown, `ExportDiagnosticSnapshotJson`, and JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolwindstudio.pas`](../tests/code/testcases/testtoolwindstudio.pas) (`TTestToolWindStudio` — 2 tests)**: Verifies quadratic $H^2$ cantilever trunk bend scaling (`6m` tree bends `> 3x` further than `2m` sapling), finite-speed radial shockwave propagation (`0 m/s` pre-arrival at `t=0s` -> `> 15 m/s` outward blast at `t=1.0s` when `R = 10m` -> automatic ring expiration at `t=3.0s`), `wbpHurricaneTempest` `90°` `+Z` wind alignment, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolpreloadstudio.pas`](../tests/code/testcases/testtoolpreloadstudio.pas) (`TTestToolPreloadStudio` — 2 tests)**: Verifies priority-sorted `Critical > HighVFX > Normal > Background` warmup with strict `2.5 ms/frame` hitch-free frame throttling (`2.2 ms` Frame 1 + `2.2 ms` Frame 2), pinned-handle protection (`paladin_body.gltf` never evicted) alongside least-recently-used unpinned `room_b.gltf` VRAM eviction under a `100 MB` budget, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

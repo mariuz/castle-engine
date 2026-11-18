@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="201">
+    <Units Count="203">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1087,6 +1087,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormWindStudio"/>
       </Unit200>
+      <Unit201>
+        <Filename Value="../common-code/toolpreloadstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPreloadStudio"/>
+      </Unit201>
+      <Unit202>
+        <Filename Value="code/formpreloadstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPreloadStudio"/>
+      </Unit202>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
