@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -983,7 +983,7 @@ begin
   P.Add('query', MakePropSchema('string', 'Optional multi-token case-insensitive keyword filter (e.g. "ackermann", "gauntlet", "phase 325").'));
   P.Add('category', MakePropSchema('integer', 'Optional studio domain index (-1 = all 6 domains, 0..5 = specific TStudioHubCategory).'));
   AddToolDef('cge_list_studios',
-    'Search and list all 86 specialized Castle Game Engine Horizon 2-10 editor studios across 6 domains.',
+    'Search and list all 96 specialized Castle Game Engine Horizon 2-11 editor studios across 6 domains.',
     P, []);
 
   AddToolDef('cge_audit_world_readiness',
@@ -1007,7 +1007,7 @@ begin
   P := TJSONObject.Create;
   P.Add('checkDiskUrls', MakePropSchema('boolean', 'When true, also checks URIFileExists on disk for every non-empty asset URL property (default false).'));
   AddToolDef('cge_audit_package_cook',
-    'Run the Release Package Cook Readiness Auditor across the open design (broken/traversal URLs, ChooserTable validation, Tetrahedral Soft-Body inversions, MassTraffic safety, and 86-Studio World Readiness).',
+    'Run the Release Package Cook Readiness Auditor across the open design (broken/traversal URLs, ChooserTable validation, Tetrahedral Soft-Body inversions, MassTraffic safety, and 96-Studio World Readiness).',
     P, []);
 
   P := TJSONObject.Create;
@@ -1017,6 +1017,21 @@ begin
   P.Add('leaseSec', MakePropSchema('number', 'Lease reservation duration in seconds before stale auto-expiration (default 30).'));
   AddToolDef('cge_manage_collab_locks',
     'Coordinate multi-user / multi-agent subtree edit reservation locks with ancestor/descendant conflict rejection and lease heartbeats.',
+    P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Macro command: "status", "record_step", "replay", "clear", or "import_json" (default "status").'));
+  P.Add('stepKind', MakePropSchema('string', 'Step operation for record_step: "add_translate", "multiply_scale", "set_tag", "rename_prefix", or "set_color_rgb".'));
+  P.Add('targetFilter', MakePropSchema('string', 'Case-insensitive transform name substring filter ("*" or empty matches all transforms).'));
+  P.Add('vecX', MakePropSchema('number', 'X vector parameter for translation/scale/RGB tint.'));
+  P.Add('vecY', MakePropSchema('number', 'Y vector parameter for translation/scale/RGB tint.'));
+  P.Add('vecZ', MakePropSchema('number', 'Z vector parameter for translation/scale/RGB tint.'));
+  P.Add('scalarParam', MakePropSchema('number', 'Scalar parameter (e.g. integer Tag value for set_tag).'));
+  P.Add('strParam', MakePropSchema('string', 'String parameter (e.g. prefix for rename_prefix).'));
+  P.Add('multiplier', MakePropSchema('number', 'Parameterized delta multiplier applied during replay (default 1.0).'));
+  P.Add('macroJson', MakePropSchema('string', 'Serialized macro JSON payload for import_json.'));
+  AddToolDef('cge_run_editor_macro',
+    'Record, import, inspect, or replay parameterized multi-step scene transform macros across the open design.',
     P, []);
 end;
 
@@ -1136,6 +1151,10 @@ var
   CollabLeaseSec: Double;
   CollabOk: Boolean;
   CollabLock: TCollabSubtreeLock;
+  MacroStepKind: TMacroStepKind;
+  MacroAffected: Integer;
+  MacroMult: Single;
+  MacroStepItem: TEditorMacroStep;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -1898,6 +1917,106 @@ begin
       OutPayload.Add('activeLockCount', TCollabPresenceBroker.SharedBroker.ActiveLockCount);
       OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
       OutPayload.Add('locks', TargetsArr);
+      TargetsArr := nil;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(TargetsArr);
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_run_editor_macro' then
+  begin
+    ActionName := 'status';
+    FilterStr := '';
+    MacroMult := 1.0;
+    if ArgsObj <> nil then
+    begin
+      ActionName := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      FilterStr := Trim(ArgsObj.Get('targetFilter', ''));
+      MacroMult := ArgsObj.Get('multiplier', 1.0);
+    end;
+
+    if SameText(ActionName, 'status') then
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    CollabOk := True;
+    MacroAffected := 0;
+    ErrMsg := '';
+
+    if SameText(ActionName, 'clear') then
+      TEditorMacroRecorder.SharedRecorder.ClearSteps
+    else if SameText(ActionName, 'record_step') then
+    begin
+      if (ArgsObj = nil) or (not TEditorMacroRecorder.StringToStepKind(
+         ArgsObj.Get('stepKind', 'add_translate'), MacroStepKind)) then
+      begin
+        CollabOk := False;
+        ErrMsg := 'INVALID_STEP_KIND';
+      end else
+        TEditorMacroRecorder.SharedRecorder.RecordStep(
+          MacroStepKind,
+          FilterStr,
+          Vector3(
+            ArgsObj.Get('vecX', 0.0),
+            ArgsObj.Get('vecY', 0.0),
+            ArgsObj.Get('vecZ', 0.0)),
+          ArgsObj.Get('scalarParam', 0.0),
+          ArgsObj.Get('strParam', ''));
+    end else if SameText(ActionName, 'import_json') then
+    begin
+      CollabOk := (ArgsObj <> nil) and
+        TEditorMacroRecorder.SharedRecorder.ImportMacroJson(ArgsObj.Get('macroJson', ''));
+      if not CollabOk then
+        ErrMsg := 'INVALID_MACRO_JSON';
+    end else if SameText(ActionName, 'replay') then
+    begin
+      if DesignRoot = nil then
+      begin
+        CollabOk := False;
+        ErrMsg := 'NO_OPEN_DESIGN';
+      end else
+      begin
+        MacroAffected := TEditorMacroRecorder.SharedRecorder.ReplayMacro(DesignRoot, MacroMult);
+        if (MacroAffected > 0) and Assigned(FOnAfterModify) then
+          FOnAfterModify(Format('MCP replay macro %s (%d transforms)',
+            [TEditorMacroRecorder.SharedRecorder.MacroName, MacroAffected]));
+      end;
+    end;
+
+    OutPayload := TJSONObject.Create;
+    TargetsArr := TJSONArray.Create;
+    try
+      for I := 0 to TEditorMacroRecorder.SharedRecorder.StepCount - 1 do
+      begin
+        MacroStepItem := TEditorMacroRecorder.SharedRecorder.GetStep(I);
+        StudioItemObj := TJSONObject.Create;
+        StudioItemObj.Add('kind', TEditorMacroRecorder.StepKindToString(MacroStepItem.Kind));
+        StudioItemObj.Add('targetFilter', MacroStepItem.TargetFilter);
+        StudioItemObj.Add('vecX', MacroStepItem.VecParam.X);
+        StudioItemObj.Add('vecY', MacroStepItem.VecParam.Y);
+        StudioItemObj.Add('vecZ', MacroStepItem.VecParam.Z);
+        StudioItemObj.Add('scalarParam', MacroStepItem.ScalarParam);
+        StudioItemObj.Add('strParam', MacroStepItem.StrParam);
+        TargetsArr.Add(StudioItemObj);
+      end;
+      OutPayload.Add('ok', CollabOk);
+      OutPayload.Add('action', ActionName);
+      OutPayload.Add('errorReason', ErrMsg);
+      OutPayload.Add('macroName', TEditorMacroRecorder.SharedRecorder.MacroName);
+      OutPayload.Add('stepCount', TEditorMacroRecorder.SharedRecorder.StepCount);
+      OutPayload.Add('affectedTransforms', MacroAffected);
+      OutPayload.Add('replayCount', TEditorMacroRecorder.SharedRecorder.ReplayCount);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('macroJson', TEditorMacroRecorder.SharedRecorder.ExportMacroJson);
+      OutPayload.Add('steps', TargetsArr);
       TargetsArr := nil;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

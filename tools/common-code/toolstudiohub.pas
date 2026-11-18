@@ -130,7 +130,10 @@ uses
   CastleMassTraffic,
   CastleSurfaceGi, CastleContextualAnim, CastleTargetingSystem,
   CastleMutableCharacter, CastleRiverSpline, CastleOccluderFader,
-  CastleGameplayDebugger, CastleWindField, CastleAssetPreloader;
+  CastleGameplayDebugger, CastleWindField, CastleAssetPreloader,
+  CastleSubstrateMaterial, CastleSmartObjectSlots, CastleAeroFoil,
+  CastleCreviceClutter, CastleCameraShake, CastleFireGrid2D,
+  CastleGameplayMessenger, CastleOctahedralImpostor, CastlePoseSnapshot;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -490,6 +493,38 @@ begin
   Reg('collab_presence', 'Multi-User Collaborative Presence Locks & Sub-Scene Conflict Studio', 'Collab',
     shcPerformanceQaDeploy, 366, 'multi user collaborative presence subtree lock conflict ancestor descendant lease heartbeat',
     'Hierarchical ancestor/descendant subtree reservation locks, lease heartbeats & 86-Studio Hub.');
+
+  { Horizon 11 (Phases 367-376 — UE 6.0+ Substrate Slabs, SmartObject Queues, Aero Foil, Crevice Clutter, Camera Shake/Recoil, Grid2D Fire Spread, Gameplay Message Bus, Octahedral Impostors, Pose Snapshot Trails & Editor Macro Recorder, +10 -> 96 studios) }
+  Reg('substrate_studio', 'Substrate Multi-Slab Layered Material Mixer & Energy Studio', 'Substr',
+    shcMaterialsVfxLighting, 367, 'substrate multi slab layered material clear coat dust water transmittance fresnel energy conservation',
+    'Multi-slab vertical Fresnel/Beer-Lambert material mixer with strict energy conservation.');
+  Reg('smart_object_slots', 'Multi-Slot SmartObject Claiming, FIFO Queue & Lockout Studio', 'SmartQ',
+    shcCharactersAiGas, 368, 'smart object multi slot claiming fifo wait queue preemption lockout bench anvil',
+    'Capacity-bounded multi-slot workstation claiming with FIFO wait-queue & per-slot lockouts.');
+  Reg('aero_foil', 'Aerodynamic Wing / Sail Foil Polar, Stall & Thermal Updraft Studio', 'AeroFoil',
+    shcWorldEnvironment, 369, 'aerodynamic wing sail glider foil lift drag polar angle of attack critical stall thermal updraft',
+    'Real-time C_L/C_D angle-of-attack wing/sail solver with post-stall drop & thermal columns.');
+  Reg('crevice_clutter', 'Procedural Wall-Crevice & Seam Micro-Clutter Skirt Studio', 'Crevice',
+    shcArchitecturePcg, 370, 'wall crevice seam corner floor skirt micro clutter pebbles moss rubble worldray',
+    'WorldRay floor-wall concave corner & crevice detector scattering pebbles, moss & debris skirts.');
+  Reg('camera_shake', 'Cinematic Camera Shake Envelope, Recoil & FOV Kickback Studio', 'CamShake',
+    shcCinematicsAudioInput, 371, 'camera shake trauma perlin directional weapon recoil recovery fov kickback accessibility',
+    'Trauma^2 shake envelopes, damped spring weapon recoil, FOV kickback & 0% accessibility toggle.');
+  Reg('fire_grid_2d', 'Niagara Grid2D Cellular Fire Spread, Wind Front & Rain Studio', 'Fire2D',
+    shcMaterialsVfxLighting, 372, 'niagara grid2d fire spread combustion cellular downwind flame stone firebreak rain douse ash',
+    '2D fuel/temperature cellular fire propagation with wind advection, firebreaks & rain douse.');
+  Reg('gameplay_messenger', 'Gameplay Message Bus & Squad Bark Priority Preemption Studio', 'MsgBus',
+    shcCharactersAiGas, 373, 'gameplay message bus pub sub hierarchical tag squad radio bark priority preemption antispam',
+    'Dot-boundary GameplayTag pub/sub router & squad voice bark arbiter with emergency preemption.');
+  Reg('octahedral_impostor', 'Octahedral Billboard Impostor Atlas & 3-View Blend Studio', 'Impostor',
+    shcMaterialsVfxLighting, 374, 'octahedral billboard impostor hemi uv atlas 3 view barycentric simplex lod card',
+    'Bijective upper-hemisphere octahedral UV projection & 3-tile barycentric LOD card blending.');
+  Reg('pose_snapshot', 'Skeletal Pose Snapshot, Dash Ghost Trail & Statue Freeze Studio', 'PoseSnap',
+    shcCharactersAiGas, 375, 'pose snapshot skeletal dash ghost afterimage trail ring buffer alpha decay petrified statue',
+    'Zero-allocation ring-buffer dash ghost silhouettes, spectral decay & petrified statue freeze.');
+  Reg('macro_recorder', 'Editor Action Macro Recorder & 96-Studio Hub Studio', 'Macro',
+    shcPerformanceQaDeploy, 376, 'editor action macro recorder batch transform replay parameterized json 96 studio hub mcp',
+    'Multi-step filtered transform macro recording, JSON export/import, replay & 96-Studio Hub.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -778,6 +813,17 @@ var
          (TCastleDesignAnnotationUi(C).Status <> dasResolved) then
         Inc(OpenBugPinCount);
     end;
+
+    { Horizon 11 Subsystems }
+    if (C is TCastleSubstrateMaterial) or (C is TCastleFireSpreadGrid) or
+       (C is TCastleOctahedralImpostor) then
+      BumpSub(shcMaterialsVfxLighting);
+    if (C is TCastleMultiSlotSmartObject) or (C is TCastleGameplayMessenger) or
+       (C is TCastlePoseSnapshotTrail) then
+      BumpSub(shcCharactersAiGas);
+    if C is TCastleAeroFoilBehavior then BumpSub(shcWorldEnvironment);
+    if C is TCastleCreviceClutterVolume then BumpSub(shcArchitecturePcg);
+    if C is TCastleCameraShakeDirector then BumpSub(shcCinematicsAudioInput);
   end;
 
   procedure Traverse(const C: TComponent);

@@ -241,7 +241,7 @@ begin
 
   B := TCollabPresenceBroker.SharedBroker;
   Cv.Font.Color := RGBToColor(115, 235, 165);
-  Cv.TextOut(16, 12, Format('Horizon 10 Unified Hub: %d Studios | 18 MCP Tools | Clock: %.1fs', [
+  Cv.TextOut(16, 12, Format('Horizon 11 Unified Hub: %d Studios | 19 MCP Tools | Clock: %.1fs', [
     TStudioHubManager.StudioCount, B.CurrentTimeSec]));
 
   Y := 48;

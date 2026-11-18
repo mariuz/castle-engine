@@ -43,7 +43,7 @@ uses
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolSmartObjectSlots, ToolAeroFoil, ToolCreviceClutter, ToolCameraShake, ToolFireGrid2D, ToolGameplayMessenger, ToolOctahedralImpostor, ToolPoseSnapshot;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolSmartObjectSlots, ToolAeroFoil, ToolCreviceClutter, ToolCameraShake, ToolFireGrid2D, ToolGameplayMessenger, ToolOctahedralImpostor, ToolPoseSnapshot, ToolMacroRecorder;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -916,6 +916,8 @@ type
       MenuTreeViewItemOctahedralImpostor: TMenuItem;
       ButtonPoseSnapshot: TSpeedButton;
       MenuTreeViewItemPoseSnapshot: TMenuItem;
+      ButtonMacroRecorder: TSpeedButton;
+      MenuTreeViewItemMacroRecorder: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1529,6 +1531,8 @@ type
     procedure MenuTreeViewItemOctahedralImpostorClick(Sender: TObject);
     procedure ButtonPoseSnapshotClick(Sender: TObject);
     procedure MenuTreeViewItemPoseSnapshotClick(Sender: TObject);
+    procedure ButtonMacroRecorderClick(Sender: TObject);
+    procedure MenuTreeViewItemMacroRecorderClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -3055,6 +3059,7 @@ type
     procedure ShowGameplayMessengerDialog;
     procedure ShowOctahedralImpostorDialog;
     procedure ShowPoseSnapshotDialog;
+    procedure ShowMacroRecorderDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -3076,7 +3081,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormSmartObjectSlots, FormAeroFoil, FormCreviceClutter, FormCameraShake, FormFireGrid2D, FormGameplayMessenger, FormOctahedralImpostor, FormPoseSnapshot, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormSmartObjectSlots, FormAeroFoil, FormCreviceClutter, FormCameraShake, FormFireGrid2D, FormGameplayMessenger, FormOctahedralImpostor, FormPoseSnapshot, FormMacroRecorder, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -8441,6 +8446,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonPoseSnapshot,
       PanelMiddleTop.GetControlIndex(ButtonOctahedralImpostor) + 1);
 
+  ButtonMacroRecorder := TSpeedButton.Create(Self);
+  ButtonMacroRecorder.Caption := 'Macro';
+  ButtonMacroRecorder.Hint := 'Open Editor Action Macro Recorder & 96-Studio Hub.' + NL +
+    'Record multi-step filtered scene transform macros, JSON export/import & parameterized batch replay.';
+  ButtonMacroRecorder.ShowHint := true;
+  ButtonMacroRecorder.AutoSize := true;
+  ButtonMacroRecorder.Constraints.MinHeight := 33;
+  ButtonMacroRecorder.Constraints.MinWidth := 58;
+  ButtonMacroRecorder.BorderSpacing.Left := 2;
+  ButtonMacroRecorder.OnClick := @ButtonMacroRecorderClick;
+  ButtonMacroRecorder.Parent := PanelMiddleTop;
+  if ButtonPoseSnapshot.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonMacroRecorder,
+      PanelMiddleTop.GetControlIndex(ButtonPoseSnapshot) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -11737,6 +11757,10 @@ begin
   MenuTreeViewItemPoseSnapshot.Caption := 'Skeletal Pose Snapshot & Dash Ghost Studio...';
   MenuTreeViewItemPoseSnapshot.OnClick := @MenuTreeViewItemPoseSnapshotClick;
   MenuTreeView.Items.Add(MenuTreeViewItemPoseSnapshot);
+  MenuTreeViewItemMacroRecorder := TMenuItem.Create(Self);
+  MenuTreeViewItemMacroRecorder.Caption := 'Editor Action Macro Recorder & 96-Studio Hub...';
+  MenuTreeViewItemMacroRecorder.OnClick := @MenuTreeViewItemMacroRecorderClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMacroRecorder);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -57432,6 +57456,7 @@ begin
   else if SameText(AStudioId, 'gameplay_messenger') then ShowGameplayMessengerDialog
   else if SameText(AStudioId, 'octahedral_impostor') then ShowOctahedralImpostorDialog
   else if SameText(AStudioId, 'pose_snapshot') then ShowPoseSnapshotDialog
+  else if SameText(AStudioId, 'macro_recorder') then ShowMacroRecorderDialog
   else
     Result := False;
 end;
@@ -59054,6 +59079,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemPoseSnapshotClick(Sender: TObject);
 begin
   ShowPoseSnapshotDialog;
+end;
+
+procedure TDesignFrame.ShowMacroRecorderDialog;
+var
+  Dlg: TMacroRecorderForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TMacroRecorderForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonMacroRecorderClick(Sender: TObject);
+begin
+  ShowMacroRecorderDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMacroRecorderClick(Sender: TObject);
+begin
+  ShowMacroRecorderDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

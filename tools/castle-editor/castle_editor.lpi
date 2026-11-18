@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="223">
+    <Units Count="225">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1197,6 +1197,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormPoseSnapshot"/>
       </Unit222>
+      <Unit223>
+        <Filename Value="../common-code/toolmacrorecorder.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMacroRecorder"/>
+      </Unit223>
+      <Unit224>
+        <Filename Value="code/formmacrorecorder.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMacroRecorder"/>
+      </Unit224>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

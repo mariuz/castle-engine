@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–375** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–376** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4694,6 +4694,13 @@ Phase 375 adds Unreal Engine 6.0+ `FPoseSnapshot`-style **Skeletal Pose Snapshot
 - **Zero-Allocation Ring Buffer (`CaptureDashAfterimage` & `StepGhostDecay`)**: Stores up to `MaxGhostCount` (`1..16`) character pose snapshots in a fixed circular array with linear alpha/lifetime decay and spectral cyan/violet silhouette rendering.
 - **Petrified Stone Statue Lock (`FreezeStatuePose` / `UnfreezeStatuePose`)**: Locks a frozen stone statue pose in world space while rejecting new dash afterimage captures until unfrozen.
 
+## 66CW. Phase 376: Editor Action Macro Recorder, Parameterized Batch Transform Replay & 96-Studio Hub / 19-Tool MCP Upgrade
+
+Phase 376 adds Unreal Engine 6.0+ Editor Utility-style **Multi-Step Scene Action Macro Recording & Parameterized Replay** via `TEditorMacroRecorder` (`tools/common-code/toolmacrorecorder.pas`) and `TMacroRecorderForm` (`tools/castle-editor/code/formmacrorecorder.pas`), accessible from **`Macro`** in the top viewport toolbar, **`Design -> Editor Action Macro Recorder & 96-Studio Hub...`**, or `LaunchStudioById('macro_recorder')`.
+
+- **Parameterized Batch Transform Macros (`RecordStep`, `ReplayMacro`, `ExportMacroJson` / `ImportMacroJson`)**: Records multi-step `add_translate`, `multiply_scale`, `set_tag`, `rename_prefix`, and `set_color_rgb` pipelines filtered by transform name substring and replays them with arbitrary `DeltaMultiplier` scaling.
+- **Unified 96-Studio Hub & 19th MCP Tool (`cge_run_editor_macro`)**: Upgrades `TStudioHubManager` to **`96` studios** across all 6 domains (`Phases 1–376`) and exposes `cge_run_editor_macro` (`status`, `record_step`, `replay`, `clear`, `import_json`) as the **19th JSON-RPC MCP tool** in `TCastleMcpServer`.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4857,4 +4864,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolgameplaymessenger.pas`](../tests/code/testcases/testtoolgameplaymessenger.pas) (`TTestToolGameplayMessenger` — 2 tests)**: Verifies strict dot-boundary hierarchical vs. exact channel pub/sub routing (`Combat.Dam` never falsely matching `Combat.Damage.Critical`), `bpCriticalEmergency` mid-sentence bark preemption over `bpAmbientChatter`, per-tag anti-spam cooldown blocking & post-expiry restoration, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooloctahedralimpostor.pas`](../tests/code/testcases/testtooloctahedralimpostor.pas) (`TTestToolOctahedralImpostor` — 2 tests)**: Verifies bijective upper-hemisphere hemi-octahedral `EncodeHemiOctahedralUv` / `DecodeHemiOctahedralDir` reversibility (`< 1e-4`), exact Kronecker delta `1.0` on grid vertices, 3-tile barycentric weight summation (`W0 + W1 + W2 = 1.0`), distance LOD switchover, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolposesnapshot.pas`](../tests/code/testcases/testtoolposesnapshot.pas) (`TTestToolPoseSnapshot` — 2 tests)**: Verifies fixed-capacity ring-buffer eviction (`6` dash captures in `MaxGhostCount = 4` overwriting oldest slots without heap growth), linear alpha/lifetime decay & expiration, petrified statue pose lock rejecting new dash captures, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmacrorecorder.pas`](../tests/code/testcases/testtoolmacrorecorder.pas) (`TTestToolMacroRecorder` — 2 tests)**: Verifies multi-step name-filtered transform macro recording (`add_translate`, `multiply_scale`, `set_tag`), JSON export/import roundtrips, `DeltaMultiplier` batch replay isolation, the unified **96-Studio Hub** catalog (`Phases 1–376`), and the **19th MCP tool** `cge_run_editor_macro` (`0 unfreed memory blocks`).
 

@@ -589,7 +589,7 @@ begin
     '# Multi-User Collaborative Presence & Sub-Scene Lock Report (Phase 366)' + LineEnding + LineEnding +
     '| Metric | Value |' + LineEnding +
     '| :--- | :--- |' + LineEnding +
-    Format('| **Design Root & Hub Catalog** | `%s` — **`%d` Studios** across `6` Domains (`18` MCP Tools) |', [
+    Format('| **Design Root & Hub Catalog** | `%s` — **`%d` Studios** across `6` Domains (`19` MCP Tools) |', [
       RootLabel, TStudioHubManager.StudioCount]) + LineEnding +
     Format('| **Session Clock & Active Locks** | `t = %.1fs` / **`%d` active subtree locks** (`%d` peers) |', [
       FCurrentTimeSec, ActiveLockCount, PeerCount]) + LineEnding + LineEnding +

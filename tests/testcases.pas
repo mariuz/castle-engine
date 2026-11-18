@@ -202,6 +202,7 @@ uses
   TestToolGameplayMessenger,
   TestToolOctahedralImpostor,
   TestToolPoseSnapshot,
+  TestToolMacroRecorder,
   TestCastleVulkanRHI;
 
 implementation

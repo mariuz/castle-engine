@@ -201,7 +201,7 @@ begin
   Cv.Brush.Style := bsClear;
   Cv.Font.Color := clWhite;
   Cv.Font.Style := [fsBold];
-  Cv.TextOut(18, 10, Format('Release Package Cook Readiness: %d / 100 (%s) | Cataloged Studios: %d | MCP Tools: 17', [
+  Cv.TextOut(18, 10, Format('Release Package Cook Readiness: %d / 100 (%s) | Cataloged Studios: %d | MCP Tools: 19', [
     FLastCookScore,
     BoolToStr(FLastReadyToShip, 'SHIP-READY', 'BLOCKED BY COOK HAZARDS'),
     TStudioHubManager.StudioCount]));

@@ -689,6 +689,7 @@ type
       MenuItemGameplayMessenger: TMenuItem;
       MenuItemOctahedralImpostor: TMenuItem;
       MenuItemPoseSnapshot: TMenuItem;
+      MenuItemMacroRecorder: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -798,6 +799,7 @@ type
     procedure MenuItemGameplayMessengerClick(Sender: TObject);
     procedure MenuItemOctahedralImpostorClick(Sender: TObject);
     procedure MenuItemPoseSnapshotClick(Sender: TObject);
+    procedure MenuItemMacroRecorderClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2867,6 +2869,11 @@ begin
   MenuItemPoseSnapshot.Caption := 'Skeletal Pose Snapshot & Dash Ghost Studio...';
   MenuItemPoseSnapshot.OnClick := @MenuItemPoseSnapshotClick;
   MenuItemDesign.Add(MenuItemPoseSnapshot);
+
+  MenuItemMacroRecorder := TMenuItem.Create(MenuItemDesign);
+  MenuItemMacroRecorder.Caption := 'Editor Action Macro Recorder & 96-Studio Hub...';
+  MenuItemMacroRecorder.OnClick := @MenuItemMacroRecorderClick;
+  MenuItemDesign.Add(MenuItemMacroRecorder);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6377,6 +6384,12 @@ procedure TProjectForm.MenuItemPoseSnapshotClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowPoseSnapshotDialog;
+end;
+
+procedure TProjectForm.MenuItemMacroRecorderClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMacroRecorderDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
