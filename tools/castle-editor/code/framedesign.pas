@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt, CastleMover2, CastleCameraRigRail, CastleMeshletCluster, CastleTetSoftBody, CastleMassTraffic, CastleSurfaceGi, CastleContextualAnim, CastleTargetingSystem, CastleMutableCharacter, CastleRiverSpline, CastleOccluderFader, CastleGameplayDebugger, CastleWindField, CastleAssetPreloader, CastleSubstrateMaterial, CastleSmartObjectSlots, CastleAeroFoil, CastleCreviceClutter, CastleCameraShake, CastleFireGrid2D,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt, CastleMover2, CastleCameraRigRail, CastleMeshletCluster, CastleTetSoftBody, CastleMassTraffic, CastleSurfaceGi, CastleContextualAnim, CastleTargetingSystem, CastleMutableCharacter, CastleRiverSpline, CastleOccluderFader, CastleGameplayDebugger, CastleWindField, CastleAssetPreloader, CastleSubstrateMaterial, CastleSmartObjectSlots, CastleAeroFoil, CastleCreviceClutter, CastleCameraShake, CastleFireGrid2D, CastleGameplayMessenger,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolSmartObjectSlots, ToolAeroFoil, ToolCreviceClutter, ToolCameraShake, ToolFireGrid2D;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolSmartObjectSlots, ToolAeroFoil, ToolCreviceClutter, ToolCameraShake, ToolFireGrid2D, ToolGameplayMessenger;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -910,6 +910,8 @@ type
       MenuTreeViewItemCameraShake: TMenuItem;
       ButtonFireGrid2D: TSpeedButton;
       MenuTreeViewItemFireGrid2D: TMenuItem;
+      ButtonGameplayMessenger: TSpeedButton;
+      MenuTreeViewItemGameplayMessenger: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1517,6 +1519,8 @@ type
     procedure MenuTreeViewItemCameraShakeClick(Sender: TObject);
     procedure ButtonFireGrid2DClick(Sender: TObject);
     procedure MenuTreeViewItemFireGrid2DClick(Sender: TObject);
+    procedure ButtonGameplayMessengerClick(Sender: TObject);
+    procedure MenuTreeViewItemGameplayMessengerClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -3040,6 +3044,7 @@ type
     procedure ShowCreviceClutterDialog;
     procedure ShowCameraShakeDialog;
     procedure ShowFireGrid2DDialog;
+    procedure ShowGameplayMessengerDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -3061,7 +3066,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormSmartObjectSlots, FormAeroFoil, FormCreviceClutter, FormCameraShake, FormFireGrid2D, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormSmartObjectSlots, FormAeroFoil, FormCreviceClutter, FormCameraShake, FormFireGrid2D, FormGameplayMessenger, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -8381,6 +8386,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonFireGrid2D,
       PanelMiddleTop.GetControlIndex(ButtonCameraShake) + 1);
 
+  ButtonGameplayMessenger := TSpeedButton.Create(Self);
+  ButtonGameplayMessenger.Caption := 'MsgBus';
+  ButtonGameplayMessenger.Hint := 'Open Gameplay Message Bus & Squad Bark Studio.' + NL +
+    'Route hierarchical pub/sub topics, distance-culled spatial comms & priority bark preemption.';
+  ButtonGameplayMessenger.ShowHint := true;
+  ButtonGameplayMessenger.AutoSize := true;
+  ButtonGameplayMessenger.Constraints.MinHeight := 33;
+  ButtonGameplayMessenger.Constraints.MinWidth := 62;
+  ButtonGameplayMessenger.BorderSpacing.Left := 2;
+  ButtonGameplayMessenger.OnClick := @ButtonGameplayMessengerClick;
+  ButtonGameplayMessenger.Parent := PanelMiddleTop;
+  if ButtonFireGrid2D.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonGameplayMessenger,
+      PanelMiddleTop.GetControlIndex(ButtonFireGrid2D) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -11665,6 +11685,10 @@ begin
   MenuTreeViewItemFireGrid2D.Caption := 'Niagara Grid2D Cellular Fire Spread Studio...';
   MenuTreeViewItemFireGrid2D.OnClick := @MenuTreeViewItemFireGrid2DClick;
   MenuTreeView.Items.Add(MenuTreeViewItemFireGrid2D);
+  MenuTreeViewItemGameplayMessenger := TMenuItem.Create(Self);
+  MenuTreeViewItemGameplayMessenger.Caption := 'Gameplay Message Bus & Squad Bark Studio...';
+  MenuTreeViewItemGameplayMessenger.OnClick := @MenuTreeViewItemGameplayMessengerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemGameplayMessenger);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -17065,6 +17089,8 @@ var
         Suffix := Suffix + ' ' + TCastleCameraShakeDirector(NodeObj).ShakeSummaryBadge
       else if NodeObj is TCastleFireSpreadGrid then
         Suffix := Suffix + ' ' + TCastleFireSpreadGrid(NodeObj).FireSummaryBadge
+      else if NodeObj is TCastleGameplayMessenger then
+        Suffix := Suffix + ' ' + TCastleGameplayMessenger(NodeObj).MessengerSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -57351,6 +57377,7 @@ begin
   else if SameText(AStudioId, 'crevice_clutter') then ShowCreviceClutterDialog
   else if SameText(AStudioId, 'camera_shake') then ShowCameraShakeDialog
   else if SameText(AStudioId, 'fire_grid_2d') then ShowFireGrid2DDialog
+  else if SameText(AStudioId, 'gameplay_messenger') then ShowGameplayMessengerDialog
   else
     Result := False;
 end;
@@ -58892,6 +58919,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemFireGrid2DClick(Sender: TObject);
 begin
   ShowFireGrid2DDialog;
+end;
+
+procedure TDesignFrame.ShowGameplayMessengerDialog;
+var
+  Dlg: TGameplayMessengerForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TGameplayMessengerForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonGameplayMessengerClick(Sender: TObject);
+begin
+  ShowGameplayMessengerDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemGameplayMessengerClick(Sender: TObject);
+begin
+  ShowGameplayMessengerDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

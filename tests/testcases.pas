@@ -199,6 +199,7 @@ uses
   TestToolCreviceClutter,
   TestToolCameraShake,
   TestToolFireGrid2D,
+  TestToolGameplayMessenger,
   TestCastleVulkanRHI;
 
 implementation

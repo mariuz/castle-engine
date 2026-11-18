@@ -686,6 +686,7 @@ type
       MenuItemCreviceClutter: TMenuItem;
       MenuItemCameraShake: TMenuItem;
       MenuItemFireGrid2D: TMenuItem;
+      MenuItemGameplayMessenger: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -792,6 +793,7 @@ type
     procedure MenuItemCreviceClutterClick(Sender: TObject);
     procedure MenuItemCameraShakeClick(Sender: TObject);
     procedure MenuItemFireGrid2DClick(Sender: TObject);
+    procedure MenuItemGameplayMessengerClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2846,6 +2848,11 @@ begin
   MenuItemFireGrid2D.Caption := 'Niagara Grid2D Cellular Fire Spread Studio...';
   MenuItemFireGrid2D.OnClick := @MenuItemFireGrid2DClick;
   MenuItemDesign.Add(MenuItemFireGrid2D);
+
+  MenuItemGameplayMessenger := TMenuItem.Create(MenuItemDesign);
+  MenuItemGameplayMessenger.Caption := 'Gameplay Message Bus & Squad Bark Studio...';
+  MenuItemGameplayMessenger.OnClick := @MenuItemGameplayMessengerClick;
+  MenuItemDesign.Add(MenuItemGameplayMessenger);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6338,6 +6345,12 @@ procedure TProjectForm.MenuItemFireGrid2DClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowFireGrid2DDialog;
+end;
+
+procedure TProjectForm.MenuItemGameplayMessengerClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowGameplayMessengerDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="217">
+    <Units Count="219">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1167,6 +1167,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormFireGrid2D"/>
       </Unit216>
+      <Unit217>
+        <Filename Value="../common-code/toolgameplaymessenger.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGameplayMessenger"/>
+      </Unit217>
+      <Unit218>
+        <Filename Value="code/formgameplaymessenger.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGameplayMessenger"/>
+      </Unit218>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

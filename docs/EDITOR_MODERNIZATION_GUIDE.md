@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–372** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–373** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4657,6 +4657,29 @@ Grid.StepCombustion(0.25);
 
 ---
 
+## 66CT. Gameplay Message Bus & Squad AI Radio Bark Router Studio (Phase 373)
+
+Castle Game Engine provides a decoupled GameplayTag pub/sub router and single-channel squad AI radio bark arbiter with anti-spam cooldowns and emergency priority preemption matching Unreal Engine 6.0+'s `UGameplayMessageSubsystem` workflows:
+
+1. **Gameplay Messenger Runtime (`src/scene/castlegameplaymessenger.pas`)**:
+   - `TCastleGameplayMessenger` routes dot-boundary GameplayTag messages (`BroadcastGameplayMessage`) to hierarchical or exact channel subscribers (`RegisterChannelSubscription`), while `RequestSquadBark` prevents simultaneous voice spam via per-tag cooldowns and preempts lower-priority chatter on `bpCriticalEmergency` alerts.
+2. **Message Bus & Bark Studio (`TGameplayMessengerForm` & `TGameplayMessengerHelper`)**:
+   - Open via the top-bar **`MsgBus`** button, Hierarchy context menu, or **`Design -> Gameplay Message Bus & Squad Bark Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TGameplayMessengerHelper.SpawnSquadCommsBusDemo(Viewport, DesignOwner, Bus);
+Bus.BroadcastGameplayMessage('Combat.Damage.Critical', 'HeroPaladin', 420.0, 'SunfireCrit');
+Bus.RequestSquadBark('Bark.Combat.Grenade', 'Captain', 'GRENADE!', bpCriticalEmergency, 2.5, 8.0, Reason);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors & Sound](https://castle-engine.io/behaviors) · [UE Lyra Gameplay Message Router](https://dev.epicgames.com/documentation/en-us/unreal-engine/lyra-sample-game-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Game Architecture, Audio & AI Events (YouTube)](https://www.youtube.com/watch?v=f35MP274-4k)
+- **Screenshots:** [CGE 3D Tactical Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4817,4 +4840,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolcreviceclutter.pas`](../tests/code/testcases/testtoolcreviceclutter.pas) (`TTestToolCreviceClutter` — 2 tests)**: Verifies 8-compass `WorldRay` wall-seam accumulation (`> 12` items), multi-wall concave L-corner detection (`WallHitDirs >= 4`), `0` stray clutter in the open South-East courtyard, seeded determinism, `2.10m` vs. `1.20m` skirt scaling, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcamerashake.pas`](../tests/code/testcases/testtoolcamerashake.pas) (`TTestToolCameraShake` — 2 tests)**: Verifies C1 Hermite explosion distance falloff (`0.0` at `40m > 28m`, `0.50` at `16m`, `1.00` at `2m`), directional shotgun pitch/FOV recoil kick (`+3.5°` pitch & `+3.0°` FOV) and decay to zero rest, `8`-blast `MaxPitchRollCapDeg` clamping, `GlobalShakeScale = 0.0` motion-sickness suppression, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolfiregrid2d.pas`](../tests/code/testcases/testtoolfiregrid2d.pas) (`TTestToolFireGrid2D` — 2 tests)**: Verifies `+X` downwind flame-front acceleration (`> 2x` burned area vs. upwind `-X`), origin fuel exhaustion to `fcsCharredAsh`, `100%` containment across a non-flammable `IX = 9` stone firebreak trench, `DouseWaterSplash` + monsoon `RainIntensity = 1.0` extinguishing, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolgameplaymessenger.pas`](../tests/code/testcases/testtoolgameplaymessenger.pas) (`TTestToolGameplayMessenger` — 2 tests)**: Verifies strict dot-boundary hierarchical vs. exact channel pub/sub routing (`Combat.Dam` never falsely matching `Combat.Damage.Critical`), `bpCriticalEmergency` mid-sentence bark preemption over `bpAmbientChatter`, per-tag anti-spam cooldown blocking & post-expiry restoration, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
