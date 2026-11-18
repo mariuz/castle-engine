@@ -175,6 +175,7 @@ uses
   TestToolRegressionHarness,
   TestToolChooserTable,
   TestToolGroomStudio,
+  TestToolTraversalStudio,
   TestCastleVulkanRHI;
 
 implementation

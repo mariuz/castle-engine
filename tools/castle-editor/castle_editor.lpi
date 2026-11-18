@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="169">
+    <Units Count="171">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -927,6 +927,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormGroomStudio"/>
       </Unit168>
+      <Unit169>
+        <Filename Value="../common-code/tooltraversalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTraversalStudio"/>
+      </Unit169>
+      <Unit170>
+        <Filename Value="code/formtraversalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTraversalStudio"/>
+      </Unit170>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

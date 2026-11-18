@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–348** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–349** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4112,6 +4112,29 @@ Groom.StepGroomPhysics(0.03);
 
 ---
 
+## 66BV. Parkour Traversal Ledge/Vault/Mantle Scanner & Root-Motion Warp Studio (Phase 349)
+
+Castle Game Engine provides multi-ray parkour obstacle classification (`StepUp`, `ThinVaultOver`, `LowMantleOnto`, `HighLedgeClimb`, `BlockedSheerWall`), overhead ceiling headroom rejection, and Bezier root-motion warp anchor trajectories matching Unreal Engine 6.0+'s Game Animation Sample (`GASP`) Traversal workflows:
+
+1. **Parkour Traversal Runtime (`src/scene/castletraversalparkour.pas`)**:
+   - `TCastleTraversalBehavior` casts shin-forward, top-ledge downward, ceiling-headroom upward (`CapsuleClearanceHeight`), and far-drop depth `WorldRay` probes (`ScanObstacleAhead`), solving `FrontEdgeAnchorWorld`, `LandingAnchorWorld`, and `EvaluateWarpTrajectory`.
+2. **Parkour Studio (`TTraversalStudioForm` & `TTraversalStudioHelper`)**:
+   - Open via the top-bar **`Parkour`** button, Hierarchy context menu, or **`Design -> Parkour Traversal Vault, Mantle & Warp Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TTraversalStudioHelper.SpawnParkourGymCourseDemo(Viewport, DesignOwner, Runner, Trav);
+Probe := Trav.ScanObstacleAhead(Viewport.Items, Vector3(-4.0, 0.0, 0.0), Vector3(0, 0, -1));
+Trav.BeginTraversalWarp(Runner.Translation, Probe);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Physics & Raycasting](https://castle-engine.io/physics) · [UE GASP Traversal](https://dev.epicgames.com/documentation/en-us/unreal-engine/game-animation-sample-project-in-unreal-engine) · [UE Motion Warping](https://dev.epicgames.com/documentation/en-us/unreal-engine/motion-warping-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Character Locomotion & Physics Raycasting (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Character Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4248,4 +4271,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolregressionharness.pas`](../tests/code/testcases/testtoolregressionharness.pas) (`TTestToolRegressionHarness` — 2 tests)**: Verifies canonically sorted 64-bit FNV-1a world-state hashing across multi-subsystem Horizon 8 scenes, dual-pass 24-frame seeded replay bit-exact determinism with non-destructive world restoration, per-actor `TRANSFORM_DRIFT` (`0.35m`) & `VISIBILITY_DRIFT` diff pinpointing, Golden JSON reload roundtrips, the unified **66-Studio Hub** Horizon 2–8 catalog, and the 16th MCP tool `cge_verify_determinism_hash` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolchoosertable.pas`](../tests/code/testcases/testtoolchoosertable.pas) (`TTestToolChooserTable` — 2 tests)**: Verifies hierarchical GameplayTag prefix matching (`'Surface.Stone'` matching `'Surface.Stone.Wet'`), numeric speed/HP range gates, airborne boolean gates, wildcard fallback resolution, `3 : 2 : 1` seeded weighted tie-breaking across equal-priority AI barks, `ValidateRows` inverted-range detection, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgroomstudio.pas`](../tests/code/testcases/testtoolgroomstudio.pas) (`TTestToolGroomStudio` — 2 tests)**: Verifies progressive `ClumpTightness` root-to-tip child strand convergence (`0.0` loose vs. `1.0` exact tip lock), lateral `+X` wind tip deflection with strict scalp-sphere anti-clipping clearance (`MinDistanceFromScalpCenter >= ScalpRadius`), `gspCurlyRinglets` / `gspWolfManeFur` card triangle counts, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooltraversalstudio.pas`](../tests/code/testcases/testtooltraversalstudio.pas) (`TTestToolTraversalStudio` — 2 tests)**: Verifies all 5 parkour `WorldRay` classifications (`0.40m` Curb `takStepUp`, `1.05m x 0.45m` Fence `takThinVaultOver` onto far floor, `1.20m x 2.60m` Crate `takLowMantleOnto` onto top, `2.20m` Ledge `takHighLedgeClimb`, `3.80m` Tower `takBlockedSheerWall`), low-ceiling headroom rejection (`BlockedByLowCeiling`), Bezier root-motion warp execution, and JSON roundtrips (`0 unfreed memory blocks`).
 

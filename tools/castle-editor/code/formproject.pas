@@ -662,6 +662,7 @@ type
       MenuItemRegressionHarness: TMenuItem;
       MenuItemChooserTable: TMenuItem;
       MenuItemGroomStudio: TMenuItem;
+      MenuItemTraversalStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -744,6 +745,7 @@ type
     procedure MenuItemRegressionHarnessClick(Sender: TObject);
     procedure MenuItemChooserTableClick(Sender: TObject);
     procedure MenuItemGroomStudioClick(Sender: TObject);
+    procedure MenuItemTraversalStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2678,6 +2680,11 @@ begin
   MenuItemGroomStudio.Caption := 'Groom Strand Hair & Fur Clump Cards Studio...';
   MenuItemGroomStudio.OnClick := @MenuItemGroomStudioClick;
   MenuItemDesign.Add(MenuItemGroomStudio);
+
+  MenuItemTraversalStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemTraversalStudio.Caption := 'Parkour Traversal Vault, Mantle & Warp Studio...';
+  MenuItemTraversalStudio.OnClick := @MenuItemTraversalStudioClick;
+  MenuItemDesign.Add(MenuItemTraversalStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6026,6 +6033,12 @@ procedure TProjectForm.MenuItemGroomStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowGroomStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemTraversalStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowTraversalStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
