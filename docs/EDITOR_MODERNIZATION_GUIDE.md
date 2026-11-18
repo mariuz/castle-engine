@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–367** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–368** across Horizons 1–11), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4545,6 +4545,29 @@ Sample := Mat.EvaluateSlabAtCosTheta(0.35);
 
 ---
 
+## 66CO. Multi-Slot SmartObject Claiming, FIFO Wait-Queue & Cooldown Studio (Phase 368)
+
+Castle Game Engine provides multi-slot interactive SmartObject stations with hierarchical GameplayTag role gates, per-slot cooldowns, and automatic FIFO wait-queue promotion matching Unreal Engine 6.0+'s `USmartObjectDefinition` workflows:
+
+1. **Multi-Slot SmartObject Runtime (`src/scene/castlesmartobjectslots.pas`)**:
+   - `TCastleMultiSlotSmartObject` manages `Claimed -> InUse -> CoolingDown -> Free` lifecycles across arbitrary docking slots (`RequestClaimOrEnqueue`, `BeginUsingClaimedSlot`, `ReleaseSlotAndStartCooldown`), enforces hierarchical `Role.*` GameplayTag requirements, and promotes queued waiters in strict FIFO order upon cooldown completion (`StepSlotsAndPromoteQueue`).
+2. **SmartObject Queue Studio (`TSmartObjectSlotsForm` & `TSmartObjectSlotsHelper`)**:
+   - Open via the top-bar **`SmartQ`** button, Hierarchy context menu, or **`Design -> Multi-Slot SmartObject Queue & Cooldown Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TSmartObjectSlotsHelper.SpawnTavernSmartTableDemo(Viewport, DesignOwner, Station);
+Station.RequestClaimOrEnqueue('Npc_1', 'Role.Villager', SlotIdx, Reason);
+Station.StepSlotsAndPromoteQueue(2.5);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE Smart Objects (`USmartObjectDefinition`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/smart-objects-in-unreal-engine---quick-start)
+- **Videos & Movies:** 🎬 [CGE Official Video — AI Behaviors, Interactions & Gameplay (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE 3D Tavern Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4700,4 +4723,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolpreloadstudio.pas`](../tests/code/testcases/testtoolpreloadstudio.pas) (`TTestToolPreloadStudio` — 2 tests)**: Verifies priority-sorted `Critical > HighVFX > Normal > Background` warmup with strict `2.5 ms/frame` hitch-free frame throttling (`2.2 ms` Frame 1 + `2.2 ms` Frame 2), pinned-handle protection (`paladin_body.gltf` never evicted) alongside least-recently-used unpinned `room_b.gltf` VRAM eviction under a `100 MB` budget, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcollabpresence.pas`](../tests/code/testcases/testtoolcollabpresence.pas) (`TTestToolCollabPresence` — 2 tests)**: Verifies bidirectional ancestor/descendant subtree lock conflict rejection (`CastleGate <-> GateHinge`) alongside concurrent sibling editing (`TavernSign`), heartbeat lease renewal vs. stale-lock auto-expiration (`ExpireStaleLocks`), JSON session roundtrips, the unified **86-Studio Hub** Horizon 2–10 catalog, and the 18th MCP tool `cge_manage_collab_locks` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsubstratestudio.pas`](../tests/code/testcases/testtoolsubstratestudio.pas) (`TTestToolSubstrateStudio` — 2 tests)**: Verifies strict `<= 1.0` multi-slab energy conservation across all presets & extreme white/metallic/fuzz configurations, Beer-Lambert `5 um` vs. `90 um` clear-coat spectral absorption, Charlie-style velvet grazing rim amplification, `520 nm` Airy thin-film iridescent color shift across `CosThetaV`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsmartobjectslots.pas`](../tests/code/testcases/testtoolsmartobjectslots.pas) (`TTestToolSmartObjectSlots` — 2 tests)**: Verifies 4-seat saturation, FIFO wait-queue ordering (`Npc_5` ahead of `Npc_6`), `4.0s` cooldown blocking premature promotion followed by automatic FIFO promotion on expiry, hierarchical `Role.Blacksmith.Master` tag matching vs. untrained `Role.Farmer` rejection without queue pollution, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="207">
+    <Units Count="209">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1117,6 +1117,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSubstrateStudio"/>
       </Unit206>
+      <Unit207>
+        <Filename Value="../common-code/toolsmartobjectslots.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSmartObjectSlots"/>
+      </Unit207>
+      <Unit208>
+        <Filename Value="code/formsmartobjectslots.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSmartObjectSlots"/>
+      </Unit208>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

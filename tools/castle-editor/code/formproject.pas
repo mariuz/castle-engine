@@ -681,6 +681,7 @@ type
       MenuItemPreloadStudio: TMenuItem;
       MenuItemCollabPresence: TMenuItem;
       MenuItemSubstrateStudio: TMenuItem;
+      MenuItemSmartObjectSlots: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -782,6 +783,7 @@ type
     procedure MenuItemPreloadStudioClick(Sender: TObject);
     procedure MenuItemCollabPresenceClick(Sender: TObject);
     procedure MenuItemSubstrateStudioClick(Sender: TObject);
+    procedure MenuItemSmartObjectSlotsClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2811,6 +2813,11 @@ begin
   MenuItemSubstrateStudio.Caption := 'Substrate Multi-Slab Material Mixer Studio...';
   MenuItemSubstrateStudio.OnClick := @MenuItemSubstrateStudioClick;
   MenuItemDesign.Add(MenuItemSubstrateStudio);
+
+  MenuItemSmartObjectSlots := TMenuItem.Create(MenuItemDesign);
+  MenuItemSmartObjectSlots.Caption := 'Multi-Slot SmartObject Queue & Cooldown Studio...';
+  MenuItemSmartObjectSlots.OnClick := @MenuItemSmartObjectSlotsClick;
+  MenuItemDesign.Add(MenuItemSmartObjectSlots);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6273,6 +6280,12 @@ procedure TProjectForm.MenuItemSubstrateStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSubstrateStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemSmartObjectSlotsClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSmartObjectSlotsDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

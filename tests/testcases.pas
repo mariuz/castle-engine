@@ -194,6 +194,7 @@ uses
   TestToolPreloadStudio,
   TestToolCollabPresence,
   TestToolSubstrateStudio,
+  TestToolSmartObjectSlots,
   TestCastleVulkanRHI;
 
 implementation
