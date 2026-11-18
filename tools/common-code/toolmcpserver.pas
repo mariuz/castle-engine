@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -983,7 +983,7 @@ begin
   P.Add('query', MakePropSchema('string', 'Optional multi-token case-insensitive keyword filter (e.g. "ackermann", "gauntlet", "phase 325").'));
   P.Add('category', MakePropSchema('integer', 'Optional studio domain index (-1 = all 6 domains, 0..5 = specific TStudioHubCategory).'));
   AddToolDef('cge_list_studios',
-    'Search and list all 66 specialized Castle Game Engine Horizon 2-8 editor studios across 6 domains.',
+    'Search and list all 76 specialized Castle Game Engine Horizon 2-9 editor studios across 6 domains.',
     P, []);
 
   AddToolDef('cge_audit_world_readiness',
@@ -1002,6 +1002,12 @@ begin
   P.Add('seed', MakePropSchema('integer', 'Deterministic PRNG seed applied across simulation subsystems before each pass (default 20260346).'));
   AddToolDef('cge_verify_determinism_hash',
     'Compute the canonical 64-bit FNV-1a world-state hash and run a non-destructive dual-pass seeded determinism verification across all actors & simulation subsystems.',
+    P, []);
+
+  P := TJSONObject.Create;
+  P.Add('checkDiskUrls', MakePropSchema('boolean', 'When true, also checks URIFileExists on disk for every non-empty asset URL property (default false).'));
+  AddToolDef('cge_audit_package_cook',
+    'Run the Release Package Cook Readiness Auditor across the open design (broken/traversal URLs, ChooserTable validation, Tetrahedral Soft-Body inversions, MassTraffic safety, and 76-Studio World Readiness).',
     P, []);
 end;
 
@@ -1116,6 +1122,8 @@ var
   DetAudit: TDeterminismAuditResult;
   DetSnap: TGoldenWorldSnapshot;
   DetSeed: Integer;
+  CookRep: TCookAuditReport;
+  CheckDiskUrls: Boolean;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -1782,6 +1790,44 @@ begin
     finally
       FreeAndNil(OutPayload);
       FreeAndNil(DetSnap);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_audit_package_cook' then
+  begin
+    if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+    CheckDiskUrls := False;
+    if ArgsObj <> nil then
+      CheckDiskUrls := ArgsObj.Get('checkDiskUrls', False);
+    CookRep := TLiveCodingCookBroker.AuditPackageCookReadiness(DesignRoot, DesignOwner, CheckDiskUrls);
+    OutPayload := TJSONObject.Create;
+    LinesArr := TJSONArray.Create;
+    try
+      for I := 0 to CookRep.Findings.Count - 1 do
+        LinesArr.Add(CookRep.Findings[I]);
+      OutPayload.Add('cookReadinessScore', CookRep.CookReadinessScore);
+      OutPayload.Add('cookReadyToShip', CookRep.CookReadyToShip);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('totalCookableComponents', CookRep.TotalCookableComponents);
+      OutPayload.Add('brokenAssetUrlCount', CookRep.BrokenAssetUrlCount);
+      OutPayload.Add('chooserIssueCount', CookRep.ChooserIssueCount);
+      OutPayload.Add('invertedSoftBodyCount', CookRep.InvertedSoftBodyCount);
+      OutPayload.Add('trafficHazardCount', CookRep.TrafficHazardCount);
+      OutPayload.Add('estimatedCookedPayloadKB', CookRep.EstimatedCookedPayloadKB);
+      OutPayload.Add('findings', LinesArr);
+      LinesArr := nil;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(LinesArr);
+      FreeAndNil(OutPayload);
+      FreeAndNil(CookRep);
     end;
     Exit;
   end;

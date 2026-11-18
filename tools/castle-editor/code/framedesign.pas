@@ -43,7 +43,7 @@ uses
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -876,6 +876,8 @@ type
       MenuTreeViewItemTetSoftBody: TMenuItem;
       ButtonMassTraffic: TSpeedButton;
       MenuTreeViewItemMassTraffic: TMenuItem;
+      ButtonLiveCookAuditor: TSpeedButton;
+      MenuTreeViewItemLiveCookAuditor: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1449,6 +1451,8 @@ type
     procedure MenuTreeViewItemTetSoftBodyClick(Sender: TObject);
     procedure ButtonMassTrafficClick(Sender: TObject);
     procedure MenuTreeViewItemMassTrafficClick(Sender: TObject);
+    procedure ButtonLiveCookAuditorClick(Sender: TObject);
+    procedure MenuTreeViewItemLiveCookAuditorClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2955,6 +2959,7 @@ type
     procedure ShowMeshletStudioDialog;
     procedure ShowTetSoftBodyDialog;
     procedure ShowMassTrafficDialog;
+    procedure ShowLiveCookAuditorDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2976,7 +2981,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -8041,6 +8046,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonMassTraffic,
       PanelMiddleTop.GetControlIndex(ButtonTetSoftBody) + 1);
 
+  ButtonLiveCookAuditor := TSpeedButton.Create(Self);
+  ButtonLiveCookAuditor.Caption := 'CookLive';
+  ButtonLiveCookAuditor.Hint := 'Open Live Coding RTTI Broker & Release Package Cook Auditor Studio.' + NL +
+    'Capture/rehydrate live RTTI state with field aliases and audit 76-Studio Release Cook readiness.';
+  ButtonLiveCookAuditor.ShowHint := true;
+  ButtonLiveCookAuditor.AutoSize := true;
+  ButtonLiveCookAuditor.Constraints.MinHeight := 33;
+  ButtonLiveCookAuditor.Constraints.MinWidth := 66;
+  ButtonLiveCookAuditor.BorderSpacing.Left := 2;
+  ButtonLiveCookAuditor.OnClick := @ButtonLiveCookAuditorClick;
+  ButtonLiveCookAuditor.Parent := PanelMiddleTop;
+  if ButtonMassTraffic.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonLiveCookAuditor,
+      PanelMiddleTop.GetControlIndex(ButtonMassTraffic) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -11240,6 +11260,11 @@ begin
   MenuTreeViewItemMassTraffic.Caption := 'MassTraffic Multi-Lane Signal & IDM Headway Studio...';
   MenuTreeViewItemMassTraffic.OnClick := @MenuTreeViewItemMassTrafficClick;
   MenuTreeView.Items.Add(MenuTreeViewItemMassTraffic);
+
+  MenuTreeViewItemLiveCookAuditor := TMenuItem.Create(Self);
+  MenuTreeViewItemLiveCookAuditor.Caption := 'Live Coding RTTI Broker & Release Cook Auditor Studio...';
+  MenuTreeViewItemLiveCookAuditor.OnClick := @MenuTreeViewItemLiveCookAuditorClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemLiveCookAuditor);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -56879,6 +56904,7 @@ begin
   else if SameText(AStudioId, 'meshlet_studio') then ShowMeshletStudioDialog
   else if SameText(AStudioId, 'tet_softbody') then ShowTetSoftBodyDialog
   else if SameText(AStudioId, 'mass_traffic') then ShowMassTrafficDialog
+  else if SameText(AStudioId, 'live_cook_auditor') then ShowLiveCookAuditorDialog
   else
     Result := False;
 end;
@@ -57961,6 +57987,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemMassTrafficClick(Sender: TObject);
 begin
   ShowMassTrafficDialog;
+end;
+
+procedure TDesignFrame.ShowLiveCookAuditorDialog;
+var
+  Dlg: TLiveCookAuditorForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TLiveCookAuditorForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonLiveCookAuditorClick(Sender: TObject);
+begin
+  ShowLiveCookAuditorDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemLiveCookAuditorClick(Sender: TObject);
+begin
+  ShowLiveCookAuditorDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

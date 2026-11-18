@@ -123,8 +123,8 @@ var
   OuterJson, InnerJson: TJSONData;
   I: Integer;
 begin
-  { 1. Verify all 66 Horizon 2-8 studios are registered in TStudioHubManager }
-  AssertEquals(66, TStudioHubManager.StudioCount);
+  { 1. Verify all 76 Horizon 2-9 studios are registered in TStudioHubManager }
+  AssertEquals(76, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon8Ids) do
     AssertTrue('Missing Horizon 8 studio id: ' + Horizon8Ids[I],
       TStudioHubManager.FindStudioById(Horizon8Ids[I], Entry));

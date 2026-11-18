@@ -182,6 +182,7 @@ uses
   TestToolMeshletStudio,
   TestToolTetSoftBody,
   TestToolMassTraffic,
+  TestToolLiveCookAuditor,
   TestCastleVulkanRHI;
 
 implementation

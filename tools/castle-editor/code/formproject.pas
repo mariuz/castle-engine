@@ -669,6 +669,7 @@ type
       MenuItemMeshletStudio: TMenuItem;
       MenuItemTetSoftBody: TMenuItem;
       MenuItemMassTraffic: TMenuItem;
+      MenuItemLiveCookAuditor: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -758,6 +759,7 @@ type
     procedure MenuItemMeshletStudioClick(Sender: TObject);
     procedure MenuItemTetSoftBodyClick(Sender: TObject);
     procedure MenuItemMassTrafficClick(Sender: TObject);
+    procedure MenuItemLiveCookAuditorClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2727,6 +2729,11 @@ begin
   MenuItemMassTraffic.Caption := 'MassTraffic Multi-Lane Signal & IDM Headway Studio...';
   MenuItemMassTraffic.OnClick := @MenuItemMassTrafficClick;
   MenuItemDesign.Add(MenuItemMassTraffic);
+
+  MenuItemLiveCookAuditor := TMenuItem.Create(MenuItemDesign);
+  MenuItemLiveCookAuditor.Caption := 'Live Coding RTTI Broker & Release Cook Auditor Studio...';
+  MenuItemLiveCookAuditor.OnClick := @MenuItemLiveCookAuditorClick;
+  MenuItemDesign.Add(MenuItemLiveCookAuditor);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6117,6 +6124,12 @@ procedure TProjectForm.MenuItemMassTrafficClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMassTrafficDialog;
+end;
+
+procedure TProjectForm.MenuItemLiveCookAuditorClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowLiveCookAuditorDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

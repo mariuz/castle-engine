@@ -124,7 +124,10 @@ uses
   CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement,
   CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker,
   CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone,
-  CastleSoundscape;
+  CastleSoundscape,
+  CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt,
+  CastleMover2, CastleCameraRigRail, CastleMeshletCluster, CastleTetSoftBody,
+  CastleMassTraffic;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -420,6 +423,38 @@ begin
   Reg('regression_harness', 'Deterministic Golden-Snapshot State Hasher & Drift Auditor Studio', 'Regress',
     shcPerformanceQaDeploy, 346, 'determinism golden snapshot fnv1a hash replay drift regression qa audit',
     '64-bit FNV-1a world-state hasher, dual-run seeded replay verifier & per-actor drift diff.');
+
+  { Horizon 9 (Phases 347-356 — UE 6.0+ Choosers, Groom, Parkour, RVT, Mover 2.0, Camera Rail, Meshlets, Tet Flesh, MassTraffic & Live Cook Parity, +10 -> 76 studios) }
+  Reg('chooser_table', 'Chooser Tables Context-Driven Multi-Column Asset Selector Studio', 'Chooser',
+    shcCharactersAiGas, 347, 'chooser table context tag prefix range priority weighted asset montage bark',
+    'Hierarchical GameplayTag prefix columns, numeric ranges, priority tiers & weighted tie-breaking.');
+  Reg('groom_studio', 'Groom Strand Hair / Fur Clump Cards & Inertial Wind Studio', 'Groom',
+    shcMaterialsVfxLighting, 348, 'groom strand hair fur clump card curl frizz scalp collision verlet wind',
+    'Fibonacci scalp guides, progressive root-to-tip lock clumping, scalp anti-clip & Verlet wind.');
+  Reg('traversal_studio', 'Parkour Traversal Vault, Mantle, Ledge Scanner & Warp Studio', 'Parkour',
+    shcCharactersAiGas, 349, 'parkour traversal vault mantle step climb worldray obstacle bezier motion warp gasp',
+    'Multi-height WorldRay obstacle classifier (Step/Vault/Mantle/Climb) & Bezier root-motion warp.');
+  Reg('rvt_studio', 'Runtime Virtual Texture (RVT) LRU Tile Cache & Snow/Mud Trail Studio', 'RVT/Snow',
+    shcWorldEnvironment, 350, 'rvt runtime virtual texture lru page tile snow mud sand footprint rut berm',
+    'LRU virtual page residency table, deformable snow/mud sinkage + berms & heightmap PNG export.');
+  Reg('mover_studio', 'Chaos Mover 2.0 Rollback-Ready Kinematic Character Modes Studio', 'Mover2',
+    shcCharactersAiGas, 351, 'chaos mover 2 rollback syncstate walk slide wallrun swim grapple rewind netcode',
+    'Stateless InputCmd + SyncState locomotion across 6 modes with 128-tick rollback resimulation.');
+  Reg('camera_rail', 'Camera Rig Rail Closest-Point Auto-Dolly & Co-Op Framing Studio', 'CamRail',
+    shcCinematicsAudioInput, 352, 'camera rig rail catmull auto dolly look ahead deadzone coop split merge fov',
+    'Closest-point Catmull-Rom auto-dolly, velocity look-ahead, deadzone aim & 2P split hysteresis.');
+  Reg('meshlet_studio', 'Nanite-Style Meshlet Cluster Builder & Normal-Cone Culler Studio', 'Meshlet',
+    shcMaterialsVfxLighting, 353, 'nanite meshlet cluster 64v 124t bounding sphere normal cone backface cull pixel error lod',
+    'Greedy 64v/124t spatial meshlets, perspective normal-cone backface rejection & pixel-error LOD.');
+  Reg('tet_softbody', 'Chaos Flesh Tetrahedral Volume-Preserving XPBD Soft-Body Studio', 'TetFlesh',
+    shcArchitecturePcg, 354, 'chaos flesh tetrahedral xpbd softbody signed volume 6v inversion free tendon',
+    '5-tet-per-cell 3D deformable lattices with exact signed-volume 6V XPBD & 0 tet inversions.');
+  Reg('mass_traffic', 'MassTraffic Multi-Lane Road Network, Signal Phases & IDM Studio', 'Traffic',
+    shcCharactersAiGas, 355, 'masstraffic road lane intersection signal nema red green yellow idm headway car',
+    '8-lane urban crossroads, conflict-free NEMA 4-way signal interlocks & IDM safe car-following.');
+  Reg('live_cook_auditor', 'Live Coding RTTI State Broker & Release Package Cook Auditor Studio', 'CookLive',
+    shcPerformanceQaDeploy, 356, 'live coding rtti hot reload snapshot rehydrate coreredirect alias package cook audit',
+    'Live RTTI snapshot/rehydrate with field-rename aliases & Release Package Cook readiness gate.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -581,6 +616,17 @@ var
       BumpSub(shcMaterialsVfxLighting);
     if (C is TCastleStateTreeBehavior) or (C is TCastleControlRigBehavior) or
        (C is TCastleGameplayCueDirector) or (C is TCastleJiggleBoneBehavior) then
+      BumpSub(shcCharactersAiGas);
+    if C is TCastleRuntimeVirtualTexture then
+      BumpSub(shcWorldEnvironment);
+    if (C is TCastleGroomComponent) or (C is TCastleMeshletClusterer) then
+      BumpSub(shcMaterialsVfxLighting);
+    if C is TCastleTetSoftBody then
+      BumpSub(shcArchitecturePcg);
+    if C is TCastleCameraRigRail then
+      BumpSub(shcCinematicsAudioInput);
+    if (C is TCastleChooserTable) or (C is TCastleTraversalBehavior) or
+       (C is TCastleMoverBehavior) or (C is TCastleMassTrafficManager) then
       BumpSub(shcCharactersAiGas);
 
     { Architecture, CSG, Splines & Soft-Body }

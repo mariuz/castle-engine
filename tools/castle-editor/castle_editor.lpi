@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="183">
+    <Units Count="185">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -997,6 +997,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMassTraffic"/>
       </Unit182>
+      <Unit183>
+        <Filename Value="../common-code/toollivecookauditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolLiveCookAuditor"/>
+      </Unit183>
+      <Unit184>
+        <Filename Value="code/formlivecookauditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormLiveCookAuditor"/>
+      </Unit184>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–355** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–356** across Horizons 1–9), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4271,6 +4271,30 @@ Traffic.StepTraffic(0.20);
 
 ---
 
+## 66CC. Live Coding RTTI Broker, Package Cook Auditor & Unified 76-Studio Hub / 17-Tool MCP (Phase 356)
+
+Castle Game Engine provides a Live Coding RTTI hot-reload state snapshot/rehydration broker with `CoreRedirect`-style property rename aliases, a pre-packaging Release Cook Readiness Auditor, and the unified **76-Studio Hub / 17-Tool MCP** server matching Unreal Engine 6.0+'s Live Coding and Cook pipelines:
+
+1. **Live Coding RTTI & Cook Broker (`tools/common-code/toollivecookauditor.pas`)**:
+   - `TLiveCodingCookBroker` captures live published scalar/string/enum/vector RTTI state (`CaptureLiveRttiSnapshot`), rehydrates hot-reloaded instances with field-rename aliases (`RehydrateLiveRttiSnapshot`), and audits Release Package Cook readiness (`AuditPackageCookReadiness`).
+2. **Unified 76-Studio Hub & 17th MCP Tool (`cge_audit_package_cook`)**:
+   - `TStudioHubManager` indexes all **`76` Horizon 2–9 studios** across 6 domains, and `TCastleMcpServer` exposes the **17th MCP tool `cge_audit_package_cook`**. Open visually via **`CookLive`** in the top viewport bar or **`Design -> Live Coding RTTI Broker & Release Cook Auditor Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+Snap := TLiveCodingCookBroker.CaptureLiveRttiSnapshot(Viewport, DesignOwner);
+Stats := TLiveCodingCookBroker.RehydrateLiveRttiSnapshot(Snap, Viewport, DesignOwner,
+  [TRttiFieldAliasRule.Make('LegacyCruiseSpeed', 'DesiredSpeedMps')]);
+CookRep := TLiveCodingCookBroker.AuditPackageCookReadiness(Viewport, DesignOwner, False);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Build Tool & Packaging](https://castle-engine.io/build_tool) · [UE Live Coding](https://dev.epicgames.com/documentation/en-us/unreal-engine/using-live-coding-to-recompile-unreal-engine-applications-at-runtime)
+- **Videos & Movies:** 🎬 [CGE Official Video — Editor Architecture, Packaging & Automation (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+- **Screenshots:** [CGE Editor & Build Pipeline](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4337,7 +4361,7 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 ```
 
 In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 editor subsystems include dedicated automated test suites:
-- **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 16 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 17 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnprshaderstudio.pas`](../tests/code/testcases/testtoolnprshaderstudio.pas) (`TTestToolNprShaderStudio` — 2 tests)**: Verifies all 5 `TCastleStylizedShaderPreset` GLSL generators (`PLUG_lighting_apply`, `PLUG_material_light_diffuse`, `PLUG_fragment_modify`), X3D `TEffectNode` attach/enable/disable/remove lifecycle on `TCastleScene`, `.castle-transform` JSON serialization roundtrip, and `TLightShadowBudgetAuditor` multi-light overlap hotspot scoring, multi-shadow-volume conflict detection, `EnsureSingleShadowVolumeLight`, and `ClampUnboundedLightRadii` (`0 unfreed memory blocks`).
@@ -4414,4 +4438,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolmeshletstudio.pas`](../tests/code/testcases/testtoolmeshletstudio.pas) (`TTestToolMeshletStudio` — 2 tests)**: Verifies lossless `1,536`-triangle UV sphere partitioning into `<= 64v / <= 124t` spatial meshlets, exact perspective normal-cone backface cluster rejection on far-hemisphere (`-Z`) clusters with zero false-positive front-hemisphere (`+Z`) culls, screen-space pixel-error `LOD 0` vs. `LOD 2` selection, `mspTwistedTorusRing`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltetsoftbody.pas`](../tests/code/testcases/testtooltetsoftbody.pas) (`TTestToolTetSoftBody` — 2 tests)**: Verifies `3x3x3 -> 135` positively oriented tetrahedra (`8.000 m^3` rest volume), `InvertedTetCount = 0` + `[88%..112%]` volume preservation under floor drop & `-14 m/s` radial hammer slam, top-pinned hanging tendon elastic stretch (`tsbpHangingFleshPillar`), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmasstraffic.pas`](../tests/code/testcases/testtoolmasstraffic.pas) (`TTestToolMassTraffic` — 2 tests)**: Verifies conflict-free NEMA 4-way signal interlocks (`SignalConflictCount = 0`), East-West red-light stop-line queue braking upstream of `51.0m` while North-South flows on Green, `RearEndOverlapCount = 0` across `24` and `40` Rush-Hour vehicles over multi-stage phase cycles, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoollivecookauditor.pas`](../tests/code/testcases/testtoollivecookauditor.pas) (`TTestToolLiveCookAuditor` — 2 tests)**: Verifies `TLiveCodingCookBroker.CaptureLiveRttiSnapshot` & `RehydrateLiveRttiSnapshot` restoring scrambled vector/string/scalar properties + `CoreRedirect`-style `'LegacyCruiseSpeed' -> 'DesiredSpeedMps'` field-alias migration, `AuditPackageCookReadiness` blocking traversal-unsafe URLs & empty `TCastleChooserTable` matrices and reaching `100/100` upon remediation, the unified **76-Studio Hub** Horizon 2–9 catalog, and the 17th MCP tool `cge_audit_package_cook` (`0 unfreed memory blocks`).
 
