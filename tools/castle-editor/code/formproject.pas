@@ -677,6 +677,7 @@ type
       MenuItemRiverStudio: TMenuItem;
       MenuItemOccluderFader: TMenuItem;
       MenuItemGameplayDebugger: TMenuItem;
+      MenuItemWindStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -774,6 +775,7 @@ type
     procedure MenuItemRiverStudioClick(Sender: TObject);
     procedure MenuItemOccluderFaderClick(Sender: TObject);
     procedure MenuItemGameplayDebuggerClick(Sender: TObject);
+    procedure MenuItemWindStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2783,6 +2785,11 @@ begin
   MenuItemGameplayDebugger.Caption := 'GameplayDebugger Live 3D HUD & Hotkey Channels Studio...';
   MenuItemGameplayDebugger.OnClick := @MenuItemGameplayDebuggerClick;
   MenuItemDesign.Add(MenuItemGameplayDebugger);
+
+  MenuItemWindStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemWindStudio.Caption := 'Procedural Foliage Wind Gust Field & Shockwave Studio...';
+  MenuItemWindStudio.OnClick := @MenuItemWindStudioClick;
+  MenuItemDesign.Add(MenuItemWindStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6221,6 +6228,12 @@ procedure TProjectForm.MenuItemGameplayDebuggerClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowGameplayDebuggerDialog;
+end;
+
+procedure TProjectForm.MenuItemWindStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowWindStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

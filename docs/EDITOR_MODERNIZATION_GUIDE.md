@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–363** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–364** across Horizons 1–10), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4453,6 +4453,29 @@ Debugger.CollectSnapshotFromWorld(Viewport.Items);
 
 ---
 
+## 66CK. Procedural Foliage Wind Gust Field & Shockwave Impulse Studio (Phase 364)
+
+Castle Game Engine provides a global Beaufort wind gust director with finite-speed expanding radial explosion/rotorwash shockwave rings and 3-tier UE Pivot-Painter 2.0 trunk/branch/leaf kinematics matching Unreal Engine 6.0+'s `AWindDirectionalSource` workflows:
+
+1. **Wind Field & Shockwave Runtime (`src/scene/castlewindfield.pas`)**:
+   - `TCastleWindFieldDirector` evaluates travelling harmonic gusts (`WindAzimuthDeg`, `BaseWindSpeedMps`, `GustAmplitudeMps`), propagates finite-speed radial shockwave rings (`TriggerRadialShockwave`), and solves quadratic cantilever trunk bend, secondary branch sway, and leaf flutter phase (`SamplePivotWindAtWorld`).
+2. **Wind & Shockwave Studio (`TWindStudioForm` & `TWindStudioHelper`)**:
+   - Open via the top-bar **`WindFX`** button, Hierarchy context menu, or **`Design -> Procedural Foliage Wind Gust Field & Shockwave Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TWindStudioHelper.SpawnForestWindShockwaveDemo(Viewport, DesignOwner, Director);
+Director.TriggerRadialShockwave(Vector3(0, 0, 0), 30.0, 10.0, 20.0);
+Director.StepWindField(1.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Shaders & Environment](https://castle-engine.io/shaders) · [UE WindDirectionalSource](https://dev.epicgames.com/documentation/en-us/unreal-engine/wind-directional-source-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Environments, Weather & Shaders (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Forest Viewport](https://castle-engine.io/images/thumb_const_height_size/mountains_of_fire_screen_1.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4604,4 +4627,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolriverstudio.pas`](../tests/code/testcases/testtoolriverstudio.pas) (`TTestToolRiverStudio` — 2 tests)**: Verifies $Q = A \cdot v$ continuity flow acceleration (`> 3x` faster in the `2.2m` gorge than the `9.0m` headwater & `10.0m` outflow basin) with whitewater foam generation, kayak downstream advection & elevation descent, steep waterfall `SlopeSin` foam boost, out-of-bank dry-land rejection, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooloccluderfader.pas`](../tests/code/testcases/testtooloccluderfader.pas) (`TTestToolOccluderFader` — 2 tests)**: Verifies camera-to-target `WorldRay` wall cutaway fade (`CastleFrontWallOccluder -> 18%` alpha) with non-blocking side-pillar & hero isolation plus full `100%` opacity recovery on clear overhead sightlines, exact `1.35m` length-preserving radial grass parting (`> 35°` near bend vs. `0°` far stillness), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgameplaydebugger.pas`](../tests/code/testcases/testtoolgameplaydebugger.pas) (`TTestToolGameplayDebugger` — 2 tests)**: Verifies 6-channel live multi-subsystem HUD & 3D marker aggregation across AI StateTree, Targeting Lock-On (`DebugBossTarget`), GAS (`Class.Paladin`), Mover 2.0, MassTraffic, and Surface GI, per-category `ToggleChannelByNumpadKey(0..5)` bitmask filtering, zero-overhead `OverlayActive = False` teardown, `ExportDiagnosticSnapshotJson`, and JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolwindstudio.pas`](../tests/code/testcases/testtoolwindstudio.pas) (`TTestToolWindStudio` — 2 tests)**: Verifies quadratic $H^2$ cantilever trunk bend scaling (`6m` tree bends `> 3x` further than `2m` sapling), finite-speed radial shockwave propagation (`0 m/s` pre-arrival at `t=0s` -> `> 15 m/s` outward blast at `t=1.0s` when `R = 10m` -> automatic ring expiration at `t=3.0s`), `wbpHurricaneTempest` `90°` `+Z` wind alignment, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

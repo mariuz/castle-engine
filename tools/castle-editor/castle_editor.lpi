@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="199">
+    <Units Count="201">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1077,6 +1077,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormGameplayDebugger"/>
       </Unit198>
+      <Unit199>
+        <Filename Value="../common-code/toolwindstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolWindStudio"/>
+      </Unit199>
+      <Unit200>
+        <Filename Value="code/formwindstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormWindStudio"/>
+      </Unit200>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

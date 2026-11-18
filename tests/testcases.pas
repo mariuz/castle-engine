@@ -190,6 +190,7 @@ uses
   TestToolRiverStudio,
   TestToolOccluderFader,
   TestToolGameplayDebugger,
+  TestToolWindStudio,
   TestCastleVulkanRHI;
 
 implementation
