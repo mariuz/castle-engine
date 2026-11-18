@@ -687,6 +687,7 @@ type
       MenuItemCameraShake: TMenuItem;
       MenuItemFireGrid2D: TMenuItem;
       MenuItemGameplayMessenger: TMenuItem;
+      MenuItemOctahedralImpostor: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -794,6 +795,7 @@ type
     procedure MenuItemCameraShakeClick(Sender: TObject);
     procedure MenuItemFireGrid2DClick(Sender: TObject);
     procedure MenuItemGameplayMessengerClick(Sender: TObject);
+    procedure MenuItemOctahedralImpostorClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2853,6 +2855,11 @@ begin
   MenuItemGameplayMessenger.Caption := 'Gameplay Message Bus & Squad Bark Studio...';
   MenuItemGameplayMessenger.OnClick := @MenuItemGameplayMessengerClick;
   MenuItemDesign.Add(MenuItemGameplayMessenger);
+
+  MenuItemOctahedralImpostor := TMenuItem.Create(MenuItemDesign);
+  MenuItemOctahedralImpostor.Caption := 'Octahedral Billboard Impostor Studio...';
+  MenuItemOctahedralImpostor.OnClick := @MenuItemOctahedralImpostorClick;
+  MenuItemDesign.Add(MenuItemOctahedralImpostor);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6351,6 +6358,12 @@ procedure TProjectForm.MenuItemGameplayMessengerClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowGameplayMessengerDialog;
+end;
+
+procedure TProjectForm.MenuItemOctahedralImpostorClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowOctahedralImpostorDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

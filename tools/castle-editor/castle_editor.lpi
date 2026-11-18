@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="219">
+    <Units Count="221">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1177,6 +1177,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormGameplayMessenger"/>
       </Unit218>
+      <Unit219>
+        <Filename Value="../common-code/tooloctahedralimpostor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolOctahedralImpostor"/>
+      </Unit219>
+      <Unit220>
+        <Filename Value="code/formoctahedralimpostor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormOctahedralImpostor"/>
+      </Unit220>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

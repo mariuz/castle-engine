@@ -200,6 +200,7 @@ uses
   TestToolCameraShake,
   TestToolFireGrid2D,
   TestToolGameplayMessenger,
+  TestToolOctahedralImpostor,
   TestCastleVulkanRHI;
 
 implementation
