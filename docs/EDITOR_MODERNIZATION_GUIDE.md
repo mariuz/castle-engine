@@ -4820,6 +4820,13 @@ Phase 393 adds **Interactive 2D Foliage Bend Fields & Elastic Recovery** via `TC
 - **2D `(BendX, BendZ)` Parting & Blast Flatten (`StampCharacterWalkCrush` / `TriggerShockwaveBlast`)**: Bends stalks radially outward with exact length-preserving trigonometric tip offsets ($\|\mathbf{p}_{\text{tip}}\| = L$) across 3 presets (`ftpGoldenWheatField`, `ftpSwampCattailReeds`, `ftpAlienBioluminescentFerns`).
 - **Damped Hookean Spring-Back (`StepElasticSpringBack`)**: Integrates $\ddot{\mathbf{b}} = -k \mathbf{b} - c \dot{\mathbf{b}}$ to restore trampled undergrowth smoothly to vertical rest.
 
+## 66DO. Phase 394: Gameplay Interaction Focus Scanner (`WorldRay` Gaze + Proximity Cone & Hold-Progress Ring) Studio
+
+Phase 394 adds **Player Interaction Focus & Hold-to-Interact State Machines** via `TCastleInteractScanner` (`src/scene/castleinteractscanner.pas`), `TInteractScannerHelper` (`tools/common-code/toolinteractscanner.pas`), and `TInteractScannerForm` (`tools/castle-editor/code/forminteractscanner.pas`), accessible from **`Interact`** in the top viewport toolbar, **`Design -> Gameplay Interaction Focus Scanner & Hold-Ring Studio...`**, or `LaunchStudioById('interact_scanner')`.
+
+- **Gaze + Proximity Scoring & `WorldRay` Wall Gate (`ScanBestInteractable`)**: Ranks nearby `Interact_*` / `Tag > 0` candidates by weighted gaze alignment + distance while rejecting targets occluded behind solid doors or walls across 3 presets (`ispFirstPersonPrecisionGaze`, `ispThirdPersonActionCone`, `ispSurvivalTimedSabotage`).
+- **Tap vs. Timed Hold Decay (`StepHoldInteraction`)**: Drives `HoldProgress01` with smooth `ReleaseDecayRatePerSec` decay on early button release and `RepeatCooldownSec` anti-repeat protection.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5001,4 +5008,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolbuoyancyhull.pas`](../tests/code/testcases/testtoolbuoyancyhull.pas) (`TTestToolBuoyancyHull` — 2 tests)**: Verifies exact spherical-cap identities (`0.0`, `0.5`, `1.0`), `+20°` starboard heel righting torque (`> +200 Nm`), calm-water Archimedes draft & roll equilibrium settling, wave heave oscillation, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolspiderweb.pas`](../tests/code/testcases/testtoolspiderweb.pas) (`TTestToolSpiderweb` — 2 tests)**: Verifies `12 / 12` radial `WorldRay` stone-archway anchor locks (`204` segments), deterministic `swpTornDungeonCornerCobweb` sector removal, `> 20` morning dewdrop beads (`swpDewdropForestCanopySilk`), and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolfoliagetrample.pas`](../tests/code/testcases/testtoolfoliagetrample.pas) (`TTestToolFoliageTrample` — 2 tests)**: Verifies radial 4-quadrant shockwave outward parting, exact stalk length conservation (`1.25m`), Hookean spring-damper recovery back to `0` trampled cells, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolinteractscanner.pas`](../tests/code/testcases/testtoolinteractscanner.pas) (`TTestToolInteractScanner` — 2 tests)**: Verifies gaze-axis focus selection over peripheral items, `WorldRay` rejection of `Interact_VaultChestBehindWall` behind `LockedVaultDoorSlab`, `1.20s` timed hold completion, early-release progress decay, `RepeatCooldownSec` lockout, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

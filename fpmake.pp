@@ -604,6 +604,7 @@ begin
     P.Targets.AddUnit('castlebuoyancyhull.pas');
     P.Targets.AddUnit('castlespiderweb.pas');
     P.Targets.AddUnit('castlefoliagetrample.pas');
+    P.Targets.AddUnit('castleinteractscanner.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

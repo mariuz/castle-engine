@@ -220,6 +220,7 @@ uses
   TestToolBuoyancyHull,
   TestToolSpiderweb,
   TestToolFoliageTrample,
+  TestToolInteractScanner,
   TestCastleVulkanRHI;
 
 implementation

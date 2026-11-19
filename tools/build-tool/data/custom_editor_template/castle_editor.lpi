@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="259">
+    <Units Count="261">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1377,6 +1377,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormFoliageTrample"/>
       </Unit258>
+      <Unit259>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolinteractscanner.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolInteractScanner"/>
+      </Unit259>
+      <Unit260>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/forminteractscanner.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormInteractScanner"/>
+      </Unit260>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
