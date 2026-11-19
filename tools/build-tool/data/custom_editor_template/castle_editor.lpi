@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="31">
+    <Units Count="231">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -237,6 +237,1006 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="DesignSteam"/>
       </Unit30>
+      <Unit31>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmcpserver.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMcpServer"/>
+      </Unit31>
+      <Unit32>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/editormcpserver.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="EditorMcpServer"/>
+      </Unit32>
+      <Unit33>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooldesignsandboxdiff.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDesignSandboxDiff"/>
+      </Unit33>
+      <Unit34>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formdesignsandboxdiff.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDesignSandboxDiff"/>
+      </Unit34>
+      <Unit35>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolnprshaderstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolNprShaderStudio"/>
+      </Unit35>
+      <Unit36>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formnprshaderstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormNprShaderStudio"/>
+      </Unit36>
+      <Unit37>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooldesignannotations.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDesignAnnotations"/>
+      </Unit37>
+      <Unit38>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formdesignannotations.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDesignAnnotations"/>
+      </Unit38>
+      <Unit39>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolwasmpreviewserver.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolWasmPreviewServer"/>
+      </Unit39>
+      <Unit40>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formwasmpreview.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormWasmPreview"/>
+      </Unit40>
+      <Unit41>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolprefaboverrides.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPrefabOverrides"/>
+      </Unit41>
+      <Unit42>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formprefaboverrides.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPrefabOverrides"/>
+      </Unit42>
+      <Unit43>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolworldstreaming.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolWorldStreaming"/>
+      </Unit43>
+      <Unit44>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formworldminimap.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormWorldMinimap"/>
+      </Unit44>
+      <Unit45>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolsequencer.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSequencer"/>
+      </Unit45>
+      <Unit46>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formsequencer.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSequencer"/>
+      </Unit46>
+      <Unit47>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolstategraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolStateGraph"/>
+      </Unit47>
+      <Unit48>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formstategraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormStateGraph"/>
+      </Unit48>
+      <Unit49>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolparticlestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolParticleStudio"/>
+      </Unit49>
+      <Unit50>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formparticlestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormParticleStudio"/>
+      </Unit50>
+      <Unit51>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolnavnetwork.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolNavNetwork"/>
+      </Unit51>
+      <Unit52>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formnavnetwork.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormNavNetwork"/>
+      </Unit52>
+      <Unit53>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolaudiomixer.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolAudioMixer"/>
+      </Unit53>
+      <Unit54>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formaudiomixer.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormAudioMixer"/>
+      </Unit54>
+      <Unit55>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolassetgraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolAssetGraph"/>
+      </Unit55>
+      <Unit56>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formassetgraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormAssetGraph"/>
+      </Unit56>
+      <Unit57>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolpostprocessstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPostProcessStudio"/>
+      </Unit57>
+      <Unit58>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formpostprocessstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPostProcessStudio"/>
+      </Unit58>
+      <Unit59>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toollocalization.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolLocalization"/>
+      </Unit59>
+      <Unit60>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formlocalization.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormLocalization"/>
+      </Unit60>
+      <Unit61>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolresponsivesim.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolResponsiveSim"/>
+      </Unit61>
+      <Unit62>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formresponsivesim.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormResponsiveSim"/>
+      </Unit62>
+      <Unit63>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolvariantmanager.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVariantManager"/>
+      </Unit63>
+      <Unit64>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formvariantmanager.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVariantManager"/>
+      </Unit64>
+      <Unit65>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolsplinestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSplineStudio"/>
+      </Unit65>
+      <Unit66>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formsplinestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSplineStudio"/>
+      </Unit66>
+      <Unit67>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooldecalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDecalStudio"/>
+      </Unit67>
+      <Unit68>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formdecalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDecalStudio"/>
+      </Unit68>
+      <Unit69>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooltimeofdaystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTimeOfDayStudio"/>
+      </Unit69>
+      <Unit70>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formtimeofdaystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTimeOfDayStudio"/>
+      </Unit70>
+      <Unit71>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooldatatablestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDataTableStudio"/>
+      </Unit71>
+      <Unit72>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formdatatablestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDataTableStudio"/>
+      </Unit72>
+      <Unit73>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmodularsnap.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolModularSnap"/>
+      </Unit73>
+      <Unit74>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmodularsnap.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormModularSnap"/>
+      </Unit74>
+      <Unit75>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooldialoguequest.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDialogueQuest"/>
+      </Unit75>
+      <Unit76>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formdialoguequest.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDialogueQuest"/>
+      </Unit76>
+      <Unit77>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolfoliagebiome.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFoliageBiome"/>
+      </Unit77>
+      <Unit78>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formfoliagebiome.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFoliageBiome"/>
+      </Unit78>
+      <Unit79>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolikrig.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolIkRig"/>
+      </Unit79>
+      <Unit80>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formikrig.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormIkRig"/>
+      </Unit80>
+      <Unit81>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooldestructible.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDestructible"/>
+      </Unit81>
+      <Unit82>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formdestructible.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDestructible"/>
+      </Unit82>
+      <Unit83>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolframeprofiler.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFrameProfiler"/>
+      </Unit83>
+      <Unit84>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formframeprofiler.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFrameProfiler"/>
+      </Unit84>
+      <Unit85>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmaterialgraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMaterialGraph"/>
+      </Unit85>
+      <Unit86>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmaterialgraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMaterialGraph"/>
+      </Unit86>
+      <Unit87>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolwaterstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolWaterStudio"/>
+      </Unit87>
+      <Unit88>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formwaterstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormWaterStudio"/>
+      </Unit88>
+      <Unit89>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolcsgstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCsgStudio"/>
+      </Unit89>
+      <Unit90>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formcsgstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCsgStudio"/>
+      </Unit90>
+      <Unit91>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolabilitystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolAbilityStudio"/>
+      </Unit91>
+      <Unit92>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formabilitystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormAbilityStudio"/>
+      </Unit92>
+      <Unit93>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolinputstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolInputStudio"/>
+      </Unit93>
+      <Unit94>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/forminputstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormInputStudio"/>
+      </Unit94>
+      <Unit95>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolvirtualcamera.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVirtualCamera"/>
+      </Unit95>
+      <Unit96>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formvirtualcamera.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVirtualCamera"/>
+      </Unit96>
+      <Unit97>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolclothstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolClothStudio"/>
+      </Unit97>
+      <Unit98>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formclothstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormClothStudio"/>
+      </Unit98>
+      <Unit99>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolutilityai.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolUtilityAi"/>
+      </Unit99>
+      <Unit100>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formutilityai.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormUtilityAi"/>
+      </Unit100>
+      <Unit101>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolsavereplay.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSaveReplay"/>
+      </Unit101>
+      <Unit102>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formsavereplay.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSaveReplay"/>
+      </Unit102>
+      <Unit103>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolstudiohub.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolStudioHub"/>
+      </Unit103>
+      <Unit104>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formstudiohub.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormStudioHub"/>
+      </Unit104>
+      <Unit105>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolvehiclestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVehicleStudio"/>
+      </Unit105>
+      <Unit106>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formvehiclestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVehicleStudio"/>
+      </Unit106>
+      <Unit107>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolblendmontage.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolBlendMontage"/>
+      </Unit107>
+      <Unit108>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formblendmontage.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormBlendMontage"/>
+      </Unit108>
+      <Unit109>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooleqsstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolEqsStudio"/>
+      </Unit109>
+      <Unit110>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formeqsstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormEqsStudio"/>
+      </Unit110>
+      <Unit111>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolinventorystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolInventoryStudio"/>
+      </Unit111>
+      <Unit112>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/forminventorystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormInventoryStudio"/>
+      </Unit112>
+      <Unit113>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolnetcodestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolNetcodeStudio"/>
+      </Unit113>
+      <Unit114>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formnetcodestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormNetcodeStudio"/>
+      </Unit114>
+      <Unit115>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmetasoundstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMetaSoundStudio"/>
+      </Unit115>
+      <Unit116>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmetasoundstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMetaSoundStudio"/>
+      </Unit116>
+      <Unit117>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooltilemapstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTilemapStudio"/>
+      </Unit117>
+      <Unit118>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formtilemapstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTilemapStudio"/>
+      </Unit118>
+      <Unit119>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolvolumetricstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVolumetricStudio"/>
+      </Unit119>
+      <Unit120>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formvolumetricstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVolumetricStudio"/>
+      </Unit120>
+      <Unit121>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolgeometryscript.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGeometryScript"/>
+      </Unit121>
+      <Unit122>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formgeometryscript.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGeometryScript"/>
+      </Unit122>
+      <Unit123>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolplaytestgauntlet.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPlaytestGauntlet"/>
+      </Unit123>
+      <Unit124>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formplaytestgauntlet.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPlaytestGauntlet"/>
+      </Unit124>
+      <Unit125>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmotionmatching.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMotionMatching"/>
+      </Unit125>
+      <Unit126>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmotionmatching.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMotionMatching"/>
+      </Unit126>
+      <Unit127>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmassentity.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMassEntity"/>
+      </Unit127>
+      <Unit128>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmassentity.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMassEntity"/>
+      </Unit128>
+      <Unit129>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolvoxelstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVoxelStudio"/>
+      </Unit129>
+      <Unit130>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formvoxelstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVoxelStudio"/>
+      </Unit130>
+      <Unit131>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolfluidstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFluidStudio"/>
+      </Unit131>
+      <Unit132>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formfluidstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFluidStudio"/>
+      </Unit132>
+      <Unit133>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolragdollstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolRagdollStudio"/>
+      </Unit133>
+      <Unit134>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formragdollstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormRagdollStudio"/>
+      </Unit134>
+      <Unit135>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolcommonuistudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCommonUiStudio"/>
+      </Unit135>
+      <Unit136>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formcommonuistudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCommonUiStudio"/>
+      </Unit136>
+      <Unit137>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolhlodstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolHlodStudio"/>
+      </Unit137>
+      <Unit138>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formhlodstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormHlodStudio"/>
+      </Unit138>
+      <Unit139>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolribbonstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolRibbonStudio"/>
+      </Unit139>
+      <Unit140>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formribbonstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormRibbonStudio"/>
+      </Unit140>
+      <Unit141>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolsettlementstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSettlementStudio"/>
+      </Unit141>
+      <Unit142>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formsettlementstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSettlementStudio"/>
+      </Unit142>
+      <Unit143>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooltelemetryinsights.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTelemetryInsights"/>
+      </Unit143>
+      <Unit144>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formtelemetryinsights.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTelemetryInsights"/>
+      </Unit144>
+      <Unit145>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolstatetree.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolStateTree"/>
+      </Unit145>
+      <Unit146>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formstatetree.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormStateTree"/>
+      </Unit146>
+      <Unit147>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolcontrolrig.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolControlRig"/>
+      </Unit147>
+      <Unit148>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formcontrolrig.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormControlRig"/>
+      </Unit148>
+      <Unit149>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolspringarm.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSpringArm"/>
+      </Unit149>
+      <Unit150>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formspringarm.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSpringArm"/>
+      </Unit150>
+      <Unit151>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolerosionstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolErosionStudio"/>
+      </Unit151>
+      <Unit152>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formerosionstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormErosionStudio"/>
+      </Unit152>
+      <Unit153>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmegalights.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMegaLights"/>
+      </Unit153>
+      <Unit154>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmegalights.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMegaLights"/>
+      </Unit154>
+      <Unit155>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolgameplaycue.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGameplayCue"/>
+      </Unit155>
+      <Unit156>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formgameplaycue.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGameplayCue"/>
+      </Unit156>
+      <Unit157>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooldatalayers.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDataLayers"/>
+      </Unit157>
+      <Unit158>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formdatalayers.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDataLayers"/>
+      </Unit158>
+      <Unit159>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooljigglebone.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolJiggleBone"/>
+      </Unit159>
+      <Unit160>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formjigglebone.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormJiggleBone"/>
+      </Unit160>
+      <Unit161>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolsoundscape.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSoundscape"/>
+      </Unit161>
+      <Unit162>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formsoundscape.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSoundscape"/>
+      </Unit162>
+      <Unit163>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolregressionharness.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolRegressionHarness"/>
+      </Unit163>
+      <Unit164>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formregressionharness.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormRegressionHarness"/>
+      </Unit164>
+      <Unit165>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolchoosertable.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolChooserTable"/>
+      </Unit165>
+      <Unit166>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formchoosertable.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormChooserTable"/>
+      </Unit166>
+      <Unit167>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolgroomstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGroomStudio"/>
+      </Unit167>
+      <Unit168>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formgroomstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGroomStudio"/>
+      </Unit168>
+      <Unit169>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooltraversalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTraversalStudio"/>
+      </Unit169>
+      <Unit170>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formtraversalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTraversalStudio"/>
+      </Unit170>
+      <Unit171>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolrvtstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolRvtStudio"/>
+      </Unit171>
+      <Unit172>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formrvtstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormRvtStudio"/>
+      </Unit172>
+      <Unit173>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmoverstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMoverStudio"/>
+      </Unit173>
+      <Unit174>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmoverstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMoverStudio"/>
+      </Unit174>
+      <Unit175>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolcamerarail.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCameraRail"/>
+      </Unit175>
+      <Unit176>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formcamerarail.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCameraRail"/>
+      </Unit176>
+      <Unit177>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmeshletstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMeshletStudio"/>
+      </Unit177>
+      <Unit178>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmeshletstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMeshletStudio"/>
+      </Unit178>
+      <Unit179>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooltetsoftbody.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTetSoftBody"/>
+      </Unit179>
+      <Unit180>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formtetsoftbody.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTetSoftBody"/>
+      </Unit180>
+      <Unit181>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmasstraffic.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMassTraffic"/>
+      </Unit181>
+      <Unit182>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmasstraffic.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMassTraffic"/>
+      </Unit182>
+      <Unit183>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toollivecookauditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolLiveCookAuditor"/>
+      </Unit183>
+      <Unit184>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formlivecookauditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormLiveCookAuditor"/>
+      </Unit184>
+      <Unit185>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolsurfacegi.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSurfaceGi"/>
+      </Unit185>
+      <Unit186>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formsurfacegistudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSurfaceGiStudio"/>
+      </Unit186>
+      <Unit187>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolcontextualanim.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolContextualAnim"/>
+      </Unit187>
+      <Unit188>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formcontextualanim.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormContextualAnim"/>
+      </Unit188>
+      <Unit189>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooltargetingstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTargetingStudio"/>
+      </Unit189>
+      <Unit190>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formtargetingstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTargetingStudio"/>
+      </Unit190>
+      <Unit191>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmutablestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMutableStudio"/>
+      </Unit191>
+      <Unit192>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmutablestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMutableStudio"/>
+      </Unit192>
+      <Unit193>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolriverstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolRiverStudio"/>
+      </Unit193>
+      <Unit194>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formriverstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormRiverStudio"/>
+      </Unit194>
+      <Unit195>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooloccluderfader.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolOccluderFader"/>
+      </Unit195>
+      <Unit196>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formoccluderfader.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormOccluderFader"/>
+      </Unit196>
+      <Unit197>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolgameplaydebugger.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGameplayDebugger"/>
+      </Unit197>
+      <Unit198>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formgameplaydebugger.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGameplayDebugger"/>
+      </Unit198>
+      <Unit199>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolwindstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolWindStudio"/>
+      </Unit199>
+      <Unit200>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formwindstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormWindStudio"/>
+      </Unit200>
+      <Unit201>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolpreloadstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPreloadStudio"/>
+      </Unit201>
+      <Unit202>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formpreloadstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPreloadStudio"/>
+      </Unit202>
+      <Unit203>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolcollabpresence.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCollabPresence"/>
+      </Unit203>
+      <Unit204>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formcollabpresence.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCollabPresence"/>
+      </Unit204>
+      <Unit205>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolsubstratestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSubstrateStudio"/>
+      </Unit205>
+      <Unit206>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formsubstratestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSubstrateStudio"/>
+      </Unit206>
+      <Unit207>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolsmartobjectslots.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSmartObjectSlots"/>
+      </Unit207>
+      <Unit208>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formsmartobjectslots.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSmartObjectSlots"/>
+      </Unit208>
+      <Unit209>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolaerofoil.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolAeroFoil"/>
+      </Unit209>
+      <Unit210>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formaerofoil.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormAeroFoil"/>
+      </Unit210>
+      <Unit211>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolcreviceclutter.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCreviceClutter"/>
+      </Unit211>
+      <Unit212>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formcreviceclutter.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCreviceClutter"/>
+      </Unit212>
+      <Unit213>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolcamerashake.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCameraShake"/>
+      </Unit213>
+      <Unit214>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formcamerashake.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCameraShake"/>
+      </Unit214>
+      <Unit215>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolfiregrid2d.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFireGrid2D"/>
+      </Unit215>
+      <Unit216>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formfiregrid2d.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFireGrid2D"/>
+      </Unit216>
+      <Unit217>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolgameplaymessenger.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGameplayMessenger"/>
+      </Unit217>
+      <Unit218>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formgameplaymessenger.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGameplayMessenger"/>
+      </Unit218>
+      <Unit219>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooloctahedralimpostor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolOctahedralImpostor"/>
+      </Unit219>
+      <Unit220>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formoctahedralimpostor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormOctahedralImpostor"/>
+      </Unit220>
+      <Unit221>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolposesnapshot.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPoseSnapshot"/>
+      </Unit221>
+      <Unit222>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formposesnapshot.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPoseSnapshot"/>
+      </Unit222>
+      <Unit223>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmacrorecorder.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMacroRecorder"/>
+      </Unit223>
+      <Unit224>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmacrorecorder.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMacroRecorder"/>
+      </Unit224>
+      <Unit225>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolportalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPortalStudio"/>
+      </Unit225>
+      <Unit226>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formportalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPortalStudio"/>
+      </Unit226>
+      <Unit227>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolsensoryperception.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSensoryPerception"/>
+      </Unit227>
+      <Unit228>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formsensoryperception.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSensoryPerception"/>
+      </Unit228>
+      <Unit229>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolivyclimber.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolIvyClimber"/>
+      </Unit229>
+      <Unit230>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formivyclimber.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormIvyClimber"/>
+      </Unit230>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

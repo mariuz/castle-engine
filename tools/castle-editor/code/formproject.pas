@@ -692,6 +692,7 @@ type
       MenuItemMacroRecorder: TMenuItem;
       MenuItemPortalStudio: TMenuItem;
       MenuItemSensoryPerception: TMenuItem;
+      MenuItemIvyClimber: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -804,6 +805,7 @@ type
     procedure MenuItemMacroRecorderClick(Sender: TObject);
     procedure MenuItemPortalStudioClick(Sender: TObject);
     procedure MenuItemSensoryPerceptionClick(Sender: TObject);
+    procedure MenuItemIvyClimberClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2888,6 +2890,11 @@ begin
   MenuItemSensoryPerception.Caption := 'AI Sensory Perception Studio...';
   MenuItemSensoryPerception.OnClick := @MenuItemSensoryPerceptionClick;
   MenuItemDesign.Add(MenuItemSensoryPerception);
+
+  MenuItemIvyClimber := TMenuItem.Create(MenuItemDesign);
+  MenuItemIvyClimber.Caption := 'Procedural Ivy & Vine Climber Studio...';
+  MenuItemIvyClimber.OnClick := @MenuItemIvyClimberClick;
+  MenuItemDesign.Add(MenuItemIvyClimber);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6416,6 +6423,12 @@ procedure TProjectForm.MenuItemSensoryPerceptionClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSensoryPerceptionDialog;
+end;
+
+procedure TProjectForm.MenuItemIvyClimberClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowIvyClimberDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

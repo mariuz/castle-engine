@@ -205,6 +205,7 @@ uses
   TestToolMacroRecorder,
   TestToolPortalStudio,
   TestToolSensoryPerception,
+  TestToolIvyClimber,
   TestCastleVulkanRHI;
 
 implementation

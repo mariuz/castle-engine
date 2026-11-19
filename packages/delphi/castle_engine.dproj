@@ -99,7 +99,7 @@
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;$(DCC_Namespace)</DCC_Namespace>
         <DCC_CBuilderOutput>All</DCC_CBuilderOutput>
         <SanitizedProjectName>castle_engine</SanitizedProjectName>
-        <DCC_UnitSearchPath>../../src/base;../../src/common_includes;../../src/base/android;../../src/base/windows;../../src/base/unix;../../src/base_rendering;../../src/base_rendering/dglopengl;../../src/base_rendering/glsl/generated-pascal;../../src/fonts;../../src/window;../../src/window/gtk;../../src/window/gtk/gtk3/gtk3bindings;../../src/window/windows;../../src/window/unix;../../src/window/deprecated_units;../../src/images;../../src/transform;../../src/scene;../../src/scene/glsl/generated-pascal;../../src/scene/x3d;../../src/scene/load;../../src/scene/load/spine;../../src/scene/load/md3;../../src/scene/load/ifc;../../src/scene/load/collada;../../src/scene/load/pasgltf;../../src/audio;../../src/audio/fmod;../../src/audio/openal;../../src/audio/ogg_vorbis;../../src/files;../../src/files/indy;../../src/castlescript;../../src/ui;../../src/ui/windows;../../src/services;../../src/services/steam;../../src/physics;../../src/physics/kraft;../../src/deprecated_units;../../src/vampyre_imaginglib/src/Source;../../src/vampyre_imaginglib/src/Source/JpegLib;../../src/vampyre_imaginglib/src/Source/ZLib;../../src/vampyre_imaginglib/src/Extras/Extensions;../../src/vampyre_imaginglib/src/Extensions/J2KObjects;../../src/vampyre_imaginglib/src/Extensions/LibTiff;../../src/vampyre_imaginglib/src/Extensions;../../src/compatibility/delphi-only;../../src/compatibility/delphi-only/fcl-json;../../src/delphi;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>../../src/base;../../src/common_includes;../../src/base/android;../../src/base/windows;../../src/base/unix;../../src/base_rendering;../../src/base_rendering/rhi;../../src/base_rendering/vulkan;../../src/base_rendering/opengl;../../src/base_rendering/dglopengl;../../src/base_rendering/glsl/generated-pascal;../../src/fonts;../../src/window;../../src/window/gtk;../../src/window/gtk/gtk3/gtk3bindings;../../src/window/windows;../../src/window/unix;../../src/window/deprecated_units;../../src/images;../../src/transform;../../src/scene;../../src/scene/glsl/generated-pascal;../../src/scene/x3d;../../src/scene/load;../../src/scene/load/spine;../../src/scene/load/md3;../../src/scene/load/ifc;../../src/scene/load/collada;../../src/scene/load/pasgltf;../../src/audio;../../src/audio/fmod;../../src/audio/openal;../../src/audio/ogg_vorbis;../../src/files;../../src/files/indy;../../src/castlescript;../../src/ui;../../src/ui/windows;../../src/services;../../src/services/steam;../../src/physics;../../src/physics/kraft;../../src/deprecated_units;../../src/vampyre_imaginglib/src/Source;../../src/vampyre_imaginglib/src/Source/JpegLib;../../src/vampyre_imaginglib/src/Source/ZLib;../../src/vampyre_imaginglib/src/Extras/Extensions;../../src/vampyre_imaginglib/src/Extensions/J2KObjects;../../src/vampyre_imaginglib/src/Extensions/LibTiff;../../src/vampyre_imaginglib/src/Extensions;../../src/compatibility/delphi-only;../../src/compatibility/delphi-only/fcl-json;../../src/delphi;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <VerInfo_Locale>1045</VerInfo_Locale>
         <VerInfo_Keys>CompanyName=;FileDescription=$(MSBuildProjectName);FileVersion=1.0.0.0;InternalName=;LegalCopyright=;LegalTrademarks=;OriginalFilename=;ProgramID=com.embarcadero.$(MSBuildProjectName);ProductName=$(MSBuildProjectName);ProductVersion=1.0.0.0;Comments=</VerInfo_Keys>
         <DCC_Description>Castle Game Engine - base for other packages</DCC_Description>
@@ -497,6 +497,104 @@
         <DCCReference Include="..\..\src\services\steam\castleinternalsteamapi.pas"/>
         <DCCReference Include="..\..\src\services\steam\castlesteam.pas"/>
         <DCCReference Include="..\..\src\base_rendering\castlegles.pas"/>
+        <DCCReference Include="..\..\src\base\castleinternalrenderdoc.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\opengl\castleinternalrhi_opengl.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\rhi\castleinternalbatch2drhi.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\rhi\castleinternalrhi.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\rhi\castleinternalshaderrhi.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalrhi_vulkan.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalshadercompiler.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalvulkan.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalvulkanmemory.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalvulkanwsi.pas"/>
+        <DCCReference Include="..\..\src\scene\castleaerofoil.pas"/>
+        <DCCReference Include="..\..\src\scene\castleassetpreloader.pas"/>
+        <DCCReference Include="..\..\src\scene\castleaudiomixer.pas"/>
+        <DCCReference Include="..\..\src\scene\castleblendmontage.pas"/>
+        <DCCReference Include="..\..\src\scene\castlecamerarigrail.pas"/>
+        <DCCReference Include="..\..\src\scene\castlecamerashake.pas"/>
+        <DCCReference Include="..\..\src\scene\castlechoosertable.pas"/>
+        <DCCReference Include="..\..\src\scene\castleclothrope.pas"/>
+        <DCCReference Include="..\..\src\scene\castlecommonuimvvm.pas"/>
+        <DCCReference Include="..\..\src\scene\castlecontextualanim.pas"/>
+        <DCCReference Include="..\..\src\scene\castlecontrolrig.pas"/>
+        <DCCReference Include="..\..\src\scene\castlecreviceclutter.pas"/>
+        <DCCReference Include="..\..\src\scene\castlecsgmodeler.pas"/>
+        <DCCReference Include="..\..\src\scene\castledatalayers.pas"/>
+        <DCCReference Include="..\..\src\scene\castledatatable.pas"/>
+        <DCCReference Include="..\..\src\scene\castledecalprojector.pas"/>
+        <DCCReference Include="..\..\src\scene\castledesignannotations.pas"/>
+        <DCCReference Include="..\..\src\scene\castledestructible.pas"/>
+        <DCCReference Include="..\..\src\scene\castledialoguequest.pas"/>
+        <DCCReference Include="..\..\src\scene\castleenhancedinput.pas"/>
+        <DCCReference Include="..\..\src\scene\castleeqstactical.pas"/>
+        <DCCReference Include="..\..\src\scene\castleerosionbaker.pas"/>
+        <DCCReference Include="..\..\src\scene\castlefiregrid2d.pas"/>
+        <DCCReference Include="..\..\src\scene\castlefoliagebiome.pas"/>
+        <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
+        <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
+        <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>
+        <DCCReference Include="..\..\src\scene\castlegameplaymessenger.pas"/>
+        <DCCReference Include="..\..\src\scene\castlegeometryscript.pas"/>
+        <DCCReference Include="..\..\src\scene\castlegroomhair.pas"/>
+        <DCCReference Include="..\..\src\scene\castlehlodbaker.pas"/>
+        <DCCReference Include="..\..\src\scene\castleikrig.pas"/>
+        <DCCReference Include="..\..\src\scene\castleinventorycraft.pas"/>
+        <DCCReference Include="..\..\src\scene\castleivyclimber.pas"/>
+        <DCCReference Include="..\..\src\scene\castlejigglebone.pas"/>
+        <DCCReference Include="..\..\src\scene\castlelocalizationtable.pas"/>
+        <DCCReference Include="..\..\src\scene\castlemassentity.pas"/>
+        <DCCReference Include="..\..\src\scene\castlemasstraffic.pas"/>
+        <DCCReference Include="..\..\src\scene\castlematerialgraph.pas"/>
+        <DCCReference Include="..\..\src\scene\castlemegalights.pas"/>
+        <DCCReference Include="..\..\src\scene\castlemeshletcluster.pas"/>
+        <DCCReference Include="..\..\src\scene\castlemetasound.pas"/>
+        <DCCReference Include="..\..\src\scene\castlemodularsnap.pas"/>
+        <DCCReference Include="..\..\src\scene\castlemotionmatching.pas"/>
+        <DCCReference Include="..\..\src\scene\castlemover2.pas"/>
+        <DCCReference Include="..\..\src\scene\castlemutablecharacter.pas"/>
+        <DCCReference Include="..\..\src\scene\castlenavnetwork.pas"/>
+        <DCCReference Include="..\..\src\scene\castlenetcodeiris.pas"/>
+        <DCCReference Include="..\..\src\scene\castlenprshader.pas"/>
+        <DCCReference Include="..\..\src\scene\castleoccluderfader.pas"/>
+        <DCCReference Include="..\..\src\scene\castleoctahedralimpostor.pas"/>
+        <DCCReference Include="..\..\src\scene\castleparticles.pas"/>
+        <DCCReference Include="..\..\src\scene\castlepcgsettlement.pas"/>
+        <DCCReference Include="..\..\src\scene\castleportalpair.pas"/>
+        <DCCReference Include="..\..\src\scene\castleposesnapshot.pas"/>
+        <DCCReference Include="..\..\src\scene\castlepostprocessvolume.pas"/>
+        <DCCReference Include="..\..\src\scene\castleprefaboverrides.pas"/>
+        <DCCReference Include="..\..\src\scene\castleragdollhit.pas"/>
+        <DCCReference Include="..\..\src\scene\castleribbontrail.pas"/>
+        <DCCReference Include="..\..\src\scene\castleriverspline.pas"/>
+        <DCCReference Include="..\..\src\scene\castleruntimevt.pas"/>
+        <DCCReference Include="..\..\src\scene\castlesavereplay.pas"/>
+        <DCCReference Include="..\..\src\scene\castlescalability.pas"/>
+        <DCCReference Include="..\..\src\scene\castlesensoryperception.pas"/>
+        <DCCReference Include="..\..\src\scene\castlesequencer.pas"/>
+        <DCCReference Include="..\..\src\scene\castleshallowfluid.pas"/>
+        <DCCReference Include="..\..\src\scene\castlesmartobjectslots.pas"/>
+        <DCCReference Include="..\..\src\scene\castlesoundscape.pas"/>
+        <DCCReference Include="..\..\src\scene\castlesplinepath.pas"/>
+        <DCCReference Include="..\..\src\scene\castlespringarm.pas"/>
+        <DCCReference Include="..\..\src\scene\castlestategraph.pas"/>
+        <DCCReference Include="..\..\src\scene\castlestatetree.pas"/>
+        <DCCReference Include="..\..\src\scene\castlestreamingzone.pas"/>
+        <DCCReference Include="..\..\src\scene\castlesubstratematerial.pas"/>
+        <DCCReference Include="..\..\src\scene\castlesurfacegi.pas"/>
+        <DCCReference Include="..\..\src\scene\castletargetingsystem.pas"/>
+        <DCCReference Include="..\..\src\scene\castletetsoftbody.pas"/>
+        <DCCReference Include="..\..\src\scene\castletilemap2dplus.pas"/>
+        <DCCReference Include="..\..\src\scene\castletimeofdayweather.pas"/>
+        <DCCReference Include="..\..\src\scene\castletraversalparkour.pas"/>
+        <DCCReference Include="..\..\src\scene\castleutilityai.pas"/>
+        <DCCReference Include="..\..\src\scene\castlevariantset.pas"/>
+        <DCCReference Include="..\..\src\scene\castlevehiclesystem.pas"/>
+        <DCCReference Include="..\..\src\scene\castlevirtualcamera.pas"/>
+        <DCCReference Include="..\..\src\scene\castlevolumetrics.pas"/>
+        <DCCReference Include="..\..\src\scene\castlevoxelterrain.pas"/>
+        <DCCReference Include="..\..\src\scene\castlewatersystem.pas"/>
+        <DCCReference Include="..\..\src\scene\castlewindfield.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

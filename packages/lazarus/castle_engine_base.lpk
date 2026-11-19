@@ -60,7 +60,7 @@ This is the same license as used by Lazarus LCL and FPC RTL.
 See https://castle-engine.io/license for details.
 "/>
     <Version Major="6" Minor="93" Release="1"/>
-    <Files Count="1305">
+    <Files Count="1316">
       <Item1>
         <Filename Value="../../src/audio/castleinternalabstractsoundbackend.pas"/>
         <UnitName Value="CastleInternalAbstractSoundBackend"/>
@@ -5311,6 +5311,50 @@ See https://castle-engine.io/license for details.
         <Filename Value="../../src/scene/castlesensoryperception.pas"/>
         <UnitName Value="CastleSensoryPerception"/>
       </Item1305>
+      <Item1306>
+        <Filename Value="../../src/scene/castleivyclimber.pas"/>
+        <UnitName Value="CastleIvyClimber"/>
+      </Item1306>
+      <Item1307>
+        <Filename Value="../../src/base/castleinternalrenderdoc.pas"/>
+        <UnitName Value="CastleInternalRenderDoc"/>
+      </Item1307>
+      <Item1308>
+        <Filename Value="../../src/base_rendering/opengl/castleinternalrhi_opengl.pas"/>
+        <UnitName Value="CastleInternalRHI_OpenGL"/>
+      </Item1308>
+      <Item1309>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalbatch2drhi.pas"/>
+        <UnitName Value="CastleInternalBatch2DRHI"/>
+      </Item1309>
+      <Item1310>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalrhi.pas"/>
+        <UnitName Value="CastleInternalRHI"/>
+      </Item1310>
+      <Item1311>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalshaderrhi.pas"/>
+        <UnitName Value="CastleInternalShaderRHI"/>
+      </Item1311>
+      <Item1312>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalrhi_vulkan.pas"/>
+        <UnitName Value="CastleInternalRHI_Vulkan"/>
+      </Item1312>
+      <Item1313>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalshadercompiler.pas"/>
+        <UnitName Value="CastleInternalShaderCompiler"/>
+      </Item1313>
+      <Item1314>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkan.pas"/>
+        <UnitName Value="CastleInternalVulkan"/>
+      </Item1314>
+      <Item1315>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkanmemory.pas"/>
+        <UnitName Value="CastleInternalVulkanMemory"/>
+      </Item1315>
+      <Item1316>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkanwsi.pas"/>
+        <UnitName Value="CastleInternalVulkanWSI"/>
+      </Item1316>
     </Files>
     <CompatibilityMode Value="True"/>
     <RequiredPkgs Count="1">

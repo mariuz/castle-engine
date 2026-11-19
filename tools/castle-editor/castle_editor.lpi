@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="229">
+    <Units Count="231">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1227,6 +1227,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSensoryPerception"/>
       </Unit228>
+      <Unit229>
+        <Filename Value="../common-code/toolivyclimber.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolIvyClimber"/>
+      </Unit229>
+      <Unit230>
+        <Filename Value="code/formivyclimber.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormIvyClimber"/>
+      </Unit230>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

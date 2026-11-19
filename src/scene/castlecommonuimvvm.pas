@@ -53,7 +53,7 @@ type
   end;
 
   { Prompt template entry mapping a @link(TCastleLabel) to a template containing
-    @code({Prompt:Confirm}), @code({Prompt:Back}), @code({Prompt:Context}), etc. }
+    tokens such as @code(Prompt:Confirm), @code(Prompt:Back), @code(Prompt:Context), etc. }
   TCommonPromptTemplate = record
     TargetLabelName: String;
     TemplateText: String;

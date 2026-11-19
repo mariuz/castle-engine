@@ -27,6 +27,7 @@ permissions:
 jobs:
   delphi_test:
     name: Delphi Test (Job)
+    if: ${{ github.repository_owner == 'castle-engine' }}
     strategy:
       matrix:
         host-label: [
@@ -163,6 +164,7 @@ jobs:
 
   delphi_non_windows:
     name: Delphi build for Non-Windows (Job)
+    if: ${{ github.repository_owner == 'castle-engine' }}
     runs-on: delphi_12_2
     steps:
       - uses: actions/checkout@v7
