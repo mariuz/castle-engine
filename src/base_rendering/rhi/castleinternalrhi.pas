@@ -76,7 +76,11 @@ type
     buStorage,
     buIndirect,
     buTransferSrc,
-    buTransferDst
+    buTransferDst,
+    buShaderDeviceAddress,
+    buAccelerationStructureBuildInput,
+    buAccelerationStructureStorage,
+    buShaderBindingTable
   );
   TRHIBufferUsageFlags = set of TRHIBufferUsage;
 
@@ -155,7 +159,15 @@ type
     ssVertex,
     ssFragment,
     ssGeometry,
-    ssCompute
+    ssCompute,
+    ssTask,
+    ssMesh,
+    ssRayGen,
+    ssAnyHit,
+    ssClosestHit,
+    ssMiss,
+    ssIntersection,
+    ssCallable
   );
   TRHIShaderStageFlags = set of TRHIShaderStage;
 
@@ -396,7 +408,8 @@ type
     dtCombinedImageSampler,
     dtSampledImage,
     dtSampler,
-    dtStorageImage
+    dtStorageImage,
+    dtAccelerationStructure
   );
 
   { Optional descriptor binding flags for Vulkan 1.2 / VK_EXT_descriptor_indexing bindless arrays }
@@ -480,6 +493,8 @@ type
     VertexShader: TRHIShaderModule;
     FragmentShader: TRHIShaderModule;
     GeometryShader: TRHIShaderModule; // Optional (nil if unused)
+    TaskShader: TRHIShaderModule;     // Optional (VK_EXT_mesh_shader task stage)
+    MeshShader: TRHIShaderModule;     // Optional (VK_EXT_mesh_shader mesh stage)
     VertexInput: TRHIVertexInputDesc;
     Topology: TRHIPrimitiveTopology;
     Rasterizer: TRHIRasterizerStateDesc;
@@ -580,6 +595,11 @@ type
     SupportsExtendedDynamicState: Boolean;
     SupportsSynchronization2: Boolean;
     SupportsTimelineSemaphores: Boolean;
+    SupportsBufferDeviceAddress: Boolean;
+    SupportsAccelerationStructure: Boolean;
+    SupportsRayQuery: Boolean;
+    SupportsRayTracingPipeline: Boolean;
+    SupportsMeshShaders: Boolean;
     TimestampPeriodNanoseconds: Single;
   end;
 
@@ -606,10 +626,11 @@ type
     property UniqueId: QWord read FUniqueId;
   end;
 
-  { GPU Buffer (Vertex, Index, Uniform, Storage, or Staging). }
+  { GPU Buffer (Vertex, Index, Uniform, Storage, Staging, AccelerationStructure, SBT). }
   TRHIBuffer = class abstract(TRHIResource)
   protected
     FDesc: TRHIBufferDesc;
+    function GetDeviceAddress: UInt64; virtual;
   public
     constructor Create(const ADevice: TRHIDevice; const ADesc: TRHIBufferDesc);
     { Maps CPU-visible memory (muCpuToGpu or muGpuToCpu). }
@@ -618,6 +639,7 @@ type
     { Convenience helper to upload data. Uses staging buffer if muGpuOnly. }
     procedure UploadData(const Data; const Size: PtrUInt; const Offset: PtrUInt = 0); virtual; abstract;
     property Desc: TRHIBufferDesc read FDesc;
+    property DeviceAddress: UInt64 read GetDeviceAddress;
   end;
 
   { GPU Texture (2D, 3D, Cube, Array, Render Target). }
@@ -832,6 +854,10 @@ type
     procedure DrawIndexedIndirectCount(const IndirectBuffer: TRHIBuffer;
       const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
       const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal); virtual;
+    { Mesh Shader Task/Mesh Workgroup Dispatch (VK_EXT_mesh_shader). }
+    procedure DrawMeshTasks(const GroupCountX, GroupCountY, GroupCountZ: Cardinal); virtual;
+    procedure DrawMeshTasksIndirect(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt; const DrawCount, Stride: Cardinal); virtual;
 
     { Secondary Command List Recording & Execution (Multi-threaded recording) }
     procedure BeginSecondaryRecording(const AInheritedInfo: TRHIRenderingInfo); overload; virtual;
@@ -1895,6 +1921,11 @@ begin
   FDesc := ADesc;
 end;
 
+function TRHIBuffer.GetDeviceAddress: UInt64;
+begin
+  Result := 0;
+end;
+
 { TRHITexture }
 
 constructor TRHITexture.Create(const ADevice: TRHIDevice; const ADesc: TRHITextureDesc);
@@ -2131,6 +2162,17 @@ procedure TRHICommandList.DrawIndexedIndirectCount(const IndirectBuffer: TRHIBuf
   const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal);
 begin
   DrawIndexedIndirect(IndirectBuffer, Offset, MaxDrawCount, Stride);
+end;
+
+procedure TRHICommandList.DrawMeshTasks(const GroupCountX, GroupCountY, GroupCountZ: Cardinal);
+begin
+  if (GroupCountX = 0) and (GroupCountY = 0) and (GroupCountZ = 0) then ;
+end;
+
+procedure TRHICommandList.DrawMeshTasksIndirect(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
+begin
+  if (IndirectBuffer = nil) and (Offset = 0) and (DrawCount = 0) and (Stride = 0) then ;
 end;
 
 procedure TRHICommandList.BeginSecondaryRecording(const AInheritedInfo: TRHIRenderingInfo);

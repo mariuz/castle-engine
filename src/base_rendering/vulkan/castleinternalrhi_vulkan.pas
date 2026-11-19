@@ -50,9 +50,11 @@ type
     FMemoryOffset: VkDeviceSize;
     FAllocatedSize: VkDeviceSize;
     FMappedPtr: Pointer;
+    FDeviceAddress: UInt64;
     function VulkanDevice: TVulkanRHIDevice;
   protected
     procedure ReleaseDeviceResources; override;
+    function GetDeviceAddress: UInt64; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHIBufferDesc;
       const InitialData: Pointer);
@@ -207,6 +209,8 @@ type
     FPendingWriteInfoIndices: array of Integer;
     FBufferInfos: array of VkDescriptorBufferInfo;
     FImageInfos: array of VkDescriptorImageInfo;
+    FAccelStructHandles: array of VkAccelerationStructureKHR;
+    FAccelStructWrites: array of VkWriteDescriptorSetAccelerationStructureKHR;
     FUpdateCount: Cardinal;
     FLastBoundTexture: TRHITexture;
     FLastBoundSampler: TRHISampler;
@@ -233,6 +237,8 @@ type
     procedure BindTextureSubresource(const Binding: Cardinal;
       const Texture: TRHITexture; const MipLevel, ArrayLayer: Cardinal;
       const Sampler: TRHISampler = nil); override;
+    procedure BindAccelerationStructure(const Binding: Cardinal;
+      const AAccelerationStructure: VkAccelerationStructureKHR);
     procedure Update; override;
 
     property Handle: VkDescriptorSet read FHandle;
@@ -328,6 +334,7 @@ type
     FDynamicStateChangeCount: Cardinal;
     FIndirectDrawCallCount: Cardinal;
     FIndirectCountDrawCallCount: Cardinal;
+    FMeshTasksDrawCallCount: Cardinal;
     FLastEffectiveIndirectDrawCount: Cardinal;
     FClearAttachmentCallCount: Cardinal;
     FDynamicCullMode: TRHICullMode;
@@ -453,6 +460,11 @@ type
     procedure DrawIndexedIndirectCount(const IndirectBuffer: TRHIBuffer;
       const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
       const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal); override;
+    procedure DrawMeshTasks(const GroupCountX: Cardinal;
+      const GroupCountY: Cardinal = 1; const GroupCountZ: Cardinal = 1); override;
+    procedure DrawMeshTasksIndirect(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt; const DrawCount: Cardinal = 1;
+      const Stride: Cardinal = 12); override;
 
     procedure ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList); override;
     procedure ExecuteSecondaryCommandsInPass(
@@ -480,6 +492,7 @@ type
     property DynamicStateChangeCount: Cardinal read FDynamicStateChangeCount;
     property IndirectDrawCallCount: Cardinal read FIndirectDrawCallCount;
     property IndirectCountDrawCallCount: Cardinal read FIndirectCountDrawCallCount;
+    property MeshTasksDrawCallCount: Cardinal read FMeshTasksDrawCallCount;
     property LastEffectiveIndirectDrawCount: Cardinal read FLastEffectiveIndirectDrawCount;
     property DynamicCullMode: TRHICullMode read FDynamicCullMode;
     property DynamicFrontFace: TRHIFrontFace read FDynamicFrontFace;
@@ -534,6 +547,7 @@ type
     FDevice: VkDevice;
     FAllowFreeIndividualSets: Boolean;
     FAllowUpdateAfterBind: Boolean;
+    FSupportsAccelerationStructure: Boolean;
     FInitialMaxSets: Cardinal;
     FMaxSetsCap: Cardinal;
     FCurrentMaxSets: Cardinal;
@@ -557,7 +571,8 @@ type
       const AInitialMaxSets: Cardinal = 1024;
       const AAllowFreeIndividualSets: Boolean = False;
       const AMaxSetsCap: Cardinal = 4096;
-      const AAllowUpdateAfterBind: Boolean = False);
+      const AAllowUpdateAfterBind: Boolean = False;
+      const ASupportsAccelerationStructure: Boolean = False);
     destructor Destroy; override;
 
     { Allocates a VkDescriptorSet from the current pool page, growing the pool chain
@@ -576,6 +591,7 @@ type
     property Device: VkDevice read FDevice;
     property AllowFreeIndividualSets: Boolean read FAllowFreeIndividualSets;
     property AllowUpdateAfterBind: Boolean read FAllowUpdateAfterBind write FAllowUpdateAfterBind;
+    property SupportsAccelerationStructure: Boolean read FSupportsAccelerationStructure write FSupportsAccelerationStructure;
     property InitialMaxSets: Cardinal read FInitialMaxSets;
     property MaxSetsCap: Cardinal read FMaxSetsCap;
     property NextPoolMaxSets: Cardinal read FCurrentMaxSets;
@@ -2386,6 +2402,10 @@ type
 
   { Manages 64-vertex / 124-triangle meshlet cluster descriptors, normal-cone
     backface culling, and GPU visible meshlet compaction. }
+  TCastleMeshletTriangle = packed record
+    V0, V1, V2, Pad: Cardinal;
+  end;
+
   TCastleVulkanMeshletCuller = class
   private
     FDevice: TVulkanRHIDevice;
@@ -2394,7 +2414,28 @@ type
     FMeshletBuffer: TVulkanRHIBuffer;
     FVisibleMeshletIndicesBuffer: TVulkanRHIBuffer;
     FVisibleMeshletCountBuffer: TVulkanRHIBuffer;
+    FMeshletVertexBuffer: TVulkanRHIBuffer;
+    FMeshletTriangleBuffer: TVulkanRHIBuffer;
+    FExpandedVertexBuffer: TVulkanRHIBuffer;
+    FSoftwareIndirectDrawBuffer: TVulkanRHIBuffer;
+    FMeshTasksIndirectBuffer: TVulkanRHIBuffer;
+    FTotalTriangleCapacity: Cardinal;
+    FMeshDrawLayout: TRHIDescriptorSetLayout;
+    FMeshDrawSet: TRHIDescriptorSet;
+    FSoftwareCullLayout: TRHIDescriptorSetLayout;
+    FSoftwareCullSet: TRHIDescriptorSet;
+    FTaskShader: TRHIShaderModule;
+    FMeshShader: TRHIShaderModule;
+    FFragShader: TRHIShaderModule;
+    FFallbackVertShader: TRHIShaderModule;
+    FSoftwareCullShader: TRHIShaderModule;
+    FSoftwareCullPipeline: TRHIComputePipeline;
+    FForceSoftwareFallback: Boolean;
+    FUseTaskShader: Boolean;
+    FHardwareMeshDrawCount: Cardinal;
+    FSoftwareFallbackDrawCount: Cardinal;
     FDispatchCount: Cardinal;
+    procedure EnsureMeshletRenderPipelines;
   public
     constructor Create(const ADevice: TVulkanRHIDevice);
     destructor Destroy; override;
@@ -2404,6 +2445,12 @@ type
       const AConeAxis: TVector3; const AConeCutoff: Single;
       const AVertexOffset, AVertexCount, ATriangleOffset, ATriangleCount: Cardinal): Integer;
     procedure UploadMeshlets;
+
+    { Uploads per-meshlet clip/NDC positions + colors and local 0..63 triangle indices
+      for both VK_EXT_mesh_shader rendering and Software Compute meshlet expansion. }
+    procedure UploadMeshletGeometry(
+      const APositions, AColors: array of TVector4;
+      const ATriangles: array of TCastleMeshletTriangle);
 
     { Evaluates on CPU how many registered meshlets pass distance + normal-cone backface culling. }
     function EvaluateVisibleMeshletsCPU(const ACameraPosition: TVector3;
@@ -2417,10 +2464,38 @@ type
       const APipeline: TVulkanRHIComputePipeline = nil;
       const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
 
+    { Records the Software Compute meshlet cull + vertex expansion pass BEFORE BeginRendering
+      (used when ForceSoftwareFallback = True or Device.SupportsMeshShaders = False). }
+    procedure PrepareSoftwareMeshletCulling(
+      const ACommandList: TVulkanRHICommandList;
+      const ACameraPosition: TVector3;
+      const AMaxDrawDistance: Single;
+      const AEnableConeCull: Boolean = True);
+
+    { Renders uploaded meshlets inside an active render pass using live VK_EXT_mesh_shader
+      (vkCmdDrawMeshTasksEXT / vkCmdDrawMeshTasksIndirectEXT, returning True) when supported
+      and ForceSoftwareFallback = False, or Software Compute/Indirect fallback (returning False). }
+    function RenderMeshlets(
+      const ACommandList: TVulkanRHICommandList;
+      const AColorFormat: TRHIPixelFormat;
+      const ACameraPosition: TVector3;
+      const AMaxDrawDistance: Single;
+      const AEnableConeCull: Boolean = True;
+      const AUseIndirectMeshTasks: Boolean = False): Boolean;
+
     property MeshletCount: Cardinal read FMeshletCount;
     property MeshletBuffer: TVulkanRHIBuffer read FMeshletBuffer;
     property VisibleMeshletIndicesBuffer: TVulkanRHIBuffer read FVisibleMeshletIndicesBuffer;
     property VisibleMeshletCountBuffer: TVulkanRHIBuffer read FVisibleMeshletCountBuffer;
+    property MeshletVertexBuffer: TVulkanRHIBuffer read FMeshletVertexBuffer;
+    property MeshletTriangleBuffer: TVulkanRHIBuffer read FMeshletTriangleBuffer;
+    property ExpandedVertexBuffer: TVulkanRHIBuffer read FExpandedVertexBuffer;
+    property SoftwareIndirectDrawBuffer: TVulkanRHIBuffer read FSoftwareIndirectDrawBuffer;
+    property MeshTasksIndirectBuffer: TVulkanRHIBuffer read FMeshTasksIndirectBuffer;
+    property ForceSoftwareFallback: Boolean read FForceSoftwareFallback write FForceSoftwareFallback;
+    property UseTaskShader: Boolean read FUseTaskShader write FUseTaskShader;
+    property HardwareMeshDrawCount: Cardinal read FHardwareMeshDrawCount;
+    property SoftwareFallbackDrawCount: Cardinal read FSoftwareFallbackDrawCount;
     property DispatchCount: Cardinal read FDispatchCount;
   end;
 
@@ -3071,6 +3146,15 @@ type
 
   { Manages VK_KHR_ray_tracing_pipeline Shader Binding Table (SBT) regions
     (Raygen, Miss, Hit, Callable) with hardware handle stride & base alignment. }
+  TCastleVulkanAccelerationStructureManager = class;
+
+  TCastleRTInstanceDesc = record
+    BLASID: Cardinal;
+    Transform: TMatrix4;
+    CustomIndex: Cardinal;
+    Mask: Byte;
+  end;
+
   TCastleVulkanShaderBindingTable = class
   private
     FDevice: TVulkanRHIDevice;
@@ -3083,7 +3167,20 @@ type
     FHitRegionSize: Cardinal;
     FTotalSBTSizeBytes: Cardinal;
     FSBTBuffer: TVulkanRHIBuffer;
+    FRTDescriptorLayout: TVulkanRHIDescriptorSetLayout;
+    FRTDescriptorSet: TVulkanRHIDescriptorSet;
+    FRayGenShader: TVulkanRHIShaderModule;
+    FRayMissShader: TVulkanRHIShaderModule;
+    FRayClosestHitShader: TVulkanRHIShaderModule;
+    FRTPipelineLayout: VkPipelineLayout;
+    FRTPipeline: VkPipeline;
+    FSBTPopulated: Boolean;
+    FForceSoftwareFallback: Boolean;
+    FHardwareTraceRaysCount: Cardinal;
+    FFallbackTraceRaysCount: Cardinal;
     FTraceRaysDispatchCount: Cardinal;
+    procedure EnsureHardwareRTPipelineAndSBT;
+    procedure DestroyHardwareRTPipeline;
   public
     constructor Create(const ADevice: TVulkanRHIDevice);
     destructor Destroy; override;
@@ -3102,6 +3199,15 @@ type
       const AMissGroupCount: Cardinal = 2;
       const AHitGroupCount: Cardinal = 4);
 
+    { Executes live VK_KHR_ray_tracing_pipeline (vkCreateRayTracingPipelinesKHR +
+      vkGetRayTracingShaderGroupHandlesKHR + vkCmdTraceRaysKHR, returning True) when supported
+      and ForceSoftwareFallback = False, or delegates to AASManager.DispatchRayQueryOrFallback. }
+    function DispatchHardwareTraceRaysOrFallback(
+      const ACommandList: TVulkanRHICommandList;
+      const AASManager: TCastleVulkanAccelerationStructureManager;
+      const AOutputImage: TVulkanRHITexture;
+      const AOriginXYScale, ARayDirAndOriginZ: TVector4): Boolean;
+
     property HandleSize: Cardinal read FHandleSize write FHandleSize;
     property HandleAlignment: Cardinal read FHandleAlignment write FHandleAlignment;
     property BaseAlignment: Cardinal read FBaseAlignment write FBaseAlignment;
@@ -3111,11 +3217,15 @@ type
     property HitRegionSize: Cardinal read FHitRegionSize;
     property TotalSBTSizeBytes: Cardinal read FTotalSBTSizeBytes;
     property SBTBuffer: TVulkanRHIBuffer read FSBTBuffer;
+    property RTPipelineHandle: VkPipeline read FRTPipeline;
+    property ForceSoftwareFallback: Boolean read FForceSoftwareFallback write FForceSoftwareFallback;
+    property HardwareTraceRaysCount: Cardinal read FHardwareTraceRaysCount;
+    property FallbackTraceRaysCount: Cardinal read FFallbackTraceRaysCount;
     property TraceRaysDispatchCount: Cardinal read FTraceRaysDispatchCount;
   end;
 
   { -------------------------------------------------------------------------- }
-  { BLAS / TLAS Acceleration Structure & Compaction Manager (Phase 35.3)       }
+  { BLAS / TLAS Acceleration Structure & Compaction Manager (Phase 35.3 / 117) }
   { -------------------------------------------------------------------------- }
 
   TCastleVulkanBLASEntry = record
@@ -3124,10 +3234,19 @@ type
     UncompactedBytes: Cardinal;
     CompactedBytes: Cardinal;
     IsCompacted: Boolean;
+    Handle: VkAccelerationStructureKHR;
+    DeviceAddress: UInt64;
+    BackingBuffer: TVulkanRHIBuffer;
+    VertexBuffer: TVulkanRHIBuffer;
+    IndexBuffer: TVulkanRHIBuffer;
+    CPUVertices: array of TVector3;
+    CPUIndices: array of UInt32;
   end;
 
-  { Tracks Bottom-Level (BLAS) and Top-Level (TLAS) Acceleration Structure builds
-    and post-build BLAS memory compaction (VK_KHR_acceleration_structure). }
+  { Tracks Bottom-Level (BLAS) and Top-Level (TLAS) Acceleration Structure builds,
+    real GPU post-build BLAS compaction (VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR
+    + vkCmdCopyAccelerationStructureKHR), inline VK_KHR_ray_query compute dispatches, and
+    automatic Software Compute Stackless LBVH Ray-Tracing Fallback. }
   TCastleVulkanAccelerationStructureManager = class
   private
     FDevice: TVulkanRHIDevice;
@@ -3135,6 +3254,28 @@ type
     FTLASInstanceCount: Cardinal;
     FTLASBuildCount: Cardinal;
     FTLASBuffer: TVulkanRHIBuffer;
+    FTLASInstancesBuffer: TVulkanRHIBuffer;
+    FTLASHandle: VkAccelerationStructureKHR;
+    FTLASDeviceAddress: UInt64;
+    FLBVHNodeBuffer: TVulkanRHIBuffer;
+    FLBVHTriangleBuffer: TVulkanRHIBuffer;
+    FLBVHNodeCount: Cardinal;
+    FLBVHTriangleCount: Cardinal;
+    FRayQueryLayout: TVulkanRHIDescriptorSetLayout;
+    FRayQuerySet: TVulkanRHIDescriptorSet;
+    FRayQueryShader: TRHIShaderModule;
+    FRayQueryPipeline: TRHIComputePipeline;
+    FSoftwareLBVHLayout: TRHIDescriptorSetLayout;
+    FSoftwareLBVHSet: TRHIDescriptorSet;
+    FSoftwareLBVHShader: TRHIShaderModule;
+    FSoftwareLBVHPipeline: TRHIComputePipeline;
+    FForceSoftwareFallback: Boolean;
+    FRayQueryDispatchCount: Cardinal;
+    FSoftwareLBVHDispatchCount: Cardinal;
+    procedure DestroyBLASEntryGPU(var AEntry: TCastleVulkanBLASEntry);
+    procedure DestroyTLASGPU;
+    procedure BuildSoftwareLBVH(const AInstances: array of TCastleRTInstanceDesc);
+    procedure EnsureRayQueryAndLBVHPipelines;
     function GetBLASCount: Cardinal;
     function GetTotalUncompactedBLASBytes: Cardinal;
     function GetTotalCompactedBLASBytes: Cardinal;
@@ -3143,20 +3284,44 @@ type
     constructor Create(const ADevice: TVulkanRHIDevice);
     destructor Destroy; override;
 
-    { Clears all tracked BLAS/TLAS entries. }
+    { Clears all tracked BLAS/TLAS entries and releases GPU acceleration structures. }
     procedure ClearAccelerationStructures;
 
     { Registers a newly built Bottom-Level Acceleration Structure (BLAS) and returns its 1-based BLASID. }
     function RegisterBLASBuild(
       const ATriangleCount, AUncompactedBytes: Cardinal): Cardinal;
 
+    { Builds a real hardware VkAccelerationStructureKHR BLAS from indexed 3D triangles
+      (and caches CPU geometry for Software Compute LBVH fallback), returning its 1-based BLASID. }
+    function BuildTriangleBLAS(
+      const AVertices: array of TVector3;
+      const AIndices: array of UInt32;
+      const AAllowCompaction: Boolean = True): Cardinal;
+
     { Compacts an existing BLAS after VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR readback. }
     function CompactBLAS(
       const ABLASID: Cardinal;
       const ACompactedBytes: Cardinal = 0): Boolean;
 
+    { Executes real GPU BLAS compaction via VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR
+      + vkCmdCopyAccelerationStructureKHR(VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR). }
+    function CompactBLASOnGPU(const ABLASID: Cardinal): Boolean;
+
     { Builds or updates the Top-Level Acceleration Structure (TLAS) for AInstanceCount scene instances. }
     procedure BuildTLAS(const AInstanceCount: Cardinal);
+
+    { Builds both the hardware Top-Level VkAccelerationStructureKHR (64-byte VkAccelerationStructureInstanceKHR
+      records) and the stackless Software Compute LBVH from AInstances. }
+    function BuildInstanceTLAS(const AInstances: array of TCastleRTInstanceDesc): Boolean;
+
+    { Dispatches inline VK_KHR_ray_query compute ray tracing (returning True) when supported
+      and ForceSoftwareFallback = False, or Software Compute Stackless LBVH ray tracing (returning False). }
+    function DispatchRayQueryOrFallback(
+      const ACommandList: TVulkanRHICommandList;
+      const AOutputImage: TVulkanRHITexture;
+      const AOriginXYScale, ARayDirAndOriginZ: TVector4): Boolean;
+
+    function GetBLASDeviceAddress(const ABLASID: Cardinal): UInt64;
 
     property BLASCount: Cardinal read GetBLASCount;
     property TotalUncompactedBLASBytes: Cardinal read GetTotalUncompactedBLASBytes;
@@ -3165,6 +3330,13 @@ type
     property TLASInstanceCount: Cardinal read FTLASInstanceCount;
     property TLASBuildCount: Cardinal read FTLASBuildCount;
     property TLASBuffer: TVulkanRHIBuffer read FTLASBuffer;
+    property TLASHandle: VkAccelerationStructureKHR read FTLASHandle;
+    property TLASDeviceAddress: UInt64 read FTLASDeviceAddress;
+    property LBVHNodeCount: Cardinal read FLBVHNodeCount;
+    property LBVHTriangleCount: Cardinal read FLBVHTriangleCount;
+    property ForceSoftwareFallback: Boolean read FForceSoftwareFallback write FForceSoftwareFallback;
+    property RayQueryDispatchCount: Cardinal read FRayQueryDispatchCount;
+    property SoftwareLBVHDispatchCount: Cardinal read FSoftwareLBVHDispatchCount;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -4323,6 +4495,15 @@ type
     FSupportsHostQueryReset: Boolean;
     FSupportsDrawIndirectCountFeature: Boolean;
     FSupportsShaderDrawParameters: Boolean;
+    FSupportsBufferDeviceAddress: Boolean;
+    FSupportsAccelerationStructure: Boolean;
+    FSupportsRayQuery: Boolean;
+    FSupportsRayTracingPipeline: Boolean;
+    FSupportsMeshShaders: Boolean;
+    FSupportsTaskShaders: Boolean;
+    FRTShaderGroupHandleSize: Cardinal;
+    FRTShaderGroupHandleAlignment: Cardinal;
+    FRTShaderGroupBaseAlignment: Cardinal;
     FMaxBindlessTextures: Cardinal;
     FPipelineCacheHits: Cardinal;
     FPipelineCacheMisses: Cardinal;
@@ -4724,6 +4905,15 @@ type
     property SupportsTimelineSemaphores: Boolean read FSupportsTimelineSemaphores write SetSupportsTimelineSemaphores;
     property SupportsHostQueryReset: Boolean read FSupportsHostQueryReset write FSupportsHostQueryReset;
     property SupportsShaderDrawParameters: Boolean read FSupportsShaderDrawParameters write FSupportsShaderDrawParameters;
+    property SupportsBufferDeviceAddress: Boolean read FSupportsBufferDeviceAddress write FSupportsBufferDeviceAddress;
+    property SupportsAccelerationStructure: Boolean read FSupportsAccelerationStructure write FSupportsAccelerationStructure;
+    property SupportsRayQuery: Boolean read FSupportsRayQuery write FSupportsRayQuery;
+    property SupportsRayTracingPipeline: Boolean read FSupportsRayTracingPipeline write FSupportsRayTracingPipeline;
+    property SupportsMeshShaders: Boolean read FSupportsMeshShaders write FSupportsMeshShaders;
+    property SupportsTaskShaders: Boolean read FSupportsTaskShaders write FSupportsTaskShaders;
+    property RTShaderGroupHandleSize: Cardinal read FRTShaderGroupHandleSize;
+    property RTShaderGroupHandleAlignment: Cardinal read FRTShaderGroupHandleAlignment;
+    property RTShaderGroupBaseAlignment: Cardinal read FRTShaderGroupBaseAlignment;
     property MaxBindlessTextures: Cardinal read FMaxBindlessTextures write FMaxBindlessTextures;
     property BindlessTextureManager: TCastleVulkanBindlessTextureManager read FBindlessTextureManager;
     property TimestampProfiler: TCastleVulkanTimestampProfiler read FTimestampProfiler;
@@ -5490,6 +5680,8 @@ begin
   HashUInt64FNV1a(Result, PtrUInt(ADesc.VertexShader));
   HashUInt64FNV1a(Result, PtrUInt(ADesc.FragmentShader));
   HashUInt64FNV1a(Result, PtrUInt(ADesc.GeometryShader));
+  HashUInt64FNV1a(Result, PtrUInt(ADesc.TaskShader));
+  HashUInt64FNV1a(Result, PtrUInt(ADesc.MeshShader));
   if not AIgnoreExtendedDynamicStates then
   begin
     HashBytesFNV1a(Result, ADesc.Topology, SizeOf(ADesc.Topology));
@@ -5894,6 +6086,14 @@ begin
   if ssFragment in Stages then Result := Result or VK_SHADER_STAGE_FRAGMENT_BIT;
   if ssGeometry in Stages then Result := Result or VK_SHADER_STAGE_GEOMETRY_BIT;
   if ssCompute in Stages then Result := Result or VK_SHADER_STAGE_COMPUTE_BIT;
+  if ssTask in Stages then Result := Result or VK_SHADER_STAGE_TASK_BIT_EXT;
+  if ssMesh in Stages then Result := Result or VK_SHADER_STAGE_MESH_BIT_EXT;
+  if ssRayGen in Stages then Result := Result or VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+  if ssAnyHit in Stages then Result := Result or VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+  if ssClosestHit in Stages then Result := Result or VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+  if ssMiss in Stages then Result := Result or VK_SHADER_STAGE_MISS_BIT_KHR;
+  if ssIntersection in Stages then Result := Result or VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+  if ssCallable in Stages then Result := Result or VK_SHADER_STAGE_CALLABLE_BIT_KHR;
 end;
 
 function GetRequiredVkFormatFeatures(const AFormat: TRHIPixelFormat;
@@ -6397,6 +6597,18 @@ begin
     if (buTransferSrc in ADesc.Usage) then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     if (buTransferDst in ADesc.Usage) or (ADesc.MemoryUsage = muGpuOnly) then
       BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if ADevice.SupportsBufferDeviceAddress and
+       ((buShaderDeviceAddress in ADesc.Usage) or
+        (buAccelerationStructureBuildInput in ADesc.Usage) or
+        (buAccelerationStructureStorage in ADesc.Usage) or
+        (buShaderBindingTable in ADesc.Usage)) then
+      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    if ADevice.SupportsAccelerationStructure and (buAccelerationStructureBuildInput in ADesc.Usage) then
+      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    if ADevice.SupportsAccelerationStructure and (buAccelerationStructureStorage in ADesc.Usage) then
+      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+    if ADevice.SupportsRayTracingPipeline and (buShaderBindingTable in ADesc.Usage) then
+      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
 
     CheckVk(vkCreateBuffer(ADevice.Handle, @BufInfo, nil, @FHandle), 'vkCreateBuffer');
   end else
@@ -6413,6 +6625,10 @@ begin
       RequiredAlign := Max(RequiredAlign, ADevice.MemoryAllocator.MinStorageBufferAlignment);
     if (buTransferSrc in ADesc.Usage) or (buTransferDst in ADesc.Usage) then
       RequiredAlign := Max(RequiredAlign, ADevice.MemoryAllocator.OptimalBufferCopyOffsetAlignment);
+    if buAccelerationStructureStorage in ADesc.Usage then
+      RequiredAlign := Max(RequiredAlign, VkDeviceSize(256));
+    if buShaderBindingTable in ADesc.Usage then
+      RequiredAlign := Max(RequiredAlign, VkDeviceSize(64));
 
     { Sub-allocate from pooled VkDeviceMemory blocks via TCastleVulkanMemoryAllocator
       to stay well below Windows WDDM's 4096 maxMemoryAllocationCount limit }
@@ -6468,6 +6684,30 @@ begin
   FillChar(FAllocation, SizeOf(FAllocation), 0);
   FDeviceMemory := VK_NULL_HANDLE;
   FAllocatedSize := 0;
+end;
+
+function TVulkanRHIBuffer.GetDeviceAddress: UInt64;
+var
+  AddrInfo: VkBufferDeviceAddressInfo;
+begin
+  if FDeviceAddress <> 0 then
+    Exit(FDeviceAddress);
+  if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
+     VulkanDevice.SupportsBufferDeviceAddress and (FHandle <> VK_NULL_HANDLE) and
+     Assigned(vkGetBufferDeviceAddress) then
+  begin
+    FillChar(AddrInfo, SizeOf(AddrInfo), 0);
+    AddrInfo.sType := VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    AddrInfo.buffer := FHandle;
+    FDeviceAddress := vkGetBufferDeviceAddress(VulkanDevice.Handle, @AddrInfo);
+    Exit(FDeviceAddress);
+  end;
+  if (buShaderDeviceAddress in FDesc.Usage) or
+     (buAccelerationStructureBuildInput in FDesc.Usage) or
+     (buAccelerationStructureStorage in FDesc.Usage) or
+     (buShaderBindingTable in FDesc.Usage) then
+    FDeviceAddress := UInt64($100000000) + ((UInt64(PtrUInt(Self)) shl 8) and UInt64($0000FFFFFFFFF000));
+  Result := FDeviceAddress;
 end;
 
 destructor TVulkanRHIBuffer.Destroy;
@@ -7761,8 +8001,9 @@ begin
       dtStorageBuffer:        VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
       dtCombinedImageSampler: VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
       dtSampledImage:         VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-      dtSampler:              VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_SAMPLER;
-      dtStorageImage:         VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+      dtSampler:               VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_SAMPLER;
+      dtStorageImage:          VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+      dtAccelerationStructure: VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     end;
 
     VkBindingFlags[I] := 0;
@@ -7931,6 +8172,8 @@ begin
   SetLength(FPendingWriteInfoIndices, 0);
   SetLength(FBufferInfos, 0);
   SetLength(FImageInfos, 0);
+  SetLength(FAccelStructHandles, 0);
+  SetLength(FAccelStructWrites, 0);
   inherited;
 end;
 
@@ -8120,6 +8363,33 @@ begin
   FPendingWrites[WriteIdx].descriptorType := VkDescType;
 end;
 
+procedure TVulkanRHIDescriptorSet.BindAccelerationStructure(const Binding: Cardinal;
+  const AAccelerationStructure: VkAccelerationStructureKHR);
+var
+  Idx, WriteIdx: Integer;
+begin
+  if AAccelerationStructure = VK_NULL_HANDLE then Exit;
+  Idx := Length(FAccelStructHandles);
+  SetLength(FAccelStructHandles, Idx + 1);
+  SetLength(FAccelStructWrites, Idx + 1);
+  FAccelStructHandles[Idx] := AAccelerationStructure;
+  FillChar(FAccelStructWrites[Idx], SizeOf(VkWriteDescriptorSetAccelerationStructureKHR), 0);
+  FAccelStructWrites[Idx].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+  FAccelStructWrites[Idx].accelerationStructureCount := 1;
+
+  WriteIdx := Length(FPendingWrites);
+  SetLength(FPendingWrites, WriteIdx + 1);
+  SetLength(FPendingWriteInfoIndices, WriteIdx + 1);
+  FPendingWriteInfoIndices[WriteIdx] := Idx;
+  FillChar(FPendingWrites[WriteIdx], SizeOf(VkWriteDescriptorSet), 0);
+  FPendingWrites[WriteIdx].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  FPendingWrites[WriteIdx].dstSet := FHandle;
+  FPendingWrites[WriteIdx].dstBinding := Binding;
+  FPendingWrites[WriteIdx].dstArrayElement := 0;
+  FPendingWrites[WriteIdx].descriptorCount := 1;
+  FPendingWrites[WriteIdx].descriptorType := VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+end;
+
 procedure TVulkanRHIDescriptorSet.Update;
 var
   I, InfoIdx: Integer;
@@ -8129,6 +8399,11 @@ begin
     for I := 0 to High(FPendingWrites) do
     begin
       InfoIdx := FPendingWriteInfoIndices[I];
+      if FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR then
+      begin
+        FAccelStructWrites[InfoIdx].pAccelerationStructures := @FAccelStructHandles[InfoIdx];
+        FPendingWrites[I].pNext := @FAccelStructWrites[InfoIdx];
+      end else
       if (FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) or
          (FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) or
          (FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER) or
@@ -8144,6 +8419,8 @@ begin
     SetLength(FPendingWriteInfoIndices, 0);
     SetLength(FBufferInfos, 0);
     SetLength(FImageInfos, 0);
+    SetLength(FAccelStructHandles, 0);
+    SetLength(FAccelStructWrites, 0);
   end;
 end;
 
@@ -8153,7 +8430,8 @@ var
   SetLayouts: array of VkDescriptorSetLayout;
   PushRange: VkPushConstantRange;
   LayoutInfo: VkPipelineLayoutCreateInfo;
-  Stages: array[0..2] of VkPipelineShaderStageCreateInfo;
+  Stages: array[0..3] of VkPipelineShaderStageCreateInfo;
+  IsMeshPipeline: Boolean;
   StageCount: Cardinal;
   VertexBindings: array of VkVertexInputBindingDescription;
   VertexAttrs: array of VkVertexInputAttributeDescription;
@@ -8214,8 +8492,10 @@ begin
     CheckVk(vkCreatePipelineLayout(ADevice.Handle, @LayoutInfo, nil, @FPipelineLayout), 'vkCreatePipelineLayout');
   end;
 
-  { Fast-Link Path via VK_EXT_graphics_pipeline_library }
-  if ADevice.SupportsGraphicsPipelineLibrary then
+  IsMeshPipeline := ADesc.MeshShader <> nil;
+
+  { Fast-Link Path via VK_EXT_graphics_pipeline_library (vertex-pipeline only) }
+  if ADevice.SupportsGraphicsPipelineLibrary and (not IsMeshPipeline) then
   begin
     FVertexInputLibrary := ADevice.GetOrCreateVertexInputLibrary(ADesc);
     FPreRasterizationLibrary := ADevice.GetOrCreatePreRasterizationLibrary(ADesc, FPipelineLayout, FRenderPass);
@@ -8273,29 +8553,58 @@ begin
   { 2. Shader Stages }
   StageCount := 0;
   FillChar(Stages, SizeOf(Stages), 0);
-  if (ADesc.VertexShader <> nil) and ((ADesc.VertexShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+  if IsMeshPipeline then
   begin
-    Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    Stages[StageCount].stage := VK_SHADER_STAGE_VERTEX_BIT;
-    Stages[StageCount].module := (ADesc.VertexShader as TVulkanRHIShaderModule).Handle;
-    Stages[StageCount].pName := 'main';
-    Inc(StageCount);
-  end;
-  if (ADesc.FragmentShader <> nil) and ((ADesc.FragmentShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+    if (ADesc.TaskShader <> nil) and ((ADesc.TaskShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+    begin
+      Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      Stages[StageCount].stage := VK_SHADER_STAGE_TASK_BIT_EXT;
+      Stages[StageCount].module := (ADesc.TaskShader as TVulkanRHIShaderModule).Handle;
+      Stages[StageCount].pName := 'main';
+      Inc(StageCount);
+    end;
+    if (ADesc.MeshShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE then
+    begin
+      Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      Stages[StageCount].stage := VK_SHADER_STAGE_MESH_BIT_EXT;
+      Stages[StageCount].module := (ADesc.MeshShader as TVulkanRHIShaderModule).Handle;
+      Stages[StageCount].pName := 'main';
+      Inc(StageCount);
+    end;
+    if (ADesc.FragmentShader <> nil) and ((ADesc.FragmentShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+    begin
+      Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      Stages[StageCount].stage := VK_SHADER_STAGE_FRAGMENT_BIT;
+      Stages[StageCount].module := (ADesc.FragmentShader as TVulkanRHIShaderModule).Handle;
+      Stages[StageCount].pName := 'main';
+      Inc(StageCount);
+    end;
+  end else
   begin
-    Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    Stages[StageCount].stage := VK_SHADER_STAGE_FRAGMENT_BIT;
-    Stages[StageCount].module := (ADesc.FragmentShader as TVulkanRHIShaderModule).Handle;
-    Stages[StageCount].pName := 'main';
-    Inc(StageCount);
-  end;
-  if (ADesc.GeometryShader <> nil) and ((ADesc.GeometryShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
-  begin
-    Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    Stages[StageCount].stage := VK_SHADER_STAGE_GEOMETRY_BIT;
-    Stages[StageCount].module := (ADesc.GeometryShader as TVulkanRHIShaderModule).Handle;
-    Stages[StageCount].pName := 'main';
-    Inc(StageCount);
+    if (ADesc.VertexShader <> nil) and ((ADesc.VertexShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+    begin
+      Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      Stages[StageCount].stage := VK_SHADER_STAGE_VERTEX_BIT;
+      Stages[StageCount].module := (ADesc.VertexShader as TVulkanRHIShaderModule).Handle;
+      Stages[StageCount].pName := 'main';
+      Inc(StageCount);
+    end;
+    if (ADesc.FragmentShader <> nil) and ((ADesc.FragmentShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+    begin
+      Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      Stages[StageCount].stage := VK_SHADER_STAGE_FRAGMENT_BIT;
+      Stages[StageCount].module := (ADesc.FragmentShader as TVulkanRHIShaderModule).Handle;
+      Stages[StageCount].pName := 'main';
+      Inc(StageCount);
+    end;
+    if (ADesc.GeometryShader <> nil) and ((ADesc.GeometryShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+    begin
+      Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      Stages[StageCount].stage := VK_SHADER_STAGE_GEOMETRY_BIT;
+      Stages[StageCount].module := (ADesc.GeometryShader as TVulkanRHIShaderModule).Handle;
+      Stages[StageCount].pName := 'main';
+      Inc(StageCount);
+    end;
   end;
 
   { 3. Vertex Input Layout }
@@ -8406,13 +8715,16 @@ begin
   end;
   if ADevice.SupportsExtendedDynamicState then
   begin
-    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_CULL_MODE;
-    DynamicStates[DynamicStateCount + 1] := VK_DYNAMIC_STATE_FRONT_FACE;
-    DynamicStates[DynamicStateCount + 2] := VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY;
-    DynamicStates[DynamicStateCount + 3] := VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE;
-    DynamicStates[DynamicStateCount + 4] := VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE;
-    DynamicStates[DynamicStateCount + 5] := VK_DYNAMIC_STATE_DEPTH_COMPARE_OP;
-    Inc(DynamicStateCount, 6);
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_CULL_MODE; Inc(DynamicStateCount);
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_FRONT_FACE; Inc(DynamicStateCount);
+    if not IsMeshPipeline then
+    begin
+      DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY;
+      Inc(DynamicStateCount);
+    end;
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE; Inc(DynamicStateCount);
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE; Inc(DynamicStateCount);
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_DEPTH_COMPARE_OP; Inc(DynamicStateCount);
   end;
   FillChar(DynamicStateInfo, SizeOf(DynamicStateInfo), 0);
   DynamicStateInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -8450,8 +8762,15 @@ begin
   PipelineInfo.stageCount := StageCount;
   if StageCount > 0 then
     PipelineInfo.pStages := @Stages[0];
-  PipelineInfo.pVertexInputState := @VertexInputInfo;
-  PipelineInfo.pInputAssemblyState := @InputAssembly;
+  if IsMeshPipeline then
+  begin
+    PipelineInfo.pVertexInputState := nil;
+    PipelineInfo.pInputAssemblyState := nil;
+  end else
+  begin
+    PipelineInfo.pVertexInputState := @VertexInputInfo;
+    PipelineInfo.pInputAssemblyState := @InputAssembly;
+  end;
   PipelineInfo.pViewportState := @ViewportState;
   PipelineInfo.pRasterizationState := @Rasterizer;
   PipelineInfo.pMultisampleState := @Multisampling;
@@ -8780,6 +9099,7 @@ begin
   FDynamicStateChangeCount := 0;
   FIndirectDrawCallCount := 0;
   FIndirectCountDrawCallCount := 0;
+  FMeshTasksDrawCallCount := 0;
   FLastEffectiveIndirectDrawCount := 0;
   FillChar(FBoundDescriptorSets, SizeOf(FBoundDescriptorSets), 0);
   FDescriptorSetBindCount := 0;
@@ -10205,6 +10525,29 @@ begin
       EffectiveCount, Stride);
 end;
 
+procedure TVulkanRHICommandList.DrawMeshTasks(const GroupCountX: Cardinal;
+  const GroupCountY: Cardinal; const GroupCountZ: Cardinal);
+begin
+  if (GroupCountX = 0) or (GroupCountY = 0) or (GroupCountZ = 0) then Exit;
+  Inc(FMeshTasksDrawCallCount);
+  if (FHandle <> nil) and (FDevice <> nil) and
+     FDevice.SupportsMeshShaders and Assigned(vkCmdDrawMeshTasksEXT) then
+    vkCmdDrawMeshTasksEXT(FHandle, GroupCountX, GroupCountY, GroupCountZ);
+end;
+
+procedure TVulkanRHICommandList.DrawMeshTasksIndirect(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt; const DrawCount: Cardinal; const Stride: Cardinal);
+begin
+  if (IndirectBuffer = nil) or (DrawCount = 0) then Exit;
+  Inc(FMeshTasksDrawCallCount);
+  Inc(FIndirectDrawCallCount);
+  FLastEffectiveIndirectDrawCount := DrawCount;
+  if (FHandle <> nil) and (FDevice <> nil) and
+     FDevice.SupportsMeshShaders and Assigned(vkCmdDrawMeshTasksIndirectEXT) then
+    vkCmdDrawMeshTasksIndirectEXT(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
+      Offset, DrawCount, Stride);
+end;
+
 procedure TVulkanRHICommandList.ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList);
 var
   CmdBuffers: array of VkCommandBuffer;
@@ -10370,7 +10713,8 @@ end;
 
 constructor TVulkanDescriptorPoolAllocator.Create(const ADevice: VkDevice;
   const AInitialMaxSets: Cardinal; const AAllowFreeIndividualSets: Boolean;
-  const AMaxSetsCap: Cardinal; const AAllowUpdateAfterBind: Boolean);
+  const AMaxSetsCap: Cardinal; const AAllowUpdateAfterBind: Boolean;
+  const ASupportsAccelerationStructure: Boolean);
 begin
   inherited Create;
   FDevice := ADevice;
@@ -10379,6 +10723,7 @@ begin
   FCurrentMaxSets := FInitialMaxSets;
   FAllowFreeIndividualSets := AAllowFreeIndividualSets;
   FAllowUpdateAfterBind := AAllowUpdateAfterBind;
+  FSupportsAccelerationStructure := ASupportsAccelerationStructure;
   FHasCurrentPage := False;
   FForceNextAllocationError := VK_SUCCESS;
 end;
@@ -10407,7 +10752,8 @@ end;
 function TVulkanDescriptorPoolAllocator.CreateNewPoolPage(
   const AMaxSets: Cardinal): TVulkanDescriptorPoolPage;
 var
-  PoolSizes: array[0..6] of VkDescriptorPoolSize;
+  PoolSizes: array[0..7] of VkDescriptorPoolSize;
+  PoolSizeCount: Cardinal;
   PoolInfo: VkDescriptorPoolCreateInfo;
 begin
   FillChar(Result, SizeOf(Result), 0);
@@ -10428,6 +10774,13 @@ begin
   PoolSizes[5].descriptorCount := Result.Capacity;
   PoolSizes[6]._type := VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
   PoolSizes[6].descriptorCount := Max(1, Result.Capacity div 4);
+  PoolSizeCount := 7;
+  if FSupportsAccelerationStructure then
+  begin
+    PoolSizes[7]._type := VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    PoolSizes[7].descriptorCount := Max(1, Result.Capacity div 4);
+    PoolSizeCount := 8;
+  end;
 
   FillChar(PoolInfo, SizeOf(PoolInfo), 0);
   PoolInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -10436,7 +10789,7 @@ begin
   if FAllowUpdateAfterBind then
     PoolInfo.flags := PoolInfo.flags or VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
   PoolInfo.maxSets := Result.Capacity;
-  PoolInfo.poolSizeCount := Length(PoolSizes);
+  PoolInfo.poolSizeCount := PoolSizeCount;
   PoolInfo.pPoolSizes := @PoolSizes[0];
 
   if (FDevice <> nil) and Assigned(vkCreateDescriptorPool) then
@@ -18802,6 +19155,21 @@ end;
 
 destructor TCastleVulkanMeshletCuller.Destroy;
 begin
+  FreeAndNil(FSoftwareCullPipeline);
+  FreeAndNil(FSoftwareCullShader);
+  FreeAndNil(FFallbackVertShader);
+  FreeAndNil(FFragShader);
+  FreeAndNil(FMeshShader);
+  FreeAndNil(FTaskShader);
+  FreeAndNil(FSoftwareCullSet);
+  FreeAndNil(FSoftwareCullLayout);
+  FreeAndNil(FMeshDrawSet);
+  FreeAndNil(FMeshDrawLayout);
+  FreeAndNil(FMeshTasksIndirectBuffer);
+  FreeAndNil(FSoftwareIndirectDrawBuffer);
+  FreeAndNil(FExpandedVertexBuffer);
+  FreeAndNil(FMeshletTriangleBuffer);
+  FreeAndNil(FMeshletVertexBuffer);
   FreeAndNil(FVisibleMeshletCountBuffer);
   FreeAndNil(FVisibleMeshletIndicesBuffer);
   FreeAndNil(FMeshletBuffer);
@@ -18933,6 +19301,298 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+procedure TCastleVulkanMeshletCuller.UploadMeshletGeometry(
+  const APositions, AColors: array of TVector4;
+  const ATriangles: array of TCastleMeshletTriangle);
+var
+  VertCount, TriCount, I: Cardinal;
+  Interleaved: array of TVector4;
+  BufDesc: TRHIBufferDesc;
+begin
+  UploadMeshlets;
+  VertCount := Max(Cardinal(1), Cardinal(Min(Length(APositions), Length(AColors))));
+  TriCount := Max(Cardinal(1), Cardinal(Length(ATriangles)));
+  FTotalTriangleCapacity := TriCount;
+
+  SetLength(Interleaved, VertCount * 2);
+  for I := 0 to VertCount - 1 do
+    if Integer(I) <= High(APositions) then
+    begin
+      Interleaved[I * 2 + 0] := APositions[I];
+      Interleaved[I * 2 + 1] := AColors[I];
+    end;
+
+  FreeAndNil(FMeshletVertexBuffer);
+  BufDesc := TRHIBufferDesc.Create(VertCount * 2 * SizeOf(TVector4),
+    [buStorage, buTransferDst], muCpuToGpu, 'MeshletVerticesSSBO');
+  FMeshletVertexBuffer := FDevice.CreateBuffer(BufDesc, @Interleaved[0]) as TVulkanRHIBuffer;
+
+  FreeAndNil(FMeshletTriangleBuffer);
+  BufDesc := TRHIBufferDesc.Create(TriCount * SizeOf(TCastleMeshletTriangle),
+    [buStorage, buTransferDst], muCpuToGpu, 'MeshletTrianglesSSBO');
+  if Length(ATriangles) > 0 then
+    FMeshletTriangleBuffer := FDevice.CreateBuffer(BufDesc, @ATriangles[0]) as TVulkanRHIBuffer
+  else
+    FMeshletTriangleBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  FreeAndNil(FExpandedVertexBuffer);
+  BufDesc := TRHIBufferDesc.Create(TriCount * 3 * 2 * SizeOf(TVector4),
+    [buVertex, buStorage, buTransferDst], muGpuOnly, 'MeshletExpandedVerticesVBO');
+  FExpandedVertexBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  if FSoftwareIndirectDrawBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(SizeOf(VkDrawIndirectCommand),
+      [buStorage, buIndirect, buTransferDst], muCpuToGpu, 'MeshletSoftwareDrawIndirectBuffer');
+    FSoftwareIndirectDrawBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+  if FMeshTasksIndirectBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(SizeOf(VkDrawMeshTasksIndirectCommandEXT),
+      [buStorage, buIndirect, buTransferDst], muCpuToGpu, 'MeshTasksIndirectBuffer');
+    FMeshTasksIndirectBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  { Refresh descriptor bindings on next draw/cull }
+  FreeAndNil(FMeshDrawSet);
+  FreeAndNil(FSoftwareCullSet);
+end;
+
+procedure TCastleVulkanMeshletCuller.EnsureMeshletRenderPipelines;
+var
+  MeshBinds: array[0..2] of TRHIDescriptorBindingDesc;
+  CullBinds: array[0..4] of TRHIDescriptorBindingDesc;
+  CompDesc: TRHIComputePipelineDesc;
+  I: Integer;
+begin
+  if FMeshDrawLayout = nil then
+  begin
+    for I := 0 to 2 do
+    begin
+      MeshBinds[I] := Default(TRHIDescriptorBindingDesc);
+      MeshBinds[I].Binding := I;
+      MeshBinds[I].DescriptorType := dtStorageBuffer;
+      MeshBinds[I].Count := 1;
+      MeshBinds[I].StageFlags := [ssTask, ssMesh];
+    end;
+    FMeshDrawLayout := FDevice.CreateDescriptorSetLayout(MeshBinds);
+  end;
+  if FSoftwareCullLayout = nil then
+  begin
+    for I := 0 to 4 do
+    begin
+      CullBinds[I] := Default(TRHIDescriptorBindingDesc);
+      CullBinds[I].Binding := I;
+      CullBinds[I].DescriptorType := dtStorageBuffer;
+      CullBinds[I].Count := 1;
+      CullBinds[I].StageFlags := [ssCompute];
+    end;
+    FSoftwareCullLayout := FDevice.CreateDescriptorSetLayout(CullBinds);
+  end;
+  if (FMeshDrawSet = nil) and (FMeshletBuffer <> nil) and
+     (FMeshletVertexBuffer <> nil) and (FMeshletTriangleBuffer <> nil) then
+  begin
+    FMeshDrawSet := FDevice.CreateDescriptorSet(FMeshDrawLayout);
+    FMeshDrawSet.BindStorageBuffer(0, FMeshletBuffer);
+    FMeshDrawSet.BindStorageBuffer(1, FMeshletVertexBuffer);
+    FMeshDrawSet.BindStorageBuffer(2, FMeshletTriangleBuffer);
+    FMeshDrawSet.Update;
+  end;
+  if (FSoftwareCullSet = nil) and (FMeshletBuffer <> nil) and
+     (FMeshletVertexBuffer <> nil) and (FMeshletTriangleBuffer <> nil) and
+     (FExpandedVertexBuffer <> nil) and (FSoftwareIndirectDrawBuffer <> nil) then
+  begin
+    FSoftwareCullSet := FDevice.CreateDescriptorSet(FSoftwareCullLayout);
+    FSoftwareCullSet.BindStorageBuffer(0, FMeshletBuffer);
+    FSoftwareCullSet.BindStorageBuffer(1, FMeshletVertexBuffer);
+    FSoftwareCullSet.BindStorageBuffer(2, FMeshletTriangleBuffer);
+    FSoftwareCullSet.BindStorageBuffer(3, FExpandedVertexBuffer);
+    FSoftwareCullSet.BindStorageBuffer(4, FSoftwareIndirectDrawBuffer);
+    FSoftwareCullSet.Update;
+  end;
+  if FFragShader = nil then
+    FFragShader := FDevice.CreateShaderModuleFromGLSL(ssFragment, '// MeshletFS', 'MeshletFS');
+  if FFallbackVertShader = nil then
+    FFallbackVertShader := FDevice.CreateShaderModuleFromGLSL(ssVertex, '// MeshletFallbackVS', 'MeshletFallbackVS');
+  if FSoftwareCullShader = nil then
+    FSoftwareCullShader := FDevice.CreateShaderModuleFromGLSL(ssCompute, '// MeshletCullCS', 'MeshletCullCS');
+  if FSoftwareCullPipeline = nil then
+  begin
+    CompDesc := Default(TRHIComputePipelineDesc);
+    CompDesc.ComputeShader := FSoftwareCullShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FSoftwareCullLayout;
+    CompDesc.PushConstantSize := 32;
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'MeshletSoftwareCullPipeline';
+    FSoftwareCullPipeline := FDevice.CreateComputePipeline(CompDesc);
+  end;
+  if FDevice.SupportsMeshShaders and (FMeshShader = nil) then
+    FMeshShader := FDevice.CreateShaderModuleFromGLSL(ssMesh, '// MeshletMeshEXT', 'MeshletMeshEXT');
+  if FDevice.SupportsMeshShaders and FDevice.SupportsTaskShaders and (FTaskShader = nil) then
+    FTaskShader := FDevice.CreateShaderModuleFromGLSL(ssTask, '// MeshletTaskEXT', 'MeshletTaskEXT');
+end;
+
+procedure TCastleVulkanMeshletCuller.PrepareSoftwareMeshletCulling(
+  const ACommandList: TVulkanRHICommandList;
+  const ACameraPosition: TVector3;
+  const AMaxDrawDistance: Single;
+  const AEnableConeCull: Boolean);
+type
+  TMeshletDrawPC = packed record
+    CameraPosAndMaxDist: TVector4;
+    MeshletCount: Cardinal;
+    EnableConeCull: Cardinal;
+    Pad0, Pad1: Cardinal;
+  end;
+var
+  InitCmd: VkDrawIndirectCommand;
+  PC: TMeshletDrawPC;
+  GroupsX: Cardinal;
+begin
+  if (ACommandList = nil) or (FMeshletCount = 0) then Exit;
+  EnsureMeshletRenderPipelines;
+  if (FSoftwareIndirectDrawBuffer = nil) or (FSoftwareCullSet = nil) then Exit;
+
+  InitCmd.vertexCount := 0;
+  InitCmd.instanceCount := 1;
+  InitCmd.firstVertex := 0;
+  InitCmd.firstInstance := 0;
+  FSoftwareIndirectDrawBuffer.UploadData(InitCmd, SizeOf(InitCmd), 0);
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.CameraPosAndMaxDist := Vector4(ACameraPosition, AMaxDrawDistance);
+  PC.MeshletCount := FMeshletCount;
+  PC.EnableConeCull := Ord(AEnableConeCull);
+
+  ACommandList.BindComputePipeline(FSoftwareCullPipeline);
+  ACommandList.BindComputeDescriptorSet(0, FSoftwareCullSet, []);
+  ACommandList.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  GroupsX := (FMeshletCount + 63) div 64;
+  ACommandList.Dispatch(GroupsX, 1, 1);
+  ACommandList.TransitionBuffer(FExpandedVertexBuffer, rsUnorderedAccess, rsShaderRead);
+  ACommandList.TransitionBuffer(FSoftwareIndirectDrawBuffer, rsUnorderedAccess, rsIndirectRead);
+  Inc(FDispatchCount);
+end;
+
+function TCastleVulkanMeshletCuller.RenderMeshlets(
+  const ACommandList: TVulkanRHICommandList;
+  const AColorFormat: TRHIPixelFormat;
+  const ACameraPosition: TVector3;
+  const AMaxDrawDistance: Single;
+  const AEnableConeCull: Boolean;
+  const AUseIndirectMeshTasks: Boolean): Boolean;
+type
+  TMeshletDrawPC = packed record
+    CameraPosAndMaxDist: TVector4;
+    MeshletCount: Cardinal;
+    EnableConeCull: Cardinal;
+    Pad0, Pad1: Cardinal;
+  end;
+var
+  PDesc: TRHIGraphicsPipelineDesc;
+  Pipe: TRHIPipeline;
+  PC: TMeshletDrawPC;
+  TaskCmd: VkDrawMeshTasksIndirectCommandEXT;
+  UseHwMesh, UseHwTask: Boolean;
+  GroupsX: Cardinal;
+begin
+  Result := False;
+  if (ACommandList = nil) or (FMeshletCount = 0) then Exit;
+  EnsureMeshletRenderPipelines;
+
+  UseHwMesh := FDevice.SupportsMeshShaders and (not FForceSoftwareFallback) and
+    (FMeshShader <> nil) and (FMeshDrawSet <> nil);
+  if UseHwMesh then
+  begin
+    UseHwTask := FUseTaskShader and FDevice.SupportsTaskShaders and (FTaskShader <> nil);
+    PDesc := Default(TRHIGraphicsPipelineDesc);
+    PDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    PDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    PDesc.SampleCount := 1;
+    if UseHwTask then
+      PDesc.TaskShader := FTaskShader;
+    PDesc.MeshShader := FMeshShader;
+    PDesc.FragmentShader := FFragShader;
+    PDesc.Rasterizer.CullMode := cmNone;
+    PDesc.DepthStencil.DepthTestEnable := False;
+    PDesc.DepthStencil.DepthWriteEnable := False;
+    SetLength(PDesc.ColorAttachmentFormats, 1);
+    PDesc.ColorAttachmentFormats[0] := AColorFormat;
+    SetLength(PDesc.DescriptorSetLayouts, 1);
+    PDesc.DescriptorSetLayouts[0] := FMeshDrawLayout;
+    PDesc.PushConstantSize := SizeOf(PC);
+    PDesc.PushConstantStages := [ssTask, ssMesh];
+    PDesc.DebugName := 'MeshletHardwareMeshPipeline';
+    Pipe := FDevice.GetOrCreatePipeline(PDesc);
+
+    FillChar(PC, SizeOf(PC), 0);
+    PC.CameraPosAndMaxDist := Vector4(ACameraPosition, AMaxDrawDistance);
+    PC.MeshletCount := FMeshletCount;
+    PC.EnableConeCull := Ord(AEnableConeCull);
+
+    ACommandList.BindPipeline(Pipe);
+    ACommandList.BindDescriptorSet(0, FMeshDrawSet, []);
+    ACommandList.PushConstants([ssTask, ssMesh], 0, SizeOf(PC), PC);
+
+    if UseHwTask then
+      GroupsX := 1
+    else
+      GroupsX := FMeshletCount;
+
+    if AUseIndirectMeshTasks and (FMeshTasksIndirectBuffer <> nil) then
+    begin
+      TaskCmd.groupCountX := GroupsX;
+      TaskCmd.groupCountY := 1;
+      TaskCmd.groupCountZ := 1;
+      FMeshTasksIndirectBuffer.UploadData(TaskCmd, SizeOf(TaskCmd), 0);
+      ACommandList.DrawMeshTasksIndirect(FMeshTasksIndirectBuffer, 0, 1, SizeOf(TaskCmd));
+    end else
+      ACommandList.DrawMeshTasks(GroupsX, 1, 1);
+
+    Inc(FHardwareMeshDrawCount);
+    Exit(True);
+  end;
+
+  { Software Compute + Indirect Vertex Expansion Fallback }
+  if (FExpandedVertexBuffer = nil) or (FSoftwareIndirectDrawBuffer = nil) then
+    Exit(False);
+
+  PDesc := Default(TRHIGraphicsPipelineDesc);
+  PDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  PDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+  PDesc.SampleCount := 1;
+  PDesc.VertexShader := FFallbackVertShader;
+  PDesc.FragmentShader := FFragShader;
+  PDesc.Topology := ptTriangleList;
+  PDesc.Rasterizer.CullMode := cmNone;
+  PDesc.DepthStencil.DepthTestEnable := False;
+  PDesc.DepthStencil.DepthWriteEnable := False;
+  SetLength(PDesc.VertexInput.Bindings, 1);
+  PDesc.VertexInput.Bindings[0].Binding := 0;
+  PDesc.VertexInput.Bindings[0].Stride := 32;
+  PDesc.VertexInput.Bindings[0].PerInstance := False;
+  SetLength(PDesc.VertexInput.Attributes, 2);
+  PDesc.VertexInput.Attributes[0].Location := 0;
+  PDesc.VertexInput.Attributes[0].Binding := 0;
+  PDesc.VertexInput.Attributes[0].Format := vafVector4;
+  PDesc.VertexInput.Attributes[0].Offset := 0;
+  PDesc.VertexInput.Attributes[1].Location := 1;
+  PDesc.VertexInput.Attributes[1].Binding := 0;
+  PDesc.VertexInput.Attributes[1].Format := vafVector4;
+  PDesc.VertexInput.Attributes[1].Offset := 16;
+  SetLength(PDesc.ColorAttachmentFormats, 1);
+  PDesc.ColorAttachmentFormats[0] := AColorFormat;
+  PDesc.DebugName := 'MeshletSoftwareFallbackPipeline';
+  Pipe := FDevice.GetOrCreatePipeline(PDesc);
+
+  ACommandList.BindPipeline(Pipe);
+  ACommandList.BindVertexBuffers(0, [FExpandedVertexBuffer], [0]);
+  ACommandList.DrawIndirect(FSoftwareIndirectDrawBuffer, 0, 1, SizeOf(VkDrawIndirectCommand));
+  Inc(FSoftwareFallbackDrawCount);
+  Result := False;
+end;
+
 { TCastleVulkanVirtualShadowMap (Phase 23.2)                                   }
 { ---------------------------------------------------------------------------- }
 
@@ -20440,13 +21100,42 @@ constructor TCastleVulkanShaderBindingTable.Create(const ADevice: TVulkanRHIDevi
 begin
   inherited Create;
   FDevice := ADevice;
-  FHandleSize := 32;
-  FHandleAlignment := 32;
-  FBaseAlignment := 64;
+  if (ADevice <> nil) and (ADevice.RTShaderGroupHandleSize > 0) then
+    FHandleSize := ADevice.RTShaderGroupHandleSize
+  else
+    FHandleSize := 32;
+  if (ADevice <> nil) and (ADevice.RTShaderGroupHandleAlignment > 0) then
+    FHandleAlignment := ADevice.RTShaderGroupHandleAlignment
+  else
+    FHandleAlignment := 32;
+  if (ADevice <> nil) and (ADevice.RTShaderGroupBaseAlignment > 0) then
+    FBaseAlignment := ADevice.RTShaderGroupBaseAlignment
+  else
+    FBaseAlignment := 64;
+end;
+
+procedure TCastleVulkanShaderBindingTable.DestroyHardwareRTPipeline;
+begin
+  if (FDevice <> nil) and (FDevice.Handle <> nil) then
+  begin
+    if (FRTPipeline <> VK_NULL_HANDLE) and Assigned(vkDestroyPipeline) then
+      vkDestroyPipeline(FDevice.Handle, FRTPipeline, nil);
+    if (FRTPipelineLayout <> VK_NULL_HANDLE) and Assigned(vkDestroyPipelineLayout) then
+      vkDestroyPipelineLayout(FDevice.Handle, FRTPipelineLayout, nil);
+  end;
+  FRTPipeline := VK_NULL_HANDLE;
+  FRTPipelineLayout := VK_NULL_HANDLE;
+  FreeAndNil(FRTDescriptorSet);
+  FreeAndNil(FRTDescriptorLayout);
+  FreeAndNil(FRayClosestHitShader);
+  FreeAndNil(FRayMissShader);
+  FreeAndNil(FRayGenShader);
+  FSBTPopulated := False;
 end;
 
 destructor TCastleVulkanShaderBindingTable.Destroy;
 begin
+  DestroyHardwareRTPipeline;
   FreeAndNil(FSBTBuffer);
   inherited;
 end;
@@ -20474,7 +21163,9 @@ begin
   if (FSBTBuffer <> nil) and (FSBTBuffer.Desc.Size >= FTotalSBTSizeBytes) then
     Exit;
   FreeAndNil(FSBTBuffer);
-  BufDesc := TRHIBufferDesc.Create(FTotalSBTSizeBytes, [buStorage, buTransferDst], muCpuToGpu,
+  FSBTPopulated := False;
+  BufDesc := TRHIBufferDesc.Create(FTotalSBTSizeBytes,
+    [buStorage, buShaderBindingTable, buShaderDeviceAddress, buTransferDst], muCpuToGpu,
     'RayTracingShaderBindingTable');
   FSBTBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
 end;
@@ -20496,8 +21187,219 @@ begin
   Inc(FTraceRaysDispatchCount);
 end;
 
+procedure TCastleVulkanShaderBindingTable.EnsureHardwareRTPipelineAndSBT;
+var
+  Binds: array[0..1] of TRHIDescriptorBindingDesc;
+  SetLayoutHandle: VkDescriptorSetLayout;
+  PushRange: VkPushConstantRange;
+  LayoutInfo: VkPipelineLayoutCreateInfo;
+  Stages: array[0..2] of VkPipelineShaderStageCreateInfo;
+  Groups: array[0..2] of VkRayTracingShaderGroupCreateInfoKHR;
+  RTInfo: VkRayTracingPipelineCreateInfoKHR;
+  RawHandles, SBTBytes: array of Byte;
+begin
+  if FSBTPopulated and (FRTPipeline <> VK_NULL_HANDLE) then
+    Exit;
+  if (FDevice = nil) or (FDevice.Handle = nil) or
+     (not FDevice.SupportsRayTracingPipeline) or
+     (not Assigned(vkCreateRayTracingPipelinesKHR)) or
+     (not Assigned(vkGetRayTracingShaderGroupHandlesKHR)) then
+    Exit;
+
+  EnsureSBTBuffer(1, 1);
+
+  if FRTDescriptorLayout = nil then
+  begin
+    Binds[0] := Default(TRHIDescriptorBindingDesc);
+    Binds[0].Binding := 0;
+    Binds[0].DescriptorType := dtAccelerationStructure;
+    Binds[0].Count := 1;
+    Binds[0].StageFlags := [ssRayGen, ssCompute];
+
+    Binds[1] := Default(TRHIDescriptorBindingDesc);
+    Binds[1].Binding := 1;
+    Binds[1].DescriptorType := dtStorageImage;
+    Binds[1].Count := 1;
+    Binds[1].StageFlags := [ssRayGen, ssCompute];
+    FRTDescriptorLayout := FDevice.CreateDescriptorSetLayout(Binds) as TVulkanRHIDescriptorSetLayout;
+  end;
+  if FRTDescriptorSet = nil then
+    FRTDescriptorSet := FDevice.CreateDescriptorSet(FRTDescriptorLayout) as TVulkanRHIDescriptorSet;
+
+  if FRayGenShader = nil then
+    FRayGenShader := FDevice.CreateShaderModuleFromGLSL(ssRayGen, '// RayTraceRGen', 'RayTraceRGen') as TVulkanRHIShaderModule;
+  if FRayMissShader = nil then
+    FRayMissShader := FDevice.CreateShaderModuleFromGLSL(ssMiss, '// RayTraceRMiss', 'RayTraceRMiss') as TVulkanRHIShaderModule;
+  if FRayClosestHitShader = nil then
+    FRayClosestHitShader := FDevice.CreateShaderModuleFromGLSL(ssClosestHit, '// RayTraceRChit', 'RayTraceRChit') as TVulkanRHIShaderModule;
+
+  if FRTPipelineLayout = VK_NULL_HANDLE then
+  begin
+    SetLayoutHandle := FRTDescriptorLayout.Handle;
+    FillChar(PushRange, SizeOf(PushRange), 0);
+    PushRange.stageFlags := VK_SHADER_STAGE_RAYGEN_BIT_KHR or VK_SHADER_STAGE_COMPUTE_BIT;
+    PushRange.offset := 0;
+    PushRange.size := 48;
+
+    FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
+    LayoutInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    LayoutInfo.setLayoutCount := 1;
+    LayoutInfo.pSetLayouts := @SetLayoutHandle;
+    LayoutInfo.pushConstantRangeCount := 1;
+    LayoutInfo.pPushConstantRanges := @PushRange;
+    CheckVk(vkCreatePipelineLayout(FDevice.Handle, @LayoutInfo, nil, @FRTPipelineLayout),
+      'vkCreatePipelineLayout(RayTracing)');
+  end;
+
+  if FRTPipeline = VK_NULL_HANDLE then
+  begin
+    FillChar(Stages, SizeOf(Stages), 0);
+    Stages[0].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Stages[0].stage := VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    Stages[0].module := FRayGenShader.Handle;
+    Stages[0].pName := 'main';
+
+    Stages[1].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Stages[1].stage := VK_SHADER_STAGE_MISS_BIT_KHR;
+    Stages[1].module := FRayMissShader.Handle;
+    Stages[1].pName := 'main';
+
+    Stages[2].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Stages[2].stage := VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    Stages[2].module := FRayClosestHitShader.Handle;
+    Stages[2].pName := 'main';
+
+    FillChar(Groups, SizeOf(Groups), 0);
+    Groups[0].sType := VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    Groups[0]._type := VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    Groups[0].generalShader := 0;
+    Groups[0].closestHitShader := VK_SHADER_UNUSED_KHR;
+    Groups[0].anyHitShader := VK_SHADER_UNUSED_KHR;
+    Groups[0].intersectionShader := VK_SHADER_UNUSED_KHR;
+
+    Groups[1].sType := VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    Groups[1]._type := VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    Groups[1].generalShader := 1;
+    Groups[1].closestHitShader := VK_SHADER_UNUSED_KHR;
+    Groups[1].anyHitShader := VK_SHADER_UNUSED_KHR;
+    Groups[1].intersectionShader := VK_SHADER_UNUSED_KHR;
+
+    Groups[2].sType := VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    Groups[2]._type := VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+    Groups[2].generalShader := VK_SHADER_UNUSED_KHR;
+    Groups[2].closestHitShader := 2;
+    Groups[2].anyHitShader := VK_SHADER_UNUSED_KHR;
+    Groups[2].intersectionShader := VK_SHADER_UNUSED_KHR;
+
+    FillChar(RTInfo, SizeOf(RTInfo), 0);
+    RTInfo.sType := VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+    RTInfo.stageCount := 3;
+    RTInfo.pStages := @Stages[0];
+    RTInfo.groupCount := 3;
+    RTInfo.pGroups := @Groups[0];
+    RTInfo.maxPipelineRayRecursionDepth := 1;
+    RTInfo.layout := FRTPipelineLayout;
+    RTInfo.basePipelineIndex := -1;
+
+    CheckVk(vkCreateRayTracingPipelinesKHR(FDevice.Handle, VK_NULL_HANDLE, FDevice.PipelineCache,
+      1, @RTInfo, nil, @FRTPipeline), 'vkCreateRayTracingPipelinesKHR');
+  end;
+
+  SetLength(RawHandles, 3 * FHandleSize);
+  CheckVk(vkGetRayTracingShaderGroupHandlesKHR(FDevice.Handle, FRTPipeline, 0, 3,
+    Length(RawHandles), @RawHandles[0]), 'vkGetRayTracingShaderGroupHandlesKHR');
+
+  SetLength(SBTBytes, FTotalSBTSizeBytes);
+  FillChar(SBTBytes[0], Length(SBTBytes), 0);
+  Move(RawHandles[0 * FHandleSize], SBTBytes[0], FHandleSize);
+  Move(RawHandles[1 * FHandleSize], SBTBytes[FRaygenRegionSize], FHandleSize);
+  Move(RawHandles[2 * FHandleSize], SBTBytes[FRaygenRegionSize + FMissRegionSize], FHandleSize);
+  FSBTBuffer.UploadData(SBTBytes[0], Length(SBTBytes), 0);
+  FSBTPopulated := True;
+end;
+
+function TCastleVulkanShaderBindingTable.DispatchHardwareTraceRaysOrFallback(
+  const ACommandList: TVulkanRHICommandList;
+  const AASManager: TCastleVulkanAccelerationStructureManager;
+  const AOutputImage: TVulkanRHITexture;
+  const AOriginXYScale, ARayDirAndOriginZ: TVector4): Boolean;
+type
+  TRTDispatchPC = packed record
+    OriginXYScale: TVector4;
+    RayDirAndOriginZ: TVector4;
+    Width: Cardinal;
+    Height: Cardinal;
+    NodeCount: Cardinal;
+    TriCount: Cardinal;
+  end;
+var
+  PC: TRTDispatchPC;
+  BaseAddr: UInt64;
+  RgenRegion, MissRegion, HitRegion, CallRegion: VkStridedDeviceAddressRegionKHR;
+  SetHandle: VkDescriptorSet;
+begin
+  Result := False;
+  if (ACommandList = nil) or (AASManager = nil) or (AOutputImage = nil) then
+    Exit;
+
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and
+     FDevice.SupportsRayTracingPipeline and (not FForceSoftwareFallback) and
+     (AASManager.TLASHandle <> VK_NULL_HANDLE) and Assigned(vkCmdTraceRaysKHR) then
+  begin
+    EnsureHardwareRTPipelineAndSBT;
+    if (FRTPipeline <> VK_NULL_HANDLE) and (FSBTBuffer <> nil) then
+    begin
+      ACommandList.TransitionTexture(AOutputImage, rsUnorderedAccess);
+      FRTDescriptorSet.BindAccelerationStructure(0, AASManager.TLASHandle);
+      FRTDescriptorSet.BindTexture(1, AOutputImage, nil);
+      FRTDescriptorSet.Update;
+
+      FillChar(PC, SizeOf(PC), 0);
+      PC.OriginXYScale := AOriginXYScale;
+      PC.RayDirAndOriginZ := ARayDirAndOriginZ;
+      PC.Width := Max(Cardinal(1), AOutputImage.Desc.Width);
+      PC.Height := Max(Cardinal(1), AOutputImage.Desc.Height);
+
+      BaseAddr := FSBTBuffer.DeviceAddress;
+      FillChar(RgenRegion, SizeOf(RgenRegion), 0);
+      RgenRegion.deviceAddress := BaseAddr;
+      RgenRegion.stride := FRaygenRegionSize;
+      RgenRegion.size := FRaygenRegionSize;
+
+      FillChar(MissRegion, SizeOf(MissRegion), 0);
+      MissRegion.deviceAddress := BaseAddr + FRaygenRegionSize;
+      MissRegion.stride := FAlignedHandleStride;
+      MissRegion.size := FMissRegionSize;
+
+      FillChar(HitRegion, SizeOf(HitRegion), 0);
+      HitRegion.deviceAddress := BaseAddr + FRaygenRegionSize + FMissRegionSize;
+      HitRegion.stride := FAlignedHandleStride;
+      HitRegion.size := FHitRegionSize;
+
+      FillChar(CallRegion, SizeOf(CallRegion), 0);
+
+      SetHandle := FRTDescriptorSet.Handle;
+      vkCmdBindPipeline(ACommandList.Handle, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, FRTPipeline);
+      vkCmdBindDescriptorSets(ACommandList.Handle, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+        FRTPipelineLayout, 0, 1, @SetHandle, 0, nil);
+      vkCmdPushConstants(ACommandList.Handle, FRTPipelineLayout,
+        VK_SHADER_STAGE_RAYGEN_BIT_KHR or VK_SHADER_STAGE_COMPUTE_BIT, 0, SizeOf(PC), @PC);
+      vkCmdTraceRaysKHR(ACommandList.Handle, @RgenRegion, @MissRegion, @HitRegion, @CallRegion,
+        PC.Width, PC.Height, 1);
+
+      Inc(FHardwareTraceRaysCount);
+      Inc(FTraceRaysDispatchCount);
+      Exit(True);
+    end;
+  end;
+
+  AASManager.DispatchRayQueryOrFallback(ACommandList, AOutputImage, AOriginXYScale, ARayDirAndOriginZ);
+  Inc(FFallbackTraceRaysCount);
+  Inc(FTraceRaysDispatchCount);
+end;
+
 { ---------------------------------------------------------------------------- }
-{ TCastleVulkanAccelerationStructureManager (Phase 35.3)                       }
+{ TCastleVulkanAccelerationStructureManager (Phase 35.3 / 117)                 }
 { ---------------------------------------------------------------------------- }
 
 constructor TCastleVulkanAccelerationStructureManager.Create(const ADevice: TVulkanRHIDevice);
@@ -20506,17 +21408,65 @@ begin
   FDevice := ADevice;
 end;
 
-destructor TCastleVulkanAccelerationStructureManager.Destroy;
+procedure TCastleVulkanAccelerationStructureManager.DestroyBLASEntryGPU(
+  var AEntry: TCastleVulkanBLASEntry);
 begin
+  if (AEntry.Handle <> VK_NULL_HANDLE) and (FDevice <> nil) and
+     (FDevice.Handle <> nil) and Assigned(vkDestroyAccelerationStructureKHR) then
+    vkDestroyAccelerationStructureKHR(FDevice.Handle, AEntry.Handle, nil);
+  AEntry.Handle := VK_NULL_HANDLE;
+  AEntry.DeviceAddress := 0;
+  FreeAndNil(AEntry.BackingBuffer);
+  FreeAndNil(AEntry.VertexBuffer);
+  FreeAndNil(AEntry.IndexBuffer);
+  SetLength(AEntry.CPUVertices, 0);
+  SetLength(AEntry.CPUIndices, 0);
+end;
+
+procedure TCastleVulkanAccelerationStructureManager.DestroyTLASGPU;
+begin
+  if (FTLASHandle <> VK_NULL_HANDLE) and (FDevice <> nil) and
+     (FDevice.Handle <> nil) and Assigned(vkDestroyAccelerationStructureKHR) then
+    vkDestroyAccelerationStructureKHR(FDevice.Handle, FTLASHandle, nil);
+  FTLASHandle := VK_NULL_HANDLE;
+  FTLASDeviceAddress := 0;
+  FreeAndNil(FTLASInstancesBuffer);
   FreeAndNil(FTLASBuffer);
+end;
+
+destructor TCastleVulkanAccelerationStructureManager.Destroy;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FBLASEntries) do
+    DestroyBLASEntryGPU(FBLASEntries[I]);
+  SetLength(FBLASEntries, 0);
+  DestroyTLASGPU;
+  FreeAndNil(FRayQueryPipeline);
+  FreeAndNil(FRayQueryShader);
+  FreeAndNil(FRayQuerySet);
+  FreeAndNil(FRayQueryLayout);
+  FreeAndNil(FSoftwareLBVHPipeline);
+  FreeAndNil(FSoftwareLBVHShader);
+  FreeAndNil(FSoftwareLBVHSet);
+  FreeAndNil(FSoftwareLBVHLayout);
+  FreeAndNil(FLBVHTriangleBuffer);
+  FreeAndNil(FLBVHNodeBuffer);
   inherited;
 end;
 
 procedure TCastleVulkanAccelerationStructureManager.ClearAccelerationStructures;
+var
+  I: Integer;
 begin
+  for I := 0 to High(FBLASEntries) do
+    DestroyBLASEntryGPU(FBLASEntries[I]);
   SetLength(FBLASEntries, 0);
+  DestroyTLASGPU;
   FTLASInstanceCount := 0;
   FTLASBuildCount := 0;
+  FLBVHNodeCount := 0;
+  FLBVHTriangleCount := 0;
 end;
 
 function TCastleVulkanAccelerationStructureManager.RegisterBLASBuild(
@@ -20528,11 +21478,149 @@ begin
   SafeBytes := Max(Cardinal(256), AUncompactedBytes);
   Idx := Length(FBLASEntries);
   SetLength(FBLASEntries, Idx + 1);
+  FBLASEntries[Idx] := Default(TCastleVulkanBLASEntry);
   FBLASEntries[Idx].BLASID := Cardinal(Idx + 1);
   FBLASEntries[Idx].TriangleCount := ATriangleCount;
   FBLASEntries[Idx].UncompactedBytes := SafeBytes;
   FBLASEntries[Idx].CompactedBytes := SafeBytes;
   FBLASEntries[Idx].IsCompacted := False;
+  Result := FBLASEntries[Idx].BLASID;
+end;
+
+function TCastleVulkanAccelerationStructureManager.BuildTriangleBLAS(
+  const AVertices: array of TVector3;
+  const AIndices: array of UInt32;
+  const AAllowCompaction: Boolean): Cardinal;
+var
+  Idx, I: Integer;
+  TriCount, MaxVert: Cardinal;
+  BufDesc: TRHIBufferDesc;
+  ScratchBuf: TVulkanRHIBuffer;
+  Geom: VkAccelerationStructureGeometryKHR;
+  BuildInfo: VkAccelerationStructureBuildGeometryInfoKHR;
+  RangeInfo: VkAccelerationStructureBuildRangeInfoKHR;
+  PRangeInfo: PVkAccelerationStructureBuildRangeInfoKHR;
+  SizesInfo: VkAccelerationStructureBuildSizesInfoKHR;
+  CreateInfo: VkAccelerationStructureCreateInfoKHR;
+  AddrInfo: VkAccelerationStructureDeviceAddressInfoKHR;
+  Cmd: VkCommandBuffer;
+  MemBarrier: VkMemoryBarrier;
+begin
+  if (Length(AVertices) < 3) or (Length(AIndices) < 3) then
+    Exit(0);
+  TriCount := Cardinal(Length(AIndices) div 3);
+  MaxVert := Cardinal(High(AVertices));
+
+  Idx := Length(FBLASEntries);
+  SetLength(FBLASEntries, Idx + 1);
+  FBLASEntries[Idx] := Default(TCastleVulkanBLASEntry);
+  FBLASEntries[Idx].BLASID := Cardinal(Idx + 1);
+  FBLASEntries[Idx].TriangleCount := TriCount;
+  SetLength(FBLASEntries[Idx].CPUVertices, Length(AVertices));
+  for I := 0 to High(AVertices) do
+    FBLASEntries[Idx].CPUVertices[I] := AVertices[I];
+  SetLength(FBLASEntries[Idx].CPUIndices, Length(AIndices));
+  for I := 0 to High(AIndices) do
+    FBLASEntries[Idx].CPUIndices[I] := AIndices[I];
+
+  FBLASEntries[Idx].UncompactedBytes := Max(Cardinal(512), TriCount * 128);
+  FBLASEntries[Idx].CompactedBytes := FBLASEntries[Idx].UncompactedBytes;
+
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and
+     FDevice.SupportsAccelerationStructure and (not FForceSoftwareFallback) and
+     Assigned(vkGetAccelerationStructureBuildSizesKHR) and
+     Assigned(vkCreateAccelerationStructureKHR) and
+     Assigned(vkCmdBuildAccelerationStructuresKHR) then
+  begin
+    BufDesc := TRHIBufferDesc.Create(Length(AVertices) * SizeOf(TVector3),
+      [buVertex, buStorage, buAccelerationStructureBuildInput, buShaderDeviceAddress, buTransferDst],
+      muCpuToGpu, 'BLASVertexBuffer');
+    FBLASEntries[Idx].VertexBuffer := FDevice.CreateBuffer(BufDesc, @AVertices[0]) as TVulkanRHIBuffer;
+
+    BufDesc := TRHIBufferDesc.Create(Length(AIndices) * SizeOf(UInt32),
+      [buIndex, buStorage, buAccelerationStructureBuildInput, buShaderDeviceAddress, buTransferDst],
+      muCpuToGpu, 'BLASIndexBuffer');
+    FBLASEntries[Idx].IndexBuffer := FDevice.CreateBuffer(BufDesc, @AIndices[0]) as TVulkanRHIBuffer;
+
+    FillChar(Geom, SizeOf(Geom), 0);
+    Geom.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    Geom.geometryType := VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    Geom.flags := VK_GEOMETRY_OPAQUE_BIT_KHR;
+    Geom.geometry.triangles.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+    Geom.geometry.triangles.vertexFormat := VK_FORMAT_R32G32B32_SFLOAT;
+    Geom.geometry.triangles.vertexData.deviceAddress := FBLASEntries[Idx].VertexBuffer.DeviceAddress;
+    Geom.geometry.triangles.vertexStride := SizeOf(TVector3);
+    Geom.geometry.triangles.maxVertex := MaxVert;
+    Geom.geometry.triangles.indexType := VK_INDEX_TYPE_UINT32;
+    Geom.geometry.triangles.indexData.deviceAddress := FBLASEntries[Idx].IndexBuffer.DeviceAddress;
+
+    FillChar(BuildInfo, SizeOf(BuildInfo), 0);
+    BuildInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    BuildInfo._type := VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    BuildInfo.flags := VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    if AAllowCompaction then
+      BuildInfo.flags := BuildInfo.flags or VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+    BuildInfo.mode := VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    BuildInfo.geometryCount := 1;
+    BuildInfo.pGeometries := @Geom;
+
+    FillChar(SizesInfo, SizeOf(SizesInfo), 0);
+    SizesInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    vkGetAccelerationStructureBuildSizesKHR(FDevice.Handle,
+      VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, @BuildInfo, @TriCount, @SizesInfo);
+
+    FBLASEntries[Idx].UncompactedBytes := Max(Cardinal(256), Cardinal(SizesInfo.accelerationStructureSize));
+    FBLASEntries[Idx].CompactedBytes := FBLASEntries[Idx].UncompactedBytes;
+
+    BufDesc := TRHIBufferDesc.Create(Max(UInt64(256), SizesInfo.accelerationStructureSize),
+      [buAccelerationStructureStorage, buShaderDeviceAddress], muGpuOnly, 'BLASBackingBuffer');
+    FBLASEntries[Idx].BackingBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+    FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+    CreateInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    CreateInfo.buffer := FBLASEntries[Idx].BackingBuffer.Handle;
+    CreateInfo.offset := 0;
+    CreateInfo.size := SizesInfo.accelerationStructureSize;
+    CreateInfo._type := VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    CheckVk(vkCreateAccelerationStructureKHR(FDevice.Handle, @CreateInfo, nil,
+      @FBLASEntries[Idx].Handle), 'vkCreateAccelerationStructureKHR(BLAS)');
+
+    BufDesc := TRHIBufferDesc.Create(Max(UInt64(256), SizesInfo.buildScratchSize),
+      [buStorage, buShaderDeviceAddress], muGpuOnly, 'BLASBuildScratchBuffer');
+    ScratchBuf := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+    try
+      BuildInfo.dstAccelerationStructure := FBLASEntries[Idx].Handle;
+      BuildInfo.scratchData.deviceAddress := ScratchBuf.DeviceAddress;
+
+      FillChar(RangeInfo, SizeOf(RangeInfo), 0);
+      RangeInfo.primitiveCount := TriCount;
+      PRangeInfo := @RangeInfo;
+
+      Cmd := FDevice.BeginSingleTimeCommands;
+      vkCmdBuildAccelerationStructuresKHR(Cmd, 1, @BuildInfo, @PRangeInfo);
+      FillChar(MemBarrier, SizeOf(MemBarrier), 0);
+      MemBarrier.sType := VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      MemBarrier.srcAccessMask := VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+      MemBarrier.dstAccessMask := VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+      vkCmdPipelineBarrier(Cmd,
+        VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+        VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR or VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0, 1, @MemBarrier, 0, nil, 0, nil);
+      FDevice.EndSingleTimeCommands(Cmd);
+    finally
+      FreeAndNil(ScratchBuf);
+    end;
+
+    if Assigned(vkGetAccelerationStructureDeviceAddressKHR) then
+    begin
+      FillChar(AddrInfo, SizeOf(AddrInfo), 0);
+      AddrInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+      AddrInfo.accelerationStructure := FBLASEntries[Idx].Handle;
+      FBLASEntries[Idx].DeviceAddress := vkGetAccelerationStructureDeviceAddressKHR(FDevice.Handle, @AddrInfo);
+    end;
+  end else
+    FBLASEntries[Idx].DeviceAddress := UInt64($200000000) + UInt64(Idx + 1) * 4096;
+
   Result := FBLASEntries[Idx].BLASID;
 end;
 
@@ -20558,6 +21646,103 @@ begin
     end;
 end;
 
+function TCastleVulkanAccelerationStructureManager.CompactBLASOnGPU(
+  const ABLASID: Cardinal): Boolean;
+var
+  I: Integer;
+  PoolInfo: VkQueryPoolCreateInfo;
+  QueryPool: VkQueryPool;
+  CompactedSize: UInt64;
+  BufDesc: TRHIBufferDesc;
+  NewBuffer, OldBuffer: TVulkanRHIBuffer;
+  CreateInfo: VkAccelerationStructureCreateInfoKHR;
+  NewHandle, OldHandle: VkAccelerationStructureKHR;
+  CopyInfo: VkCopyAccelerationStructureInfoKHR;
+  AddrInfo: VkAccelerationStructureDeviceAddressInfoKHR;
+  Cmd: VkCommandBuffer;
+begin
+  Result := False;
+  for I := 0 to High(FBLASEntries) do
+    if FBLASEntries[I].BLASID = ABLASID then
+    begin
+      if (FBLASEntries[I].Handle = VK_NULL_HANDLE) or (FDevice = nil) or
+         (FDevice.Handle = nil) or (not FDevice.SupportsAccelerationStructure) or
+         (not Assigned(vkCmdWriteAccelerationStructuresPropertiesKHR)) or
+         (not Assigned(vkCmdCopyAccelerationStructureKHR)) then
+        Exit(CompactBLAS(ABLASID, 0));
+
+      FillChar(PoolInfo, SizeOf(PoolInfo), 0);
+      PoolInfo.sType := VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+      PoolInfo.queryType := VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
+      PoolInfo.queryCount := 1;
+      QueryPool := VK_NULL_HANDLE;
+      CheckVk(vkCreateQueryPool(FDevice.Handle, @PoolInfo, nil, @QueryPool),
+        'vkCreateQueryPool(BLASCompactedSize)');
+      try
+        Cmd := FDevice.BeginSingleTimeCommands;
+        vkCmdResetQueryPool(Cmd, QueryPool, 0, 1);
+        vkCmdWriteAccelerationStructuresPropertiesKHR(Cmd, 1, @FBLASEntries[I].Handle,
+          VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, QueryPool, 0);
+        FDevice.EndSingleTimeCommands(Cmd);
+
+        CompactedSize := 0;
+        CheckVk(vkGetQueryPoolResults(FDevice.Handle, QueryPool, 0, 1,
+          SizeOf(CompactedSize), @CompactedSize, SizeOf(CompactedSize),
+          VK_QUERY_RESULT_64_BIT or VK_QUERY_RESULT_WAIT_BIT),
+          'vkGetQueryPoolResults(BLASCompactedSize)');
+      finally
+        vkDestroyQueryPool(FDevice.Handle, QueryPool, nil);
+      end;
+
+      if CompactedSize = 0 then
+        CompactedSize := FBLASEntries[I].UncompactedBytes;
+
+      BufDesc := TRHIBufferDesc.Create(Max(UInt64(256), CompactedSize),
+        [buAccelerationStructureStorage, buShaderDeviceAddress], muGpuOnly, 'BLASCompactedBuffer');
+      NewBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+      FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+      CreateInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+      CreateInfo.buffer := NewBuffer.Handle;
+      CreateInfo.offset := 0;
+      CreateInfo.size := Max(UInt64(256), CompactedSize);
+      CreateInfo._type := VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+      NewHandle := VK_NULL_HANDLE;
+      CheckVk(vkCreateAccelerationStructureKHR(FDevice.Handle, @CreateInfo, nil, @NewHandle),
+        'vkCreateAccelerationStructureKHR(CompactedBLAS)');
+
+      FillChar(CopyInfo, SizeOf(CopyInfo), 0);
+      CopyInfo.sType := VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR;
+      CopyInfo.src := FBLASEntries[I].Handle;
+      CopyInfo.dst := NewHandle;
+      CopyInfo.mode := VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR;
+
+      Cmd := FDevice.BeginSingleTimeCommands;
+      vkCmdCopyAccelerationStructureKHR(Cmd, @CopyInfo);
+      FDevice.EndSingleTimeCommands(Cmd);
+
+      OldHandle := FBLASEntries[I].Handle;
+      OldBuffer := FBLASEntries[I].BackingBuffer;
+      FBLASEntries[I].Handle := NewHandle;
+      FBLASEntries[I].BackingBuffer := NewBuffer;
+      FBLASEntries[I].CompactedBytes := Cardinal(CompactedSize);
+      FBLASEntries[I].IsCompacted := True;
+
+      if (OldHandle <> VK_NULL_HANDLE) and Assigned(vkDestroyAccelerationStructureKHR) then
+        vkDestroyAccelerationStructureKHR(FDevice.Handle, OldHandle, nil);
+      FreeAndNil(OldBuffer);
+
+      if Assigned(vkGetAccelerationStructureDeviceAddressKHR) then
+      begin
+        FillChar(AddrInfo, SizeOf(AddrInfo), 0);
+        AddrInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+        AddrInfo.accelerationStructure := NewHandle;
+        FBLASEntries[I].DeviceAddress := vkGetAccelerationStructureDeviceAddressKHR(FDevice.Handle, @AddrInfo);
+      end;
+      Exit(True);
+    end;
+end;
+
 procedure TCastleVulkanAccelerationStructureManager.BuildTLAS(
   const AInstanceCount: Cardinal);
 var
@@ -20574,6 +21759,471 @@ begin
       'TopLevelAccelerationStructureBuffer');
     FTLASBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
   end;
+end;
+
+procedure TCastleVulkanAccelerationStructureManager.BuildSoftwareLBVH(
+  const AInstances: array of TCastleRTInstanceDesc);
+type
+  TWorldTri = record
+    V0, V1, V2, BMin, BMax, Centroid: TVector3;
+    CustomIndex: UInt32;
+  end;
+  TGPUWorldTri = packed record
+    V0AndInst: TVector4;
+    V1: TVector4;
+    V2: TVector4;
+  end;
+  TGPULBVHNode = packed record
+    BMinAndLeaf: TVector4;
+    BMaxAndEscape: TVector4;
+  end;
+var
+  WorldTris: array of TWorldTri;
+  GPUTris: array of TGPUWorldTri;
+  GPUNodes: array of TGPULBVHNode;
+
+  function BitsToFloat(const AVal: UInt32): Single;
+  begin
+    Move(AVal, Result, SizeOf(Single));
+  end;
+
+  procedure SortTrisByAxis(L, R, Axis: Integer);
+  var
+    I, J: Integer;
+    Pivot: Single;
+    Tmp: TWorldTri;
+  begin
+    if L >= R then Exit;
+    I := L;
+    J := R;
+    Pivot := WorldTris[(L + R) div 2].Centroid.Data[Axis];
+    repeat
+      while WorldTris[I].Centroid.Data[Axis] < Pivot do Inc(I);
+      while WorldTris[J].Centroid.Data[Axis] > Pivot do Dec(J);
+      if I <= J then
+      begin
+        Tmp := WorldTris[I];
+        WorldTris[I] := WorldTris[J];
+        WorldTris[J] := Tmp;
+        Inc(I);
+        Dec(J);
+      end;
+    until I > J;
+    if L < J then SortTrisByAxis(L, J, Axis);
+    if I < R then SortTrisByAxis(I, R, Axis);
+  end;
+
+  function EmitNode(const AStart, AEnd: Integer; const AEscapeIdx: UInt32): UInt32;
+  var
+    NodeIdx, RightIdx: UInt32;
+    BMin, BMax, CMin, CMax, Ext: TVector3;
+    K, Axis, Mid, NegOneBits: Integer;
+  begin
+    NodeIdx := UInt32(Length(GPUNodes));
+    SetLength(GPUNodes, NodeIdx + 1);
+
+    BMin := WorldTris[AStart].BMin;
+    BMax := WorldTris[AStart].BMax;
+    CMin := WorldTris[AStart].Centroid;
+    CMax := WorldTris[AStart].Centroid;
+    for K := AStart + 1 to AEnd do
+    begin
+      BMin.X := Min(BMin.X, WorldTris[K].BMin.X);
+      BMin.Y := Min(BMin.Y, WorldTris[K].BMin.Y);
+      BMin.Z := Min(BMin.Z, WorldTris[K].BMin.Z);
+      BMax.X := Max(BMax.X, WorldTris[K].BMax.X);
+      BMax.Y := Max(BMax.Y, WorldTris[K].BMax.Y);
+      BMax.Z := Max(BMax.Z, WorldTris[K].BMax.Z);
+      CMin.X := Min(CMin.X, WorldTris[K].Centroid.X);
+      CMin.Y := Min(CMin.Y, WorldTris[K].Centroid.Y);
+      CMin.Z := Min(CMin.Z, WorldTris[K].Centroid.Z);
+      CMax.X := Max(CMax.X, WorldTris[K].Centroid.X);
+      CMax.Y := Max(CMax.Y, WorldTris[K].Centroid.Y);
+      CMax.Z := Max(CMax.Z, WorldTris[K].Centroid.Z);
+    end;
+    BMin := BMin - Vector3(1e-4, 1e-4, 1e-4);
+    BMax := BMax + Vector3(1e-4, 1e-4, 1e-4);
+
+    if AStart = AEnd then
+    begin
+      GPUNodes[NodeIdx].BMinAndLeaf := Vector4(BMin, BitsToFloat(UInt32(AStart)));
+      GPUNodes[NodeIdx].BMaxAndEscape := Vector4(BMax, BitsToFloat(AEscapeIdx));
+      Exit(NodeIdx);
+    end;
+
+    Ext := CMax - CMin;
+    Axis := 0;
+    if (Ext.Y >= Ext.X) and (Ext.Y >= Ext.Z) then
+      Axis := 1
+    else if (Ext.Z >= Ext.X) and (Ext.Z >= Ext.Y) then
+      Axis := 2;
+    SortTrisByAxis(AStart, AEnd, Axis);
+
+    Mid := (AStart + AEnd) div 2;
+    RightIdx := NodeIdx + UInt32(2 * (Mid - AStart + 1));
+    NegOneBits := -1;
+    GPUNodes[NodeIdx].BMinAndLeaf := Vector4(BMin, BitsToFloat(UInt32(NegOneBits)));
+    GPUNodes[NodeIdx].BMaxAndEscape := Vector4(BMax, BitsToFloat(AEscapeIdx));
+
+    EmitNode(AStart, Mid, RightIdx);
+    EmitNode(Mid + 1, AEnd, AEscapeIdx);
+    Result := NodeIdx;
+  end;
+
+var
+  InstIdx, BIdx, T, OutTriCount: Integer;
+  I0, I1, I2: UInt32;
+  P0, P1, P2: TVector3;
+  BufDesc: TRHIBufferDesc;
+begin
+  OutTriCount := 0;
+  for InstIdx := 0 to High(AInstances) do
+    for BIdx := 0 to High(FBLASEntries) do
+      if FBLASEntries[BIdx].BLASID = AInstances[InstIdx].BLASID then
+      begin
+        for T := 0 to (Length(FBLASEntries[BIdx].CPUIndices) div 3) - 1 do
+        begin
+          I0 := FBLASEntries[BIdx].CPUIndices[T * 3 + 0];
+          I1 := FBLASEntries[BIdx].CPUIndices[T * 3 + 1];
+          I2 := FBLASEntries[BIdx].CPUIndices[T * 3 + 2];
+          P0 := AInstances[InstIdx].Transform.MultPoint(FBLASEntries[BIdx].CPUVertices[I0]);
+          P1 := AInstances[InstIdx].Transform.MultPoint(FBLASEntries[BIdx].CPUVertices[I1]);
+          P2 := AInstances[InstIdx].Transform.MultPoint(FBLASEntries[BIdx].CPUVertices[I2]);
+
+          SetLength(WorldTris, OutTriCount + 1);
+          WorldTris[OutTriCount].V0 := P0;
+          WorldTris[OutTriCount].V1 := P1;
+          WorldTris[OutTriCount].V2 := P2;
+          WorldTris[OutTriCount].BMin := Vector3(
+            Min(P0.X, Min(P1.X, P2.X)),
+            Min(P0.Y, Min(P1.Y, P2.Y)),
+            Min(P0.Z, Min(P1.Z, P2.Z)));
+          WorldTris[OutTriCount].BMax := Vector3(
+            Max(P0.X, Max(P1.X, P2.X)),
+            Max(P0.Y, Max(P1.Y, P2.Y)),
+            Max(P0.Z, Max(P1.Z, P2.Z)));
+          WorldTris[OutTriCount].Centroid := (P0 + P1 + P2) * (1.0 / 3.0);
+          WorldTris[OutTriCount].CustomIndex := AInstances[InstIdx].CustomIndex;
+          Inc(OutTriCount);
+        end;
+        Break;
+      end;
+
+  FLBVHTriangleCount := Cardinal(OutTriCount);
+  if OutTriCount = 0 then
+  begin
+    FLBVHNodeCount := 0;
+    Exit;
+  end;
+
+  SetLength(GPUNodes, 0);
+  EmitNode(0, OutTriCount - 1, $FFFFFFFF);
+  FLBVHNodeCount := Cardinal(Length(GPUNodes));
+
+  SetLength(GPUTris, OutTriCount);
+  for T := 0 to OutTriCount - 1 do
+  begin
+    GPUTris[T].V0AndInst := Vector4(WorldTris[T].V0, BitsToFloat(WorldTris[T].CustomIndex));
+    GPUTris[T].V1 := Vector4(WorldTris[T].V1, 0.0);
+    GPUTris[T].V2 := Vector4(WorldTris[T].V2, 0.0);
+  end;
+
+  FreeAndNil(FLBVHNodeBuffer);
+  BufDesc := TRHIBufferDesc.Create(Length(GPUNodes) * SizeOf(TGPULBVHNode),
+    [buStorage, buTransferDst], muCpuToGpu, 'SoftwareLBVHNodesSSBO');
+  FLBVHNodeBuffer := FDevice.CreateBuffer(BufDesc, @GPUNodes[0]) as TVulkanRHIBuffer;
+
+  FreeAndNil(FLBVHTriangleBuffer);
+  BufDesc := TRHIBufferDesc.Create(Length(GPUTris) * SizeOf(TGPUWorldTri),
+    [buStorage, buTransferDst], muCpuToGpu, 'SoftwareLBVHTrianglesSSBO');
+  FLBVHTriangleBuffer := FDevice.CreateBuffer(BufDesc, @GPUTris[0]) as TVulkanRHIBuffer;
+
+  FreeAndNil(FSoftwareLBVHSet);
+end;
+
+function TCastleVulkanAccelerationStructureManager.BuildInstanceTLAS(
+  const AInstances: array of TCastleRTInstanceDesc): Boolean;
+var
+  VkInstances: array of VkAccelerationStructureInstanceKHR;
+  I, R, C: Integer;
+  InstMask: Byte;
+  PrimCount: Cardinal;
+  BufDesc: TRHIBufferDesc;
+  ScratchBuf: TVulkanRHIBuffer;
+  Geom: VkAccelerationStructureGeometryKHR;
+  BuildInfo: VkAccelerationStructureBuildGeometryInfoKHR;
+  RangeInfo: VkAccelerationStructureBuildRangeInfoKHR;
+  PRangeInfo: PVkAccelerationStructureBuildRangeInfoKHR;
+  SizesInfo: VkAccelerationStructureBuildSizesInfoKHR;
+  CreateInfo: VkAccelerationStructureCreateInfoKHR;
+  AddrInfo: VkAccelerationStructureDeviceAddressInfoKHR;
+  Cmd: VkCommandBuffer;
+  MemBarrier: VkMemoryBarrier;
+begin
+  Result := False;
+  DestroyTLASGPU;
+  FTLASInstanceCount := Cardinal(Length(AInstances));
+  Inc(FTLASBuildCount);
+
+  { Always build CPU/GPU Software LBVH so Software Compute fallback is always warm }
+  BuildSoftwareLBVH(AInstances);
+
+  if Length(AInstances) = 0 then
+    Exit(False);
+
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and
+     FDevice.SupportsAccelerationStructure and (not FForceSoftwareFallback) and
+     Assigned(vkGetAccelerationStructureBuildSizesKHR) and
+     Assigned(vkCreateAccelerationStructureKHR) and
+     Assigned(vkCmdBuildAccelerationStructuresKHR) then
+  begin
+    SetLength(VkInstances, Length(AInstances));
+    for I := 0 to High(AInstances) do
+    begin
+      FillChar(VkInstances[I], SizeOf(VkAccelerationStructureInstanceKHR), 0);
+      for R := 0 to 2 do
+        for C := 0 to 3 do
+          VkInstances[I].transform.matrix[R, C] := AInstances[I].Transform.Data[C, R];
+      InstMask := AInstances[I].Mask;
+      if InstMask = 0 then
+        InstMask := $FF;
+      VkInstances[I].instanceCustomIndexAndMask :=
+        (AInstances[I].CustomIndex and $00FFFFFF) or (UInt32(InstMask) shl 24);
+      VkInstances[I].instanceShaderBindingTableRecordOffsetAndFlags :=
+        UInt32(VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR) shl 24;
+      VkInstances[I].accelerationStructureReference := GetBLASDeviceAddress(AInstances[I].BLASID);
+    end;
+
+    BufDesc := TRHIBufferDesc.Create(Length(VkInstances) * SizeOf(VkAccelerationStructureInstanceKHR),
+      [buStorage, buAccelerationStructureBuildInput, buShaderDeviceAddress, buTransferDst],
+      muCpuToGpu, 'TLASInstancesBuffer');
+    FTLASInstancesBuffer := FDevice.CreateBuffer(BufDesc, @VkInstances[0]) as TVulkanRHIBuffer;
+
+    PrimCount := Cardinal(Length(VkInstances));
+    FillChar(Geom, SizeOf(Geom), 0);
+    Geom.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    Geom.geometryType := VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    Geom.flags := VK_GEOMETRY_OPAQUE_BIT_KHR;
+    Geom.geometry.instances.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    Geom.geometry.instances.arrayOfPointers := VK_FALSE;
+    Geom.geometry.instances.data.deviceAddress := FTLASInstancesBuffer.DeviceAddress;
+
+    FillChar(BuildInfo, SizeOf(BuildInfo), 0);
+    BuildInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    BuildInfo._type := VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    BuildInfo.flags := VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    BuildInfo.mode := VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    BuildInfo.geometryCount := 1;
+    BuildInfo.pGeometries := @Geom;
+
+    FillChar(SizesInfo, SizeOf(SizesInfo), 0);
+    SizesInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    vkGetAccelerationStructureBuildSizesKHR(FDevice.Handle,
+      VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, @BuildInfo, @PrimCount, @SizesInfo);
+
+    BufDesc := TRHIBufferDesc.Create(Max(UInt64(256), SizesInfo.accelerationStructureSize),
+      [buAccelerationStructureStorage, buShaderDeviceAddress], muGpuOnly, 'TLASBackingBuffer');
+    FTLASBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+    FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+    CreateInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    CreateInfo.buffer := FTLASBuffer.Handle;
+    CreateInfo.offset := 0;
+    CreateInfo.size := SizesInfo.accelerationStructureSize;
+    CreateInfo._type := VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    CheckVk(vkCreateAccelerationStructureKHR(FDevice.Handle, @CreateInfo, nil, @FTLASHandle),
+      'vkCreateAccelerationStructureKHR(TLAS)');
+
+    BufDesc := TRHIBufferDesc.Create(Max(UInt64(256), SizesInfo.buildScratchSize),
+      [buStorage, buShaderDeviceAddress], muGpuOnly, 'TLASBuildScratchBuffer');
+    ScratchBuf := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+    try
+      BuildInfo.dstAccelerationStructure := FTLASHandle;
+      BuildInfo.scratchData.deviceAddress := ScratchBuf.DeviceAddress;
+
+      FillChar(RangeInfo, SizeOf(RangeInfo), 0);
+      RangeInfo.primitiveCount := PrimCount;
+      PRangeInfo := @RangeInfo;
+
+      Cmd := FDevice.BeginSingleTimeCommands;
+      vkCmdBuildAccelerationStructuresKHR(Cmd, 1, @BuildInfo, @PRangeInfo);
+      FillChar(MemBarrier, SizeOf(MemBarrier), 0);
+      MemBarrier.sType := VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      MemBarrier.srcAccessMask := VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+      MemBarrier.dstAccessMask := VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR or VK_ACCESS_SHADER_READ_BIT;
+      vkCmdPipelineBarrier(Cmd,
+        VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT or VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+        0, 1, @MemBarrier, 0, nil, 0, nil);
+      FDevice.EndSingleTimeCommands(Cmd);
+    finally
+      FreeAndNil(ScratchBuf);
+    end;
+
+    if Assigned(vkGetAccelerationStructureDeviceAddressKHR) then
+    begin
+      FillChar(AddrInfo, SizeOf(AddrInfo), 0);
+      AddrInfo.sType := VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+      AddrInfo.accelerationStructure := FTLASHandle;
+      FTLASDeviceAddress := vkGetAccelerationStructureDeviceAddressKHR(FDevice.Handle, @AddrInfo);
+    end;
+    Exit(True);
+  end;
+
+  BuildTLAS(Cardinal(Length(AInstances)));
+  FTLASDeviceAddress := FTLASBuffer.DeviceAddress;
+  Result := FLBVHNodeCount > 0;
+end;
+
+procedure TCastleVulkanAccelerationStructureManager.EnsureRayQueryAndLBVHPipelines;
+var
+  RQBinds: array[0..1] of TRHIDescriptorBindingDesc;
+  SWBinds: array[0..2] of TRHIDescriptorBindingDesc;
+  CompDesc: TRHIComputePipelineDesc;
+begin
+  if FDevice.SupportsRayQuery and (FRayQueryLayout = nil) then
+  begin
+    RQBinds[0] := Default(TRHIDescriptorBindingDesc);
+    RQBinds[0].Binding := 0;
+    RQBinds[0].DescriptorType := dtAccelerationStructure;
+    RQBinds[0].Count := 1;
+    RQBinds[0].StageFlags := [ssCompute, ssRayGen];
+
+    RQBinds[1] := Default(TRHIDescriptorBindingDesc);
+    RQBinds[1].Binding := 1;
+    RQBinds[1].DescriptorType := dtStorageImage;
+    RQBinds[1].Count := 1;
+    RQBinds[1].StageFlags := [ssCompute, ssRayGen];
+    FRayQueryLayout := FDevice.CreateDescriptorSetLayout(RQBinds) as TVulkanRHIDescriptorSetLayout;
+  end;
+  if FDevice.SupportsRayQuery and (FRayQueryShader = nil) then
+    FRayQueryShader := FDevice.CreateShaderModuleFromGLSL(ssCompute, '// RayQueryCS', 'RayQueryCS');
+  if FDevice.SupportsRayQuery and (FRayQueryPipeline = nil) then
+  begin
+    CompDesc := Default(TRHIComputePipelineDesc);
+    CompDesc.ComputeShader := FRayQueryShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FRayQueryLayout;
+    CompDesc.PushConstantSize := 48;
+    CompDesc.PushConstantStages := [ssCompute, ssRayGen];
+    CompDesc.DebugName := 'HardwareRayQueryComputePipeline';
+    FRayQueryPipeline := FDevice.CreateComputePipeline(CompDesc);
+  end;
+
+  if FSoftwareLBVHLayout = nil then
+  begin
+    SWBinds[0] := Default(TRHIDescriptorBindingDesc);
+    SWBinds[0].Binding := 0;
+    SWBinds[0].DescriptorType := dtStorageBuffer;
+    SWBinds[0].Count := 1;
+    SWBinds[0].StageFlags := [ssCompute];
+
+    SWBinds[1] := Default(TRHIDescriptorBindingDesc);
+    SWBinds[1].Binding := 1;
+    SWBinds[1].DescriptorType := dtStorageBuffer;
+    SWBinds[1].Count := 1;
+    SWBinds[1].StageFlags := [ssCompute];
+
+    SWBinds[2] := Default(TRHIDescriptorBindingDesc);
+    SWBinds[2].Binding := 2;
+    SWBinds[2].DescriptorType := dtStorageImage;
+    SWBinds[2].Count := 1;
+    SWBinds[2].StageFlags := [ssCompute];
+    FSoftwareLBVHLayout := FDevice.CreateDescriptorSetLayout(SWBinds);
+  end;
+  if FSoftwareLBVHShader = nil then
+    FSoftwareLBVHShader := FDevice.CreateShaderModuleFromGLSL(ssCompute, '// SoftwareLBVHRayTraceCS', 'SoftwareLBVHRayTraceCS');
+  if FSoftwareLBVHPipeline = nil then
+  begin
+    CompDesc := Default(TRHIComputePipelineDesc);
+    CompDesc.ComputeShader := FSoftwareLBVHShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FSoftwareLBVHLayout;
+    CompDesc.PushConstantSize := 48;
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'SoftwareLBVHRayTracePipeline';
+    FSoftwareLBVHPipeline := FDevice.CreateComputePipeline(CompDesc);
+  end;
+end;
+
+function TCastleVulkanAccelerationStructureManager.DispatchRayQueryOrFallback(
+  const ACommandList: TVulkanRHICommandList;
+  const AOutputImage: TVulkanRHITexture;
+  const AOriginXYScale, ARayDirAndOriginZ: TVector4): Boolean;
+type
+  TRTDispatchPC = packed record
+    OriginXYScale: TVector4;
+    RayDirAndOriginZ: TVector4;
+    Width: Cardinal;
+    Height: Cardinal;
+    NodeCount: Cardinal;
+    TriCount: Cardinal;
+  end;
+var
+  PC: TRTDispatchPC;
+  GroupsX, GroupsY: Cardinal;
+begin
+  Result := False;
+  if (ACommandList = nil) or (AOutputImage = nil) then
+    Exit;
+
+  EnsureRayQueryAndLBVHPipelines;
+  ACommandList.TransitionTexture(AOutputImage, rsUnorderedAccess);
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.OriginXYScale := AOriginXYScale;
+  PC.RayDirAndOriginZ := ARayDirAndOriginZ;
+  PC.Width := Max(Cardinal(1), AOutputImage.Desc.Width);
+  PC.Height := Max(Cardinal(1), AOutputImage.Desc.Height);
+  PC.NodeCount := FLBVHNodeCount;
+  PC.TriCount := FLBVHTriangleCount;
+
+  GroupsX := (PC.Width + 7) div 8;
+  GroupsY := (PC.Height + 7) div 8;
+
+  if FDevice.SupportsRayQuery and (not FForceSoftwareFallback) and
+     (FTLASHandle <> VK_NULL_HANDLE) and (FRayQueryPipeline <> nil) then
+  begin
+    if FRayQuerySet = nil then
+      FRayQuerySet := FDevice.CreateDescriptorSet(FRayQueryLayout) as TVulkanRHIDescriptorSet;
+    FRayQuerySet.BindAccelerationStructure(0, FTLASHandle);
+    FRayQuerySet.BindTexture(1, AOutputImage, nil);
+    FRayQuerySet.Update;
+
+    ACommandList.BindComputePipeline(FRayQueryPipeline);
+    ACommandList.BindComputeDescriptorSet(0, FRayQuerySet, []);
+    ACommandList.PushConstants([ssCompute, ssRayGen], 0, SizeOf(PC), PC);
+    ACommandList.Dispatch(GroupsX, GroupsY, 1);
+    Inc(FRayQueryDispatchCount);
+    Exit(True);
+  end;
+
+  if (FLBVHNodeBuffer <> nil) and (FLBVHTriangleBuffer <> nil) and (FSoftwareLBVHPipeline <> nil) then
+  begin
+    if FSoftwareLBVHSet = nil then
+      FSoftwareLBVHSet := FDevice.CreateDescriptorSet(FSoftwareLBVHLayout);
+    FSoftwareLBVHSet.BindStorageBuffer(0, FLBVHNodeBuffer);
+    FSoftwareLBVHSet.BindStorageBuffer(1, FLBVHTriangleBuffer);
+    FSoftwareLBVHSet.BindTexture(2, AOutputImage, nil);
+    FSoftwareLBVHSet.Update;
+
+    ACommandList.BindComputePipeline(FSoftwareLBVHPipeline);
+    ACommandList.BindComputeDescriptorSet(0, FSoftwareLBVHSet, []);
+    ACommandList.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+    ACommandList.Dispatch(GroupsX, GroupsY, 1);
+    Inc(FSoftwareLBVHDispatchCount);
+  end;
+end;
+
+function TCastleVulkanAccelerationStructureManager.GetBLASDeviceAddress(
+  const ABLASID: Cardinal): UInt64;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FBLASEntries) do
+    if FBLASEntries[I].BLASID = ABLASID then
+      Exit(FBLASEntries[I].DeviceAddress);
 end;
 
 function TCastleVulkanAccelerationStructureManager.GetBLASCount: Cardinal;
@@ -23611,7 +25261,7 @@ begin
 
   PickPhysicalDevice;
   CreateLogicalDevice;
-  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
+  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice, 0, FSupportsBufferDeviceAddress);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   CreateDescriptorPool;
@@ -23671,7 +25321,7 @@ begin
       vkDestroySurfaceKHR(FInstance, ProbeSurface, nil);
   end;
 
-  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
+  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice, 0, FSupportsBufferDeviceAddress);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   CreateDescriptorPool;
@@ -23731,7 +25381,7 @@ begin
   PickPhysicalDevice;
   FSwapchainDepthFormat := NegotiateOptimalPixelFormat(pfD24_UNorm_S8_UInt, [tuDepthStencil], FPhysicalDevice);
   CreateLogicalDevice;
-  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
+  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice, 0, FSupportsBufferDeviceAddress);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   CreateDescriptorPool;
@@ -23818,27 +25468,32 @@ begin
   FSupportsSynchronization2 := ADeviceApiVersion >= VK_API_VERSION_1_3;
   FSupportsTimelineSemaphores := ADeviceApiVersion >= VK_API_VERSION_1_2;
   FSupportsHostQueryReset := ADeviceApiVersion >= VK_API_VERSION_1_2;
+  FSupportsBufferDeviceAddress := ADeviceApiVersion >= VK_API_VERSION_1_2;
+  FRTShaderGroupHandleSize := 32;
+  FRTShaderGroupHandleAlignment := 32;
+  FRTShaderGroupBaseAlignment := 64;
   FCapabilities.SupportsExtendedDynamicState := FSupportsExtendedDynamicState;
   FCapabilities.SupportsSynchronization2 := FSupportsSynchronization2;
   FCapabilities.SupportsTimelineSemaphores := FSupportsTimelineSemaphores;
+  FCapabilities.SupportsBufferDeviceAddress := FSupportsBufferDeviceAddress;
   if ASupportsBindlessTextures then
     FMaxBindlessTextures := Max(Cardinal(1), AMaxBindlessTextures)
   else
     FMaxBindlessTextures := 0;
   FCapabilities.SupportsBindlessTextures := FSupportsBindlessTextures;
   FCapabilities.MaxBindlessTextures := FMaxBindlessTextures;
-  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
+  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice, 0, FSupportsBufferDeviceAddress);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   FPersistentDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
-    FDevice, 2048, True, 8192, FSupportsBindlessUpdateAfterBind);
+    FDevice, 2048, True, 8192, FSupportsBindlessUpdateAfterBind, FSupportsAccelerationStructure);
   if FSupportsBindlessTextures and (FMaxBindlessTextures > 0) then
     FBindlessTextureManager := TCastleVulkanBindlessTextureManager.Create(
       Self, FMaxBindlessTextures, FSupportsBindlessUpdateAfterBind);
   FTimestampProfiler := TCastleVulkanTimestampProfiler.Create(Self);
   FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
   for I := 0 to MaxFramesInFlight - 1 do
-    FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
+    FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
 end;
 
 procedure TVulkanRHIDevice.ClearPipelineLibraries;
@@ -25050,8 +26705,15 @@ var
   TimelineFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures;
   HostQueryResetFeatures: VkPhysicalDeviceHostQueryResetFeatures;
   Vulkan12Features: VkPhysicalDeviceVulkan12Features;
+  BdaFeatures: VkPhysicalDeviceBufferDeviceAddressFeatures;
+  AccelStructFeatures: VkPhysicalDeviceAccelerationStructureFeaturesKHR;
+  RayQueryFeatures: VkPhysicalDeviceRayQueryFeaturesKHR;
+  RayTracingPipeFeatures: VkPhysicalDeviceRayTracingPipelineFeaturesKHR;
+  RayTracingPipeProps: VkPhysicalDeviceRayTracingPipelinePropertiesKHR;
+  MeshShaderFeatures: VkPhysicalDeviceMeshShaderFeaturesEXT;
   ShaderDrawParamsFeatures: VkPhysicalDeviceShaderDrawParametersFeatures;
   Props2: VkPhysicalDeviceProperties2;
+  HasSpirv14: Boolean;
   GplProps: VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
   DescIdxProps: VkPhysicalDeviceDescriptorIndexingProperties;
   HasGplFeature, HasExtDynFeature, HasSync2Feature, HasTimelineFeature: Boolean;
@@ -25274,8 +26936,85 @@ begin
       Features2.pNext := @Vulkan12Features;
       vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
       FSupportsDrawIndirectCountFeature := Vulkan12Features.drawIndirectCount = VK_TRUE;
+      FSupportsBufferDeviceAddress := Vulkan12Features.bufferDeviceAddress = VK_TRUE;
     end else
+    begin
       FSupportsDrawIndirectCountFeature := IsDeviceExtensionSupported(VK_KHR_draw_indirect_count);
+      if IsDeviceExtensionSupported(VK_KHR_buffer_device_address) then
+      begin
+        FillChar(BdaFeatures, SizeOf(BdaFeatures), 0);
+        BdaFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        FillChar(Features2, SizeOf(Features2), 0);
+        Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        Features2.pNext := @BdaFeatures;
+        vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+        FSupportsBufferDeviceAddress := BdaFeatures.bufferDeviceAddress = VK_TRUE;
+      end;
+    end;
+
+    HasSpirv14 := (FDeviceApiVersion >= VK_API_VERSION_1_2) or
+      (IsDeviceExtensionSupported(VK_KHR_spirv_1_4) and IsDeviceExtensionSupported(VK_KHR_shader_float_controls));
+
+    if FSupportsBufferDeviceAddress and
+       IsDeviceExtensionSupported(VK_KHR_deferred_host_operations) and
+       IsDeviceExtensionSupported(VK_KHR_acceleration_structure) then
+    begin
+      FillChar(AccelStructFeatures, SizeOf(AccelStructFeatures), 0);
+      AccelStructFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @AccelStructFeatures;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      FSupportsAccelerationStructure := AccelStructFeatures.accelerationStructure = VK_TRUE;
+    end;
+
+    if FSupportsAccelerationStructure and HasSpirv14 and
+       IsDeviceExtensionSupported(VK_KHR_ray_query) then
+    begin
+      FillChar(RayQueryFeatures, SizeOf(RayQueryFeatures), 0);
+      RayQueryFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @RayQueryFeatures;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      FSupportsRayQuery := RayQueryFeatures.rayQuery = VK_TRUE;
+    end;
+
+    if FSupportsAccelerationStructure and HasSpirv14 and
+       IsDeviceExtensionSupported(VK_KHR_ray_tracing_pipeline) then
+    begin
+      FillChar(RayTracingPipeFeatures, SizeOf(RayTracingPipeFeatures), 0);
+      RayTracingPipeFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @RayTracingPipeFeatures;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      FSupportsRayTracingPipeline := RayTracingPipeFeatures.rayTracingPipeline = VK_TRUE;
+      if FSupportsRayTracingPipeline and Assigned(vkGetPhysicalDeviceProperties2) then
+      begin
+        FillChar(RayTracingPipeProps, SizeOf(RayTracingPipeProps), 0);
+        RayTracingPipeProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+        FillChar(Props2, SizeOf(Props2), 0);
+        Props2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        Props2.pNext := @RayTracingPipeProps;
+        vkGetPhysicalDeviceProperties2(FPhysicalDevice, @Props2);
+        FRTShaderGroupHandleSize := RayTracingPipeProps.shaderGroupHandleSize;
+        FRTShaderGroupHandleAlignment := RayTracingPipeProps.shaderGroupHandleAlignment;
+        FRTShaderGroupBaseAlignment := RayTracingPipeProps.shaderGroupBaseAlignment;
+      end;
+    end;
+
+    if HasSpirv14 and IsDeviceExtensionSupported(VK_EXT_mesh_shader) then
+    begin
+      FillChar(MeshShaderFeatures, SizeOf(MeshShaderFeatures), 0);
+      MeshShaderFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @MeshShaderFeatures;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      FSupportsMeshShaders := MeshShaderFeatures.meshShader = VK_TRUE;
+      FSupportsTaskShaders := MeshShaderFeatures.taskShader = VK_TRUE;
+    end;
 
     if FDeviceApiVersion >= VK_API_VERSION_1_1 then
     begin
@@ -25344,6 +27083,11 @@ begin
   FCapabilities.SupportsExtendedDynamicState := FSupportsExtendedDynamicState;
   FCapabilities.SupportsSynchronization2 := FSupportsSynchronization2;
   FCapabilities.SupportsTimelineSemaphores := FSupportsTimelineSemaphores;
+  FCapabilities.SupportsBufferDeviceAddress := FSupportsBufferDeviceAddress;
+  FCapabilities.SupportsAccelerationStructure := FSupportsAccelerationStructure;
+  FCapabilities.SupportsRayQuery := FSupportsRayQuery;
+  FCapabilities.SupportsRayTracingPipeline := FSupportsRayTracingPipeline;
+  FCapabilities.SupportsMeshShaders := FSupportsMeshShaders;
 end;
 
 function TVulkanRHIDevice.IsDeviceExtensionSupported(const AExtensionName: AnsiString): Boolean;
@@ -25389,10 +27133,15 @@ var
   TimelineFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures;
   HostQueryResetFeatures: VkPhysicalDeviceHostQueryResetFeatures;
   Vulkan12Features: VkPhysicalDeviceVulkan12Features;
+  BdaFeatures: VkPhysicalDeviceBufferDeviceAddressFeatures;
+  AccelStructFeatures: VkPhysicalDeviceAccelerationStructureFeaturesKHR;
+  RayQueryFeatures: VkPhysicalDeviceRayQueryFeaturesKHR;
+  RayTracingPipeFeatures: VkPhysicalDeviceRayTracingPipelineFeaturesKHR;
+  MeshShaderFeatures: VkPhysicalDeviceMeshShaderFeaturesEXT;
   ShaderDrawParamsFeatures: VkPhysicalDeviceShaderDrawParametersFeatures;
   PhysFeatures, EnabledFeatures: VkPhysicalDeviceFeatures;
   ReqDynRenderExts, ReqGplExts, ReqBindlessExts, ReqExtDynSync2Exts: TAnsiStringArray;
-  DeviceExts: array[0..27] of PAnsiChar;
+  DeviceExts: array[0..39] of PAnsiChar;
   CreateInfo: VkDeviceCreateInfo;
   CacheInfo: VkPipelineCacheCreateInfo;
   NextChainHead: Pointer;
@@ -25609,6 +27358,49 @@ begin
     Inc(ExtCount);
   end;
 
+  if FSupportsBufferDeviceAddress and (FDeviceApiVersion < VK_API_VERSION_1_2) and
+     IsDeviceExtensionSupported(VK_KHR_buffer_device_address) then
+  begin
+    DeviceExts[ExtCount] := VK_KHR_buffer_device_address;
+    Inc(ExtCount);
+  end;
+  if (FSupportsRayQuery or FSupportsRayTracingPipeline or FSupportsMeshShaders) and
+     (FDeviceApiVersion < VK_API_VERSION_1_2) then
+  begin
+    if IsDeviceExtensionSupported(VK_KHR_shader_float_controls) then
+    begin
+      DeviceExts[ExtCount] := VK_KHR_shader_float_controls;
+      Inc(ExtCount);
+    end;
+    if IsDeviceExtensionSupported(VK_KHR_spirv_1_4) then
+    begin
+      DeviceExts[ExtCount] := VK_KHR_spirv_1_4;
+      Inc(ExtCount);
+    end;
+  end;
+  if FSupportsAccelerationStructure then
+  begin
+    DeviceExts[ExtCount] := VK_KHR_deferred_host_operations;
+    Inc(ExtCount);
+    DeviceExts[ExtCount] := VK_KHR_acceleration_structure;
+    Inc(ExtCount);
+  end;
+  if FSupportsRayQuery then
+  begin
+    DeviceExts[ExtCount] := VK_KHR_ray_query;
+    Inc(ExtCount);
+  end;
+  if FSupportsRayTracingPipeline then
+  begin
+    DeviceExts[ExtCount] := VK_KHR_ray_tracing_pipeline;
+    Inc(ExtCount);
+  end;
+  if FSupportsMeshShaders then
+  begin
+    DeviceExts[ExtCount] := VK_EXT_mesh_shader;
+    Inc(ExtCount);
+  end;
+
   NextChainHead := nil;
   if FDeviceApiVersion >= VK_API_VERSION_1_2 then
   begin
@@ -25623,6 +27415,8 @@ begin
       Vulkan12Features.hostQueryReset := VK_TRUE;
     if FSupportsTimelineSemaphores then
       Vulkan12Features.timelineSemaphore := VK_TRUE;
+    if FSupportsBufferDeviceAddress then
+      Vulkan12Features.bufferDeviceAddress := VK_TRUE;
     if FSupportsBindlessTextures then
     begin
       Vulkan12Features.descriptorIndexing := VK_TRUE;
@@ -25652,6 +27446,50 @@ begin
       DescIdxFeatures.pNext := NextChainHead;
       NextChainHead := @DescIdxFeatures;
     end;
+    if FSupportsBufferDeviceAddress then
+    begin
+      FillChar(BdaFeatures, SizeOf(BdaFeatures), 0);
+      BdaFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+      BdaFeatures.bufferDeviceAddress := VK_TRUE;
+      BdaFeatures.pNext := NextChainHead;
+      NextChainHead := @BdaFeatures;
+    end;
+  end;
+  if FSupportsAccelerationStructure then
+  begin
+    FillChar(AccelStructFeatures, SizeOf(AccelStructFeatures), 0);
+    AccelStructFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+    AccelStructFeatures.accelerationStructure := VK_TRUE;
+    AccelStructFeatures.pNext := NextChainHead;
+    NextChainHead := @AccelStructFeatures;
+  end;
+  if FSupportsRayQuery then
+  begin
+    FillChar(RayQueryFeatures, SizeOf(RayQueryFeatures), 0);
+    RayQueryFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+    RayQueryFeatures.rayQuery := VK_TRUE;
+    RayQueryFeatures.pNext := NextChainHead;
+    NextChainHead := @RayQueryFeatures;
+  end;
+  if FSupportsRayTracingPipeline then
+  begin
+    FillChar(RayTracingPipeFeatures, SizeOf(RayTracingPipeFeatures), 0);
+    RayTracingPipeFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+    RayTracingPipeFeatures.rayTracingPipeline := VK_TRUE;
+    RayTracingPipeFeatures.pNext := NextChainHead;
+    NextChainHead := @RayTracingPipeFeatures;
+  end;
+  if FSupportsMeshShaders then
+  begin
+    FillChar(MeshShaderFeatures, SizeOf(MeshShaderFeatures), 0);
+    MeshShaderFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+    MeshShaderFeatures.meshShader := VK_TRUE;
+    if FSupportsTaskShaders then
+      MeshShaderFeatures.taskShader := VK_TRUE;
+    MeshShaderFeatures.multiviewMeshShader := VK_FALSE;
+    MeshShaderFeatures.primitiveFragmentShadingRateMeshShader := VK_FALSE;
+    MeshShaderFeatures.pNext := NextChainHead;
+    NextChainHead := @MeshShaderFeatures;
   end;
   if FSupportsShaderDrawParameters and (FDeviceApiVersion >= VK_API_VERSION_1_1) then
   begin
@@ -26806,7 +28644,7 @@ begin
     CheckVk(vkCreateFence(FDevice, @FenceInfo, nil, @FFrames[I].InFlightFence), 'vkCreateFence');
     FFrames[I].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
     if FFrames[I].TransientDescriptorAllocator = nil then
-      FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
+      FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
   end;
 end;
 
@@ -26814,7 +28652,7 @@ procedure TVulkanRHIDevice.CreateDescriptorPool;
 begin
   if FPersistentDescriptorAllocator = nil then
     FPersistentDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
-      FDevice, 2048, True, 8192, FSupportsBindlessUpdateAfterBind);
+      FDevice, 2048, True, 8192, FSupportsBindlessUpdateAfterBind, FSupportsAccelerationStructure);
 end;
 
 function TVulkanRHIDevice.BeginFrame: TRHICommandList;
@@ -26826,7 +28664,7 @@ begin
   if FFrames[FFrameIndex].CommandList = nil then
     FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
   if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
-    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
+    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
 
   Frame := FFrames[FFrameIndex];
 
@@ -27087,7 +28925,7 @@ begin
   if FFrames[FFrameIndex].CommandList = nil then
     FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
   if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
-    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
+    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
 
   Frame := FFrames[FFrameIndex];
 
@@ -27318,7 +29156,7 @@ begin
   if FFrames[FFrameIndex].CommandList = nil then
     FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
   if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
-    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
+    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
 
   Frame := FFrames[FFrameIndex];
 

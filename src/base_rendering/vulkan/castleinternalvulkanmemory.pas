@@ -114,7 +114,8 @@ type
     constructor Create(const ADevice: VkDevice; const AMemoryTypeIndex: Cardinal;
       const ABlockSize: VkDeviceSize; const AHostVisible: Boolean;
       const AIsLinearPool: Boolean = True;
-      const AIsHostCoherent: Boolean = True);
+      const AIsHostCoherent: Boolean = True;
+      const AAllocateDeviceAddress: Boolean = False);
     destructor Destroy; override;
 
     { Attempts to sub-allocate Size bytes aligned to Alignment (and respecting
@@ -198,6 +199,7 @@ type
     FTotalVkAllocationCount: Cardinal;
     FSubAllocationCount: Cardinal;
     FSupportsMemoryBudgetExt: Boolean;
+    FSupportsBufferDeviceAddress: Boolean;
 
     function SelectMemoryType(const ATypeBits: UInt32;
       const AUsage: TRHIMemoryUsage; out AIsHostVisible, AIsHostCoherent: Boolean): Cardinal;
@@ -209,7 +211,8 @@ type
       const ADedicatedBuffer: VkBuffer; const ADedicatedImage: VkImage): TVulkanMemoryAllocation;
   public
     constructor Create(const APhysicalDevice: VkPhysicalDevice; const ADevice: VkDevice;
-      const AMaxMemoryAllocationCount: Cardinal = 4096);
+      const AMaxMemoryAllocationCount: Cardinal = 4096;
+      const ASupportsBufferDeviceAddress: Boolean = False);
     destructor Destroy; override;
 
     { Sub-allocates memory matching VkMemoryRequirements and TRHIMemoryUsage. }
@@ -275,6 +278,7 @@ type
     property TotalVkAllocationCount: Cardinal read FTotalVkAllocationCount;
     property SubAllocationCount: Cardinal read FSubAllocationCount;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt write FSupportsMemoryBudgetExt;
+    property SupportsBufferDeviceAddress: Boolean read FSupportsBufferDeviceAddress write FSupportsBufferDeviceAddress;
   end;
 
 { Rounds AOffset down and ASize up to multiples of ANonCoherentAtomSize within
@@ -347,9 +351,10 @@ end;
 constructor TCastleVulkanMemoryBlock.Create(const ADevice: VkDevice;
   const AMemoryTypeIndex: Cardinal; const ABlockSize: VkDeviceSize;
   const AHostVisible: Boolean; const AIsLinearPool: Boolean;
-  const AIsHostCoherent: Boolean);
+  const AIsHostCoherent: Boolean; const AAllocateDeviceAddress: Boolean);
 var
   AllocInfo: VkMemoryAllocateInfo;
+  AllocFlagsInfo: VkMemoryAllocateFlagsInfo;
   Res: VkResult;
 begin
   inherited Create;
@@ -369,6 +374,13 @@ begin
     AllocInfo.sType := VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize := ABlockSize;
     AllocInfo.memoryTypeIndex := AMemoryTypeIndex;
+    if AAllocateDeviceAddress and AIsLinearPool then
+    begin
+      FillChar(AllocFlagsInfo, SizeOf(AllocFlagsInfo), 0);
+      AllocFlagsInfo.sType := VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+      AllocFlagsInfo.flags := VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+      AllocInfo.pNext := @AllocFlagsInfo;
+    end;
 
     Res := vkAllocateMemory(FDevice, @AllocInfo, nil, @FDeviceMemory);
     if Res <> VK_SUCCESS then
@@ -695,7 +707,8 @@ end;
 
 constructor TCastleVulkanMemoryAllocator.Create(
   const APhysicalDevice: VkPhysicalDevice; const ADevice: VkDevice;
-  const AMaxMemoryAllocationCount: Cardinal);
+  const AMaxMemoryAllocationCount: Cardinal;
+  const ASupportsBufferDeviceAddress: Boolean);
 var
   DevProps: VkPhysicalDeviceProperties;
   I: Integer;
@@ -704,6 +717,7 @@ begin
   inherited Create;
   FPhysicalDevice := APhysicalDevice;
   FDevice := ADevice;
+  FSupportsBufferDeviceAddress := ASupportsBufferDeviceAddress;
   FLock := TCriticalSection.Create;
   FMaxMemoryAllocationCount := AMaxMemoryAllocationCount;
   if FMaxMemoryAllocationCount = 0 then
@@ -884,6 +898,7 @@ var
   Block, NewBlock: TCastleVulkanMemoryBlock;
   AllocInfo: VkMemoryAllocateInfo;
   DedicatedAllocInfo: VkMemoryDedicatedAllocateInfo;
+  AllocFlagsInfo: VkMemoryAllocateFlagsInfo;
   I: Integer;
 begin
   FillChar(Result, SizeOf(Result), 0);
@@ -905,12 +920,21 @@ begin
         AllocInfo.allocationSize := AMemReq.size;
         AllocInfo.memoryTypeIndex := MemTypeIdx;
 
+        if FSupportsBufferDeviceAddress and AIsLinearResource then
+        begin
+          FillChar(AllocFlagsInfo, SizeOf(AllocFlagsInfo), 0);
+          AllocFlagsInfo.sType := VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+          AllocFlagsInfo.flags := VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+          AllocInfo.pNext := @AllocFlagsInfo;
+        end;
+
         if (ADedicatedBuffer <> VK_NULL_HANDLE) or (ADedicatedImage <> VK_NULL_HANDLE) then
         begin
           FillChar(DedicatedAllocInfo, SizeOf(DedicatedAllocInfo), 0);
           DedicatedAllocInfo.sType := VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
           DedicatedAllocInfo.buffer := ADedicatedBuffer;
           DedicatedAllocInfo.image := ADedicatedImage;
+          DedicatedAllocInfo.pNext := AllocInfo.pNext;
           AllocInfo.pNext := @DedicatedAllocInfo;
         end;
 
@@ -971,7 +995,8 @@ begin
     begin
       try
         NewBlock := TCastleVulkanMemoryBlock.Create(
-          FDevice, MemTypeIdx, NewBlockSize, IsHostVisible, AIsLinearResource, IsHostCoherent);
+          FDevice, MemTypeIdx, NewBlockSize, IsHostVisible, AIsLinearResource,
+          IsHostCoherent, FSupportsBufferDeviceAddress);
       except
         on E: ERHIOutOfMemory do
         begin

@@ -408,6 +408,8 @@ begin
                         DummyRaw, DummyArr,
                         CmdDef.Params[MCount].PointerDepth,
                         CmdDef.Params[MCount].IsConst);
+                      if DummyArr <> '' then
+                        Inc(CmdDef.Params[MCount].PointerDepth);
                       Inc(MCount);
                     end;
                     MemberNode := MemberNode.NextSibling;
@@ -498,6 +500,7 @@ begin
     if CType = 'size_t' then Exit('PPtrUInt');
     if CType = 'VkAllocationCallbacks' then Exit('PVkAllocationCallbacks');
     if (CType = 'VkPipelineTessellationStateCreateInfo') or
+       (CType = 'VkRayTracingPipelineInterfaceCreateInfoKHR') or
        (CType = 'VkCopyDescriptorSet') or
        (CType = 'VkMemoryBarrier') or
        (CType = 'VkBufferView') then
@@ -507,6 +510,7 @@ begin
     Exit('Pointer');
   end;
 
+  if CType = 'PFN_vkDebugUtilsMessengerCallbackEXT' then Exit('PFN_vkDebugUtilsMessengerCallbackEXT');
   if CType = 'PFN_vkVoidFunction' then Exit('Pointer');
   if CType = 'uint32_t' then Exit('Cardinal');
   if CType = 'int32_t' then Exit('Integer');
@@ -525,6 +529,7 @@ begin
      (CType = 'VkFlags') or
      (CType = 'VkFlags64') or
      (CType = 'VkDeviceSize') or
+     (CType = 'VkDeviceAddress') or
      (CType = 'VkBool32') or
      (CType = 'VkSampleCountFlags') or
      (CType = 'VkFormat') or
@@ -563,6 +568,11 @@ begin
      (CType = 'VkQueryControlFlags') or
      (CType = 'VkQueryResultFlags') or
      (CType = 'VkQueryPipelineStatisticFlags') or
+     (CType = 'VkDebugUtilsMessageSeverityFlagsEXT') or
+     (CType = 'VkDebugUtilsMessageTypeFlagsEXT') or
+     (CType = 'VkDebugUtilsMessengerCreateFlagsEXT') or
+     (CType = 'VkDebugUtilsMessengerCallbackDataFlagsEXT') or
+     (CType = 'VkObjectType') or
      (CType = 'VkInstance') or
      (CType = 'VkPhysicalDevice') or
      (CType = 'VkDevice') or
@@ -588,7 +598,9 @@ begin
      (CType = 'VkSurfaceKHR') or
      (CType = 'VkSwapchainKHR') or
      (CType = 'VkCommandPool') or
-     (CType = 'VkDebugUtilsMessengerEXT') then
+     (CType = 'VkDebugUtilsMessengerEXT') or
+     (CType = 'VkDeferredOperationKHR') or
+     (CType = 'VkAccelerationStructureKHR') then
     Exit(CType);
 
   if Structs.ContainsKey(CType) then
@@ -626,6 +638,9 @@ begin
   // Keep sparseProperties compatible with flat array[0..4] of Cardinal
   if (StructName = 'VkPhysicalDeviceProperties') and (M.Name = 'sparseProperties') then
     Exit('    sparseProperties: array[0..4] of Cardinal;');
+  // Preserve 3x4 row-major transform matrix layout for VK_KHR_acceleration_structure
+  if (StructName = 'VkTransformMatrixKHR') and (M.Name = 'matrix') then
+    Exit('    matrix: array[0..2, 0..3] of Single;');
 
   MappedType := MapBaseCTypeToPascal(M.TypeName, M.PointerDepth);
   if M.ArrayLengthExpr <> '' then
@@ -646,6 +661,30 @@ var
   I: Integer;
   MemberLine: String;
 begin
+  if StructName = 'VkAccelerationStructureInstanceKHR' then
+  begin
+    OutLines.Add('  VkAccelerationStructureInstanceKHR = record');
+    OutLines.Add('    transform: VkTransformMatrixKHR;');
+    OutLines.Add('    instanceCustomIndexAndMask: Cardinal;');
+    OutLines.Add('    instanceShaderBindingTableRecordOffsetAndFlags: Cardinal;');
+    OutLines.Add('    accelerationStructureReference: UInt64;');
+    OutLines.Add('  end;');
+    if EmitPointer then
+      OutLines.Add('  PVkAccelerationStructureInstanceKHR = ^VkAccelerationStructureInstanceKHR;');
+    OutLines.Add('');
+    Exit;
+  end;
+
+  if StructName = 'VkDebugUtilsMessengerCreateInfoEXT' then
+  begin
+    OutLines.Add('  PFN_vkDebugUtilsMessengerCallbackEXT = function(');
+    OutLines.Add('    messageSeverity: VkDebugUtilsMessageSeverityFlagsEXT;');
+    OutLines.Add('    messageTypes: VkDebugUtilsMessageTypeFlagsEXT;');
+    OutLines.Add('    const pCallbackData: PVkDebugUtilsMessengerCallbackDataEXT;');
+    OutLines.Add('    pUserData: Pointer): VkBool32; {$ifdef MSWINDOWS}stdcall{$else}cdecl{$endif};');
+    OutLines.Add('');
+  end;
+
   if not Structs.TryGetValue(StructName, Def) then
     raise Exception.CreateFmt('Struct "%s" not found in vk.xml', [StructName]);
 
@@ -1239,6 +1278,100 @@ const
     'VK_OBJECT_TYPE_DEBUG_UTILS_MESSENGER_EXT'
   );
 
+  OrderedEnums4: array[0..85] of String = (
+    // Constant Blend Factors, Border Colors & Host Query Reset
+    'VK_BLEND_FACTOR_CONSTANT_COLOR',
+    'VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR',
+    'VK_BLEND_FACTOR_CONSTANT_ALPHA',
+    'VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA',
+    'VK_BLEND_FACTOR_SRC_ALPHA_SATURATE',
+    'VK_BORDER_COLOR_INT_TRANSPARENT_BLACK',
+    'VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK',
+    'VK_BORDER_COLOR_INT_OPAQUE_BLACK',
+    'VK_BORDER_COLOR_INT_OPAQUE_WHITE',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES',
+    // Phase 117: Buffer Device Address (VK_KHR_buffer_device_address / Core 1.2)
+    'VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT',
+    'VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT',
+    'VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO',
+    'VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES',
+    // Phase 117: Acceleration Structures (VK_KHR_acceleration_structure)
+    'VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR',
+    'VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR',
+    'VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR',
+    'VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR',
+    'VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR',
+    'VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR',
+    'VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR',
+    'VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR',
+    'VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR',
+    'VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR',
+    'VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR',
+    'VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR',
+    'VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR',
+    'VK_ACCELERATION_STRUCTURE_TYPE_GENERIC_KHR',
+    'VK_GEOMETRY_TYPE_TRIANGLES_KHR',
+    'VK_GEOMETRY_TYPE_AABBS_KHR',
+    'VK_GEOMETRY_TYPE_INSTANCES_KHR',
+    'VK_GEOMETRY_OPAQUE_BIT_KHR',
+    'VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR',
+    'VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR',
+    'VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR',
+    'VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR',
+    'VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR',
+    'VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR',
+    'VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR',
+    'VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR',
+    'VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR',
+    'VK_ACCELERATION_STRUCTURE_BUILD_TYPE_HOST_KHR',
+    'VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR',
+    'VK_ACCELERATION_STRUCTURE_BUILD_TYPE_HOST_OR_DEVICE_KHR',
+    'VK_COPY_ACCELERATION_STRUCTURE_MODE_CLONE_KHR',
+    'VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR',
+    'VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR',
+    'VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR',
+    'VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR',
+    'VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR',
+    'VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR',
+    'VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR',
+    'VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR',
+    'VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR',
+    'VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR',
+    'VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR',
+    // Phase 117: Ray Query & Ray Tracing Pipeline (VK_KHR_ray_query, VK_KHR_ray_tracing_pipeline)
+    'VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR',
+    'VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR',
+    'VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR',
+    'VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR',
+    'VK_SHADER_STAGE_RAYGEN_BIT_KHR',
+    'VK_SHADER_STAGE_ANY_HIT_BIT_KHR',
+    'VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR',
+    'VK_SHADER_STAGE_MISS_BIT_KHR',
+    'VK_SHADER_STAGE_INTERSECTION_BIT_KHR',
+    'VK_SHADER_STAGE_CALLABLE_BIT_KHR',
+    'VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR',
+    'VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR',
+    'VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR',
+    'VK_SHADER_UNUSED_KHR',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR',
+    'VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR',
+    'VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR',
+    // Phase 117: Mesh Shaders (VK_EXT_mesh_shader)
+    'VK_SHADER_STAGE_TASK_BIT_EXT',
+    'VK_SHADER_STAGE_MESH_BIT_EXT',
+    'VK_PIPELINE_STAGE_TASK_SHADER_BIT_EXT',
+    'VK_PIPELINE_STAGE_MESH_SHADER_BIT_EXT',
+    'VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT',
+    'VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT'
+  );
+
   OrderedStructs: array[0..77] of String = (
     'VkExtent2D',
     'VkExtent3D',
@@ -1372,6 +1505,42 @@ const
     'VkPhysicalDeviceShaderDrawParametersFeatures',
     'VkPhysicalDeviceVulkan12Features',
     'VkMemoryBarrier'
+  );
+
+  OrderedStructs3: array[0..32] of String = (
+    'VkClearAttachment',
+    'VkClearRect',
+    'VkPhysicalDeviceHostQueryResetFeatures',
+    'VkMemoryAllocateFlagsInfo',
+    'VkBufferDeviceAddressInfo',
+    'VkPhysicalDeviceBufferDeviceAddressFeatures',
+    'VkDeviceOrHostAddressKHR',
+    'VkDeviceOrHostAddressConstKHR',
+    'VkTransformMatrixKHR',
+    'VkAccelerationStructureInstanceKHR',
+    'VkAccelerationStructureBuildRangeInfoKHR',
+    'VkAccelerationStructureGeometryTrianglesDataKHR',
+    'VkAccelerationStructureGeometryAabbsDataKHR',
+    'VkAccelerationStructureGeometryInstancesDataKHR',
+    'VkAccelerationStructureGeometryDataKHR',
+    'VkAccelerationStructureGeometryKHR',
+    'VkAccelerationStructureBuildGeometryInfoKHR',
+    'VkAccelerationStructureBuildSizesInfoKHR',
+    'VkAccelerationStructureCreateInfoKHR',
+    'VkAccelerationStructureDeviceAddressInfoKHR',
+    'VkCopyAccelerationStructureInfoKHR',
+    'VkWriteDescriptorSetAccelerationStructureKHR',
+    'VkPhysicalDeviceAccelerationStructureFeaturesKHR',
+    'VkPhysicalDeviceAccelerationStructurePropertiesKHR',
+    'VkPhysicalDeviceRayQueryFeaturesKHR',
+    'VkPhysicalDeviceRayTracingPipelineFeaturesKHR',
+    'VkPhysicalDeviceRayTracingPipelinePropertiesKHR',
+    'VkRayTracingShaderGroupCreateInfoKHR',
+    'VkRayTracingPipelineCreateInfoKHR',
+    'VkStridedDeviceAddressRegionKHR',
+    'VkPhysicalDeviceMeshShaderFeaturesEXT',
+    'VkPhysicalDeviceMeshShaderPropertiesEXT',
+    'VkDrawMeshTasksIndirectCommandEXT'
   );
 
   OrderedCommands: array[0..94] of String = (
@@ -1522,7 +1691,28 @@ const
     'vkCmdWriteTimestamp'
   );
 
-  InstanceCommands: array[0..20] of String = (
+  OrderedCommands3: array[0..17] of String = (
+    'vkCmdSetBlendConstants',
+    'vkResetQueryPool',
+    'vkCmdClearAttachments',
+    'vkGetBufferDeviceAddress',
+    'vkCreateAccelerationStructureKHR',
+    'vkDestroyAccelerationStructureKHR',
+    'vkCmdBuildAccelerationStructuresKHR',
+    'vkCmdCopyAccelerationStructureKHR',
+    'vkCmdWriteAccelerationStructuresPropertiesKHR',
+    'vkGetAccelerationStructureBuildSizesKHR',
+    'vkGetAccelerationStructureDeviceAddressKHR',
+    'vkCreateRayTracingPipelinesKHR',
+    'vkGetRayTracingShaderGroupHandlesKHR',
+    'vkCmdTraceRaysKHR',
+    'vkCmdTraceRaysIndirectKHR',
+    'vkCmdDrawMeshTasksEXT',
+    'vkCmdDrawMeshTasksIndirectEXT',
+    'vkCmdDrawMeshTasksIndirectCountEXT'
+  );
+
+  InstanceCommands: array[0..28] of String = (
     'vkDestroyInstance',
     'vkEnumeratePhysicalDevices',
     'vkGetPhysicalDeviceFeatures',
@@ -1543,7 +1733,15 @@ const
     'vkGetPhysicalDeviceSurfacePresentModesKHR',
     'vkCreateDebugUtilsMessengerEXT',
     'vkDestroyDebugUtilsMessengerEXT',
-    'vkSubmitDebugUtilsMessageEXT'
+    'vkSubmitDebugUtilsMessageEXT',
+    'vkSetDebugUtilsObjectNameEXT',
+    'vkCmdBeginDebugUtilsLabelEXT',
+    'vkCmdEndDebugUtilsLabelEXT',
+    'vkCmdInsertDebugUtilsLabelEXT',
+    'vkQueueBeginDebugUtilsLabelEXT',
+    'vkQueueEndDebugUtilsLabelEXT',
+    'vkQueueInsertDebugUtilsLabelEXT',
+    'vkGetDeviceProcAddr'
   );
 
 var
@@ -1604,16 +1802,24 @@ begin
       EmitEnumConst(L, OrderedEnums2[I]);
     for I := Low(OrderedEnums3) to High(OrderedEnums3) do
       EmitEnumConst(L, OrderedEnums3[I]);
+    for I := Low(OrderedEnums4) to High(OrderedEnums4) do
+      EmitEnumConst(L, OrderedEnums4[I]);
     L.Add('');
     L.Add('  { Extension and Layer Names }');
     L.Add('  VK_EXT_debug_utils = ''VK_EXT_debug_utils'';');
+    L.Add('  VK_EXT_DEBUG_UTILS_EXTENSION_NAME = ''VK_EXT_debug_utils'';');
     L.Add('  VK_EXT_descriptor_indexing = ''VK_EXT_descriptor_indexing'';');
     L.Add('  VK_EXT_extended_dynamic_state = ''VK_EXT_extended_dynamic_state'';');
     L.Add('  VK_EXT_extended_dynamic_state2 = ''VK_EXT_extended_dynamic_state2'';');
     L.Add('  VK_EXT_extended_dynamic_state3 = ''VK_EXT_extended_dynamic_state3'';');
     L.Add('  VK_EXT_graphics_pipeline_library = ''VK_EXT_graphics_pipeline_library'';');
+    L.Add('  VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME = ''VK_EXT_host_query_reset'';');
     L.Add('  VK_EXT_memory_budget = ''VK_EXT_memory_budget'';');
+    L.Add('  VK_EXT_mesh_shader = ''VK_EXT_mesh_shader'';');
+    L.Add('  VK_KHR_acceleration_structure = ''VK_KHR_acceleration_structure'';');
+    L.Add('  VK_KHR_buffer_device_address = ''VK_KHR_buffer_device_address'';');
     L.Add('  VK_KHR_create_renderpass2 = ''VK_KHR_create_renderpass2'';');
+    L.Add('  VK_KHR_deferred_host_operations = ''VK_KHR_deferred_host_operations'';');
     L.Add('  VK_KHR_depth_stencil_resolve = ''VK_KHR_depth_stencil_resolve'';');
     L.Add('  VK_KHR_draw_indirect_count = ''VK_KHR_draw_indirect_count'';');
     L.Add('  VK_KHR_dynamic_rendering = ''VK_KHR_dynamic_rendering'';');
@@ -1623,7 +1829,11 @@ begin
     L.Add('  VK_KHR_maintenance3 = ''VK_KHR_maintenance3'';');
     L.Add('  VK_KHR_multiview = ''VK_KHR_multiview'';');
     L.Add('  VK_KHR_pipeline_library = ''VK_KHR_pipeline_library'';');
+    L.Add('  VK_KHR_ray_query = ''VK_KHR_ray_query'';');
+    L.Add('  VK_KHR_ray_tracing_pipeline = ''VK_KHR_ray_tracing_pipeline'';');
     L.Add('  VK_KHR_shader_draw_parameters = ''VK_KHR_shader_draw_parameters'';');
+    L.Add('  VK_KHR_shader_float_controls = ''VK_KHR_shader_float_controls'';');
+    L.Add('  VK_KHR_spirv_1_4 = ''VK_KHR_spirv_1_4'';');
     L.Add('  VK_KHR_swapchain = ''VK_KHR_swapchain'';');
     L.Add('  VK_KHR_synchronization2 = ''VK_KHR_synchronization2'';');
     L.Add('  VK_KHR_timeline_semaphore = ''VK_KHR_timeline_semaphore'';');
@@ -1636,6 +1846,7 @@ begin
     L.Add('  VkFlags = Cardinal;');
     L.Add('  VkFlags64 = UInt64;');
     L.Add('  VkDeviceSize = UInt64;');
+    L.Add('  VkDeviceAddress = UInt64;');
     L.Add('  VkBool32 = Cardinal;');
     L.Add('  VkSampleCountFlags = VkFlags;');
     L.Add('  VkFormat = Integer;');
@@ -1726,6 +1937,8 @@ begin
     L.Add('  VkSwapchainKHR = VkNonDispatchableHandle;');
     L.Add('  VkCommandPool = VkNonDispatchableHandle;');
     L.Add('  VkDebugUtilsMessengerEXT = VkNonDispatchableHandle;');
+    L.Add('  VkDeferredOperationKHR = VkNonDispatchableHandle;');
+    L.Add('  VkAccelerationStructureKHR = VkNonDispatchableHandle;');
     L.Add('');
     L.Add('  { Pointers to handles }');
     L.Add('  PVkInstance = ^VkInstance;');
@@ -1754,6 +1967,8 @@ begin
     L.Add('  PVkSwapchainKHR = ^VkSwapchainKHR;');
     L.Add('  PVkCommandPool = ^VkCommandPool;');
     L.Add('  PVkDebugUtilsMessengerEXT = ^VkDebugUtilsMessengerEXT;');
+    L.Add('  PVkDeferredOperationKHR = ^VkDeferredOperationKHR;');
+    L.Add('  PVkAccelerationStructureKHR = ^VkAccelerationStructureKHR;');
     L.Add('');
     L.Add('  PVkAllocationCallbacks = Pointer;');
     L.Add('');
@@ -1762,6 +1977,8 @@ begin
       EmitStructFromXml(L, OrderedStructs[I], True);
     for I := Low(OrderedStructs2) to High(OrderedStructs2) do
       EmitStructFromXml(L, OrderedStructs2[I], True);
+    for I := Low(OrderedStructs3) to High(OrderedStructs3) do
+      EmitStructFromXml(L, OrderedStructs3[I], True);
 
     L.Add('  { KHR Type Aliases }');
     L.Add('  VkRenderingAttachmentInfoKHR = VkRenderingAttachmentInfo;');
@@ -1790,6 +2007,8 @@ begin
       L.Add(FormatCommandProto(OrderedCommands[I]));
     for I := Low(OrderedCommands2) to High(OrderedCommands2) do
       L.Add(FormatCommandProto(OrderedCommands2[I]));
+    for I := Low(OrderedCommands3) to High(OrderedCommands3) do
+      L.Add(FormatCommandProto(OrderedCommands3[I]));
     L.Add('');
     L.Add('var');
     L.Add('  { Global Function Pointers }');
@@ -1797,6 +2016,8 @@ begin
       L.Add(Format('  %s: PFN_%s;', [OrderedCommands[I], OrderedCommands[I]]));
     for I := Low(OrderedCommands2) to High(OrderedCommands2) do
       L.Add(Format('  %s: PFN_%s;', [OrderedCommands2[I], OrderedCommands2[I]]));
+    for I := Low(OrderedCommands3) to High(OrderedCommands3) do
+      L.Add(Format('  %s: PFN_%s;', [OrderedCommands3[I], OrderedCommands3[I]]));
     L.Add('');
     L.Add('function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal; inline;');
     L.Add('function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal; inline;');
@@ -1809,15 +2030,20 @@ begin
     L.Add('procedure LoadVulkanInstance(const Instance: VkInstance);');
     L.Add('{ Populates device-level function pointers using vkGetDeviceProcAddr. }');
     L.Add('procedure LoadVulkanDevice(const Device: VkDevice);');
+    L.Add('{ Unloads instance- and device-scoped function pointers when Instance is destroyed. }');
+    L.Add('procedure UnloadVulkanInstance(const Instance: VkInstance);');
     L.Add('{ Unloads the Vulkan library. }');
     L.Add('procedure FreeVulkan;');
     L.Add('{ Returns True if Vulkan library is currently loaded. }');
     L.Add('function IsVulkanLoaded: Boolean;');
+    L.Add('{ Returns True if a live VkInstance dispatch table is currently loaded. }');
+    L.Add('function IsVulkanInstanceLoaded: Boolean;');
     L.Add('');
     L.Add('implementation');
     L.Add('');
     L.Add('var');
     L.Add('  VulkanLibrary: TDynLib = nil;');
+    L.Add('  LoadedVulkanInstance: VkInstance = nil;');
     L.Add('');
     L.Add('function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal;');
     L.Add('begin');
@@ -1842,6 +2068,11 @@ begin
     L.Add('function IsVulkanLoaded: Boolean;');
     L.Add('begin');
     L.Add('  Result := VulkanLibrary <> nil;');
+    L.Add('end;');
+    L.Add('');
+    L.Add('function IsVulkanInstanceLoaded: Boolean;');
+    L.Add('begin');
+    L.Add('  Result := LoadedVulkanInstance <> nil;');
     L.Add('end;');
     L.Add('');
     L.Add('function LoadVulkan: Boolean;');
@@ -1904,10 +2135,16 @@ begin
     L.Add('begin');
     L.Add('  if not Assigned(vkGetInstanceProcAddr) then Exit;');
     L.Add('');
+    L.Add('  LoadedVulkanInstance := Instance;');
     for I := Low(InstanceCommands) to High(InstanceCommands) do
     begin
       CmdName := InstanceCommands[I];
       L.Add(Format('  Pointer(%s) := vkGetInstanceProcAddr(Instance, ''%s'');', [CmdName, CmdName]));
+      if CmdName = 'vkGetDeviceProcAddr' then
+      begin
+        L.Add('  if (not Assigned(vkGetDeviceProcAddr)) and (VulkanLibrary <> nil) then');
+        L.Add('    Pointer(vkGetDeviceProcAddr) := VulkanLibrary.Symbol(''vkGetDeviceProcAddr'');');
+      end else
       if (CmdName = 'vkGetPhysicalDeviceFeatures2') or
          (CmdName = 'vkGetPhysicalDeviceProperties2') or
          (CmdName = 'vkGetPhysicalDeviceMemoryProperties2') then
@@ -1919,10 +2156,34 @@ begin
     L.Add('end;');
     L.Add('');
     L.Add('procedure LoadVulkanDevice(const Device: VkDevice);');
+    L.Add('');
+    L.Add('  function GetDevProc(const AName: PAnsiChar): Pointer;');
+    L.Add('  begin');
+    L.Add('    Result := nil;');
+    L.Add('    if (Device <> nil) and Assigned(vkGetDeviceProcAddr) then');
+    L.Add('      Result := vkGetDeviceProcAddr(Device, AName);');
+    L.Add('    if (Result = nil) and (LoadedVulkanInstance <> nil) and Assigned(vkGetInstanceProcAddr) then');
+    L.Add('      Result := vkGetInstanceProcAddr(LoadedVulkanInstance, AName);');
+    L.Add('    if (Result = nil) and Assigned(vkGetInstanceProcAddr) then');
+    L.Add('      Result := vkGetInstanceProcAddr(nil, AName);');
+    L.Add('  end;');
+    L.Add('');
+    L.Add('  function GetInstOrDevProc(const AName: PAnsiChar): Pointer;');
+    L.Add('  begin');
+    L.Add('    Result := nil;');
+    L.Add('    if (LoadedVulkanInstance <> nil) and Assigned(vkGetInstanceProcAddr) then');
+    L.Add('      Result := vkGetInstanceProcAddr(LoadedVulkanInstance, AName);');
+    L.Add('    if (Result = nil) and (Device <> nil) and Assigned(vkGetDeviceProcAddr) then');
+    L.Add('      Result := vkGetDeviceProcAddr(Device, AName);');
+    L.Add('    if (Result = nil) and Assigned(vkGetInstanceProcAddr) then');
+    L.Add('      Result := vkGetInstanceProcAddr(nil, AName);');
+    L.Add('  end;');
+    L.Add('');
     L.Add('begin');
     L.Add('  if not Assigned(vkGetInstanceProcAddr) then Exit;');
     L.Add('');
-    L.Add('  Pointer(vkGetDeviceProcAddr) := vkGetInstanceProcAddr(nil, ''vkGetDeviceProcAddr'');');
+    L.Add('  if not Assigned(vkGetDeviceProcAddr) then');
+    L.Add('    Pointer(vkGetDeviceProcAddr) := GetInstOrDevProc(''vkGetDeviceProcAddr'');');
     L.Add('');
     for I := Low(OrderedCommands) to High(OrderedCommands) do
     begin
@@ -1932,6 +2193,12 @@ begin
          (CmdName = 'vkCreateInstance') or
          (CmdName = 'vkEnumerateInstanceExtensionProperties') then
         Continue;
+      if (CmdName = 'vkCmdBeginDebugUtilsLabelEXT') or
+         (CmdName = 'vkCmdEndDebugUtilsLabelEXT') then
+      begin
+        L.Add(Format('  Pointer(%s) := GetInstOrDevProc(''%s'');', [CmdName, CmdName]));
+        Continue;
+      end;
       IsInstCmd := False;
       for J := Low(InstanceCommands) to High(InstanceCommands) do
         if InstanceCommands[J] = CmdName then
@@ -1942,19 +2209,40 @@ begin
       if IsInstCmd then
         Continue;
 
-      L.Add(Format('  Pointer(%s) := vkGetInstanceProcAddr(nil, ''%s'');', [CmdName, CmdName]));
+      L.Add(Format('  Pointer(%s) := GetDevProc(''%s'');', [CmdName, CmdName]));
       if (CmdName = 'vkCmdBeginRendering') or (CmdName = 'vkCmdEndRendering') then
       begin
         L.Add(Format('  if not Assigned(%s) then', [CmdName]));
-        L.Add(Format('    Pointer(%s) := vkGetInstanceProcAddr(nil, ''%sKHR'');', [CmdName, CmdName]));
+        L.Add(Format('    Pointer(%s) := GetDevProc(''%sKHR'');', [CmdName, CmdName]));
       end;
     end;
     for I := Low(OrderedCommands2) to High(OrderedCommands2) do
     begin
       CmdName := OrderedCommands2[I];
-      if CmdName = 'vkEnumerateInstanceVersion' then
+      if (CmdName = 'vkEnumerateInstanceVersion') or
+         (CmdName = 'vkEnumerateInstanceLayerProperties') or
+         (CmdName = 'vkCreateDebugUtilsMessengerEXT') or
+         (CmdName = 'vkDestroyDebugUtilsMessengerEXT') or
+         (CmdName = 'vkSubmitDebugUtilsMessageEXT') then
         Continue;
-      L.Add(Format('  Pointer(%s) := vkGetInstanceProcAddr(nil, ''%s'');', [CmdName, CmdName]));
+      if (CmdName = 'vkSetDebugUtilsObjectNameEXT') or
+         (CmdName = 'vkCmdInsertDebugUtilsLabelEXT') or
+         (CmdName = 'vkQueueBeginDebugUtilsLabelEXT') or
+         (CmdName = 'vkQueueEndDebugUtilsLabelEXT') or
+         (CmdName = 'vkQueueInsertDebugUtilsLabelEXT') then
+      begin
+        L.Add(Format('  Pointer(%s) := GetInstOrDevProc(''%s'');', [CmdName, CmdName]));
+        Continue;
+      end;
+      if (CmdName = 'vkGetPhysicalDeviceFeatures2') or
+         (CmdName = 'vkGetPhysicalDeviceProperties2') or
+         (CmdName = 'vkGetPhysicalDeviceFormatProperties') then
+      begin
+        L.Add(Format('  if not Assigned(%s) then', [CmdName]));
+        L.Add(Format('    Pointer(%s) := GetInstOrDevProc(''%s'');', [CmdName, CmdName]));
+        Continue;
+      end;
+      L.Add(Format('  Pointer(%s) := GetDevProc(''%s'');', [CmdName, CmdName]));
       if (CmdName = 'vkCmdPipelineBarrier2') or
          (CmdName = 'vkWaitSemaphores') or
          (CmdName = 'vkSignalSemaphore') or
@@ -1965,7 +2253,7 @@ begin
          (CmdName = 'vkCmdDrawIndexedIndirectCount') then
       begin
         L.Add(Format('  if not Assigned(%s) then', [CmdName]));
-        L.Add(Format('    Pointer(%s) := vkGetInstanceProcAddr(nil, ''%sKHR'');', [CmdName, CmdName]));
+        L.Add(Format('    Pointer(%s) := GetDevProc(''%sKHR'');', [CmdName, CmdName]));
       end else
       if (CmdName = 'vkCmdSetCullMode') or
          (CmdName = 'vkCmdSetFrontFace') or
@@ -1975,26 +2263,68 @@ begin
          (CmdName = 'vkCmdSetDepthCompareOp') then
       begin
         L.Add(Format('  if not Assigned(%s) then', [CmdName]));
-        L.Add(Format('    Pointer(%s) := vkGetInstanceProcAddr(nil, ''%sEXT'');', [CmdName, CmdName]));
+        L.Add(Format('    Pointer(%s) := GetDevProc(''%sEXT'');', [CmdName, CmdName]));
+      end;
+    end;
+    for I := Low(OrderedCommands3) to High(OrderedCommands3) do
+    begin
+      CmdName := OrderedCommands3[I];
+      L.Add(Format('  Pointer(%s) := GetDevProc(''%s'');', [CmdName, CmdName]));
+      if CmdName = 'vkGetBufferDeviceAddress' then
+      begin
+        L.Add('  if not Assigned(vkGetBufferDeviceAddress) then');
+        L.Add('    Pointer(vkGetBufferDeviceAddress) := GetDevProc(''vkGetBufferDeviceAddressKHR'');');
+      end else
+      if CmdName = 'vkResetQueryPool' then
+      begin
+        L.Add('  if not Assigned(vkResetQueryPool) then');
+        L.Add('    Pointer(vkResetQueryPool) := GetDevProc(''vkResetQueryPoolEXT'');');
       end;
     end;
     L.Add('end;');
     L.Add('');
+    L.Add('procedure UnloadVulkanInstance(const Instance: VkInstance);');
+    L.Add('begin');
+    L.Add('  if (Instance <> nil) and (LoadedVulkanInstance <> Instance) then');
+    L.Add('    Exit;');
+    L.Add('  LoadedVulkanInstance := nil;');
+    for I := Low(OrderedCommands) to High(OrderedCommands) do
+    begin
+      CmdName := OrderedCommands[I];
+      if (CmdName = 'vkGetInstanceProcAddr') or
+         (CmdName = 'vkCreateInstance') or
+         (CmdName = 'vkEnumerateInstanceExtensionProperties') then
+        Continue;
+      L.Add(Format('  %s := nil;', [CmdName]));
+    end;
+    for I := Low(OrderedCommands2) to High(OrderedCommands2) do
+    begin
+      CmdName := OrderedCommands2[I];
+      if (CmdName = 'vkEnumerateInstanceVersion') or
+         (CmdName = 'vkEnumerateInstanceLayerProperties') then
+        Continue;
+      L.Add(Format('  %s := nil;', [CmdName]));
+    end;
+    for I := Low(OrderedCommands3) to High(OrderedCommands3) do
+      L.Add(Format('  %s := nil;', [OrderedCommands3[I]]));
+    L.Add('end;');
+    L.Add('');
     L.Add('procedure FreeVulkan;');
     L.Add('begin');
+    L.Add('  UnloadVulkanInstance(nil);');
     L.Add('  FreeAndNil(VulkanLibrary);');
     L.Add('  vkGetInstanceProcAddr := nil;');
-    L.Add('  vkGetDeviceProcAddr := nil;');
     L.Add('  vkCreateInstance := nil;');
-    L.Add('  vkDestroyInstance := nil;');
-    L.Add('  vkCreateDevice := nil;');
-    L.Add('  vkDestroyDevice := nil;');
+    L.Add('  vkEnumerateInstanceExtensionProperties := nil;');
+    L.Add('  vkEnumerateInstanceLayerProperties := nil;');
+    L.Add('  vkEnumerateInstanceVersion := nil;');
     L.Add('end;');
     L.Add('');
     L.Add('finalization');
     L.Add('  FreeVulkan;');
     L.Add('end.');
 
+    L.LineBreak := #13#10;
     L.SaveToFile(OutputFile);
   finally
     L.Free;

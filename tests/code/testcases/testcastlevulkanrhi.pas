@@ -420,6 +420,9 @@ type
     procedure TestOpenGLRHIShaderTranslationHeadlessComputeIndirectAndQueryPoolRHI;
     procedure TestRealOpenGLRHIComputeSSBOStorageImageIndirectMultiDrawAndQueriesRHI;
     procedure TestUnifiedRenderGraphOpenGLVsVulkanComputeAndGraphicsBackendParityRHI;
+    procedure TestBufferDeviceAddressAccelerationStructureSBTAndMeshShaderHeadlessRHI;
+    procedure TestRealLavapipeHardwareBLASCompactionTLASRayQueryTraceRaysAndSoftwareLBVHParityRHI;
+    procedure TestRealLavapipeMeshShaderDrawMeshTasksIndirectAndSoftwareMeshletFallbackParityRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -34927,6 +34930,499 @@ begin
     SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBufferDeviceAddressAccelerationStructureSBTAndMeshShaderHeadlessRHI;
+var
+  Device: TVulkanRHIDevice;
+  BufBda, BufAsIn, BufAsStore, BufSbt: TRHIBuffer;
+  Bytes: TSPIRVBytecode;
+  Info: TSPIRVReflectionInfo;
+  FoundBind: TSPIRVReflectedBinding;
+  Verts: array[0..3] of TVector3;
+  Inds: array[0..5] of UInt32;
+  Inst: array[0..0] of TCastleRTInstanceDesc;
+  Pos4, Col4: array[0..3] of TVector4;
+  Tris: array[0..1] of TCastleMeshletTriangle;
+  BLASID: Cardinal;
+  OutImg, ColorTex: TVulkanRHITexture;
+  Cmd: TVulkanRHICommandList;
+  RInfo: TRHIRenderingInfo;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($11701)));
+  BufBda := nil;
+  BufAsIn := nil;
+  BufAsStore := nil;
+  BufSbt := nil;
+  OutImg := nil;
+  ColorTex := nil;
+  try
+    AssertTrue('Headless Vulkan 1.3 must expose SupportsBufferDeviceAddress',
+      Device.Capabilities.SupportsBufferDeviceAddress);
+    AssertTrue('MemoryAllocator must mirror SupportsBufferDeviceAddress',
+      Device.MemoryAllocator.SupportsBufferDeviceAddress);
+
+    BufBda := Device.CreateBuffer(TRHIBufferDesc.Create(256, [buStorage, buShaderDeviceAddress], muGpuOnly, 'HeadlessBDA'));
+    BufAsIn := Device.CreateBuffer(TRHIBufferDesc.Create(256, [buAccelerationStructureBuildInput, buShaderDeviceAddress], muCpuToGpu, 'HeadlessASIn'));
+    BufAsStore := Device.CreateBuffer(TRHIBufferDesc.Create(512, [buAccelerationStructureStorage, buShaderDeviceAddress], muGpuOnly, 'HeadlessASStore'));
+    BufSbt := Device.CreateBuffer(TRHIBufferDesc.Create(256, [buShaderBindingTable, buShaderDeviceAddress], muCpuToGpu, 'HeadlessSBT'));
+
+    AssertTrue('BDA buffer DeviceAddress must be non-zero', BufBda.DeviceAddress <> 0);
+    AssertTrue('AS build-input buffer DeviceAddress must be non-zero', BufAsIn.DeviceAddress <> 0);
+    AssertTrue('AS storage buffer DeviceAddress must be 256-byte aligned',
+      (BufAsStore.DeviceAddress <> 0) and ((BufAsStore.DeviceAddress mod 256) = 0));
+    AssertTrue('SBT buffer DeviceAddress must be 64-byte aligned',
+      (BufSbt.DeviceAddress <> 0) and ((BufSbt.DeviceAddress mod 64) = 0));
+
+    { Verify pure-Pascal SPIR-V 1.4 reflection for RayQuery, RayTracingPipeline, and Mesh/Task shaders }
+    AssertTrue('TryGetBuiltInSPIRV(RayQueryCS)',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssCompute, '', 'RayQueryCS', Bytes));
+    AssertTrue('InspectSPIRVBytecode(RayQueryCS)', InspectSPIRVBytecode(Bytes, Info));
+    AssertEquals('RayQueryCS stage = ssCompute', Ord(ssCompute), Ord(Info.Stage));
+    AssertTrue('RayQueryCS set 0 binding 0 = dtAccelerationStructure',
+      Info.FindBinding(0, 0, FoundBind) and (FoundBind.DescriptorType = dtAccelerationStructure));
+    AssertTrue('RayQueryCS set 0 binding 1 = dtStorageImage',
+      Info.FindBinding(0, 1, FoundBind) and (FoundBind.DescriptorType = dtStorageImage));
+    AssertEquals('RayQueryCS push constant size = 48', 48, Info.PushConstantSize);
+
+    AssertTrue('TryGetBuiltInSPIRV(RayTraceRGen)',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssRayGen, '', 'RayTraceRGen', Bytes));
+    AssertTrue('InspectSPIRVBytecode(RayTraceRGen)', InspectSPIRVBytecode(Bytes, Info));
+    AssertEquals('RayTraceRGen stage = ssRayGen', Ord(ssRayGen), Ord(Info.Stage));
+    AssertTrue('RayTraceRGen set 0 binding 0 = dtAccelerationStructure',
+      Info.FindBinding(0, 0, FoundBind) and (FoundBind.DescriptorType = dtAccelerationStructure));
+
+    AssertTrue('TryGetBuiltInSPIRV(RayTraceRMiss)',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssMiss, '', 'RayTraceRMiss', Bytes));
+    AssertTrue('InspectSPIRVBytecode(RayTraceRMiss)', InspectSPIRVBytecode(Bytes, Info));
+    AssertEquals('RayTraceRMiss stage = ssMiss', Ord(ssMiss), Ord(Info.Stage));
+
+    AssertTrue('TryGetBuiltInSPIRV(RayTraceRChit)',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssClosestHit, '', 'RayTraceRChit', Bytes));
+    AssertTrue('InspectSPIRVBytecode(RayTraceRChit)', InspectSPIRVBytecode(Bytes, Info));
+    AssertEquals('RayTraceRChit stage = ssClosestHit', Ord(ssClosestHit), Ord(Info.Stage));
+
+    AssertTrue('TryGetBuiltInSPIRV(MeshletTaskEXT)',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssTask, '', 'MeshletTaskEXT', Bytes));
+    AssertTrue('InspectSPIRVBytecode(MeshletTaskEXT)', InspectSPIRVBytecode(Bytes, Info));
+    AssertEquals('MeshletTaskEXT stage = ssTask', Ord(ssTask), Ord(Info.Stage));
+    AssertEquals('MeshletTaskEXT push constant size = 32', 32, Info.PushConstantSize);
+
+    AssertTrue('TryGetBuiltInSPIRV(MeshletMeshEXT)',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssMesh, '', 'MeshletMeshEXT', Bytes));
+    AssertTrue('InspectSPIRVBytecode(MeshletMeshEXT)', InspectSPIRVBytecode(Bytes, Info));
+    AssertEquals('MeshletMeshEXT stage = ssMesh', Ord(ssMesh), Ord(Info.Stage));
+    AssertTrue('MeshletMeshEXT binding 0 = dtStorageBuffer',
+      Info.FindBinding(0, 0, FoundBind) and (FoundBind.DescriptorType = dtStorageBuffer));
+    AssertEquals('MeshletMeshEXT push constant size = 32', 32, Info.PushConstantSize);
+
+    { Exercise headless BLAS + Compaction + TLAS + Software LBVH + Meshlet fallback lifecycle }
+    Verts[0] := Vector3(-0.5, -0.5, 0.0);
+    Verts[1] := Vector3( 0.5, -0.5, 0.0);
+    Verts[2] := Vector3( 0.5,  0.5, 0.0);
+    Verts[3] := Vector3(-0.5,  0.5, 0.0);
+    Inds[0] := 0; Inds[1] := 1; Inds[2] := 2;
+    Inds[3] := 0; Inds[4] := 2; Inds[5] := 3;
+
+    BLASID := Device.AccelerationStructureManager.BuildTriangleBLAS(Verts, Inds, True);
+    AssertEquals('Headless BLASID = 1', 1, BLASID);
+    AssertTrue('Headless CompactBLASOnGPU succeeds',
+      Device.AccelerationStructureManager.CompactBLASOnGPU(BLASID));
+    AssertTrue('CompactionSavedBytes > 0',
+      Device.AccelerationStructureManager.CompactionSavedBytes > 0);
+
+    Inst[0].BLASID := BLASID;
+    Inst[0].Transform := TMatrix4.Identity;
+    Inst[0].CustomIndex := 0;
+    Inst[0].Mask := $FF;
+    AssertTrue('Headless BuildInstanceTLAS builds software LBVH',
+      Device.AccelerationStructureManager.BuildInstanceTLAS(Inst));
+    AssertEquals('LBVH triangle count = 2', 2, Device.AccelerationStructureManager.LBVHTriangleCount);
+    AssertEquals('LBVH node count = 3', 3, Device.AccelerationStructureManager.LBVHNodeCount);
+
+    OutImg := Device.CreateTexture(
+      TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuStorage, tuSampled])) as TVulkanRHITexture;
+    ColorTex := Device.CreateTexture(
+      TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment])) as TVulkanRHITexture;
+
+    Device.MeshletCuller.ClearMeshlets;
+    Device.MeshletCuller.AddMeshlet(Vector3(0, 0, 0), 1.0, Vector3(0, 0, 1), 0.5, 0, 4, 0, 2);
+    Pos4[0] := Vector4(-0.5, -0.5, 0, 1); Col4[0] := Vector4(1, 0, 0, 1);
+    Pos4[1] := Vector4( 0.5, -0.5, 0, 1); Col4[1] := Vector4(1, 0, 0, 1);
+    Pos4[2] := Vector4( 0.5,  0.5, 0, 1); Col4[2] := Vector4(1, 0, 0, 1);
+    Pos4[3] := Vector4(-0.5,  0.5, 0, 1); Col4[3] := Vector4(1, 0, 0, 1);
+    Tris[0].V0 := 0; Tris[0].V1 := 1; Tris[0].V2 := 2; Tris[0].Pad := 0;
+    Tris[1].V0 := 0; Tris[1].V1 := 2; Tris[1].V2 := 3; Tris[1].Pad := 0;
+    Device.MeshletCuller.UploadMeshletGeometry(Pos4, Col4, Tris);
+
+    Cmd := Device.BeginOffscreenFrame as TVulkanRHICommandList;
+    AssertFalse('Headless DispatchRayQueryOrFallback uses software LBVH',
+      Device.AccelerationStructureManager.DispatchRayQueryOrFallback(
+        Cmd, OutImg, Vector4(-1, -1, 2, 2), Vector4(0, 0, -1, 2.5)));
+    AssertFalse('Headless SBT DispatchHardwareTraceRaysOrFallback falls back cleanly',
+      Device.ShaderBindingTable.DispatchHardwareTraceRaysOrFallback(
+        Cmd, Device.AccelerationStructureManager, OutImg, Vector4(-1, -1, 2, 2), Vector4(0, 0, -1, 2.5)));
+
+    Device.MeshletCuller.PrepareSoftwareMeshletCulling(Cmd, Vector3(0, 0, 5), 20.0, True);
+    RInfo := Default(TRHIRenderingInfo);
+    RInfo.RenderArea := Rectangle(0, 0, 32, 32);
+    SetLength(RInfo.ColorAttachments, 1);
+    RInfo.ColorAttachments[0].Texture := ColorTex;
+    RInfo.ColorAttachments[0].LoadOp := loClear;
+    RInfo.ColorAttachments[0].StoreOp := soStore;
+    RInfo.ColorAttachments[0].ClearColor := Vector4(0, 0, 0, 1);
+    Cmd.BeginRendering(RInfo);
+    Cmd.SetViewport(FloatRectangle(0, 0, 32, 32));
+    Cmd.SetScissor(Rectangle(0, 0, 32, 32));
+    AssertFalse('Headless RenderMeshlets uses software compute/indirect fallback',
+      Device.MeshletCuller.RenderMeshlets(Cmd, pfRGBA8_UNorm, Vector3(0, 0, 5), 20.0, True, False));
+    Cmd.EndRendering;
+    Device.EndOffscreenFrame;
+
+    AssertEquals('SoftwareLBVHDispatchCount = 2', 2, Device.AccelerationStructureManager.SoftwareLBVHDispatchCount);
+    AssertEquals('SoftwareFallbackDrawCount = 1', 1, Device.MeshletCuller.SoftwareFallbackDrawCount);
+  finally
+    FreeAndNil(ColorTex);
+    FreeAndNil(OutImg);
+    FreeAndNil(BufSbt);
+    FreeAndNil(BufAsStore);
+    FreeAndNil(BufAsIn);
+    FreeAndNil(BufBda);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeHardwareBLASCompactionTLASRayQueryTraceRaysAndSoftwareLBVHParityRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  Verts: array[0..3] of TVector3;
+  Inds: array[0..5] of UInt32;
+  Instances: array[0..1] of TCastleRTInstanceDesc;
+  BLASID: Cardinal;
+  ImgTexRQ, ImgTexRTP, ImgTexSW: TVulkanRHITexture;
+  ReadRQ, ReadRTP, ReadSW: TRGBAlphaImage;
+  Cmd: TVulkanRHICommandList;
+  OrigScale, DirZ: TVector4;
+  UsedHwRQ, UsedHwRTP, UsedSwLBVH: Boolean;
+  Metrics: TRHIVisualDiffMetrics;
+
+  procedure AssertSceneColors(const AImg: TRGBAlphaImage; const ALabel: String);
+  var
+    PInst0, POverlap, PInst1, PSky: PVector4Byte;
+  begin
+    { Note: GrabTextureImage flips rows vertically, while y=0 (row 32) and corners (2,2)/(2,61) are vertically symmetric }
+    PInst0 := AImg.PixelPtr(10, 32);
+    POverlap := AImg.PixelPtr(32, 32);
+    PInst1 := AImg.PixelPtr(52, 32);
+    PSky := AImg.PixelPtr(2, 2);
+
+    AssertTrue(ALabel + ': Left Instance 0 pixel (10,32) must be Orange (R>210, G>110, B<70)',
+      (PInst0^.X > 210) and (PInst0^.Y > 110) and (PInst0^.Z < 70));
+    AssertTrue(ALabel + ': Center overlap pixel (32,32) must pick closer Instance 0 Orange over occluded Instance 1',
+      (POverlap^.X > 210) and (POverlap^.Y > 110) and (POverlap^.Z < 70));
+    AssertTrue(ALabel + ': Right Instance 1 pixel (52,32) must be Emerald (R<70, G>195, B>85)',
+      (PInst1^.X < 70) and (PInst1^.Y > 195) and (PInst1^.Z > 85));
+    AssertTrue(ALabel + ': Corner miss pixel (2,2) must be Sky Blue (R<40, G<50, B>45)',
+      (PSky^.X < 40) and (PSky^.Y < 50) and (PSky^.Z > 45));
+  end;
+
+begin
+  VkDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(VkDev, True) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  ImgTexRQ := nil;
+  ImgTexRTP := nil;
+  ImgTexSW := nil;
+  ReadRQ := nil;
+  ReadRTP := nil;
+  ReadSW := nil;
+  try
+    SetRHIDevice(VkDev);
+    AssertTrue('Live Vulkan 1.4 device must support BufferDeviceAddress',
+      VkDev.Capabilities.SupportsBufferDeviceAddress);
+
+    { Unit quad [-0.5..+0.5]^2 at z = 0 }
+    Verts[0] := Vector3(-0.5, -0.5, 0.0);
+    Verts[1] := Vector3( 0.5, -0.5, 0.0);
+    Verts[2] := Vector3( 0.5,  0.5, 0.0);
+    Verts[3] := Vector3(-0.5,  0.5, 0.0);
+    Inds[0] := 0; Inds[1] := 1; Inds[2] := 2;
+    Inds[3] := 0; Inds[4] := 2; Inds[5] := 3;
+
+    BLASID := VkDev.AccelerationStructureManager.BuildTriangleBLAS(Verts, Inds, True);
+    AssertEquals('Built BLASID = 1', 1, BLASID);
+    AssertTrue('BLAS device address must be non-zero',
+      VkDev.AccelerationStructureManager.GetBLASDeviceAddress(BLASID) <> 0);
+    AssertTrue('Real GPU CompactBLASOnGPU must succeed',
+      VkDev.AccelerationStructureManager.CompactBLASOnGPU(BLASID));
+    AssertTrue('Compacted BLAS device address must remain non-zero',
+      VkDev.AccelerationStructureManager.GetBLASDeviceAddress(BLASID) <> 0);
+    AssertTrue('TotalCompactedBLASBytes > 0',
+      VkDev.AccelerationStructureManager.TotalCompactedBLASBytes > 0);
+
+    { Instance 0 at (-0.35, 0, +0.5) [closer, Orange] overlapping Instance 1 at (+0.35, 0, -0.5) [farther, Emerald] }
+    Instances[0].BLASID := BLASID;
+    Instances[0].Transform := TranslationMatrix(-0.35, 0.0, 0.5);
+    Instances[0].CustomIndex := 0;
+    Instances[0].Mask := $FF;
+
+    Instances[1].BLASID := BLASID;
+    Instances[1].Transform := TranslationMatrix(0.35, 0.0, -0.5);
+    Instances[1].CustomIndex := 1;
+    Instances[1].Mask := $FF;
+
+    AssertTrue('BuildInstanceTLAS must build TLAS and Software LBVH',
+      VkDev.AccelerationStructureManager.BuildInstanceTLAS(Instances));
+    if VkDev.Capabilities.SupportsAccelerationStructure then
+    begin
+      AssertTrue('Hardware TLASHandle must be non-null',
+        VkDev.AccelerationStructureManager.TLASHandle <> VK_NULL_HANDLE);
+      AssertTrue('Hardware TLASDeviceAddress must be non-zero',
+        VkDev.AccelerationStructureManager.TLASDeviceAddress <> 0);
+    end;
+
+    ImgTexRQ := VkDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuStorage, tuSampled, tuTransferSrc])) as TVulkanRHITexture;
+    ImgTexRTP := VkDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuStorage, tuSampled, tuTransferSrc])) as TVulkanRHITexture;
+    ImgTexSW := VkDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuStorage, tuSampled, tuTransferSrc])) as TVulkanRHITexture;
+
+    OrigScale := Vector4(-1.0, -1.0, 2.0, 2.0);
+    DirZ := Vector4(0.0, 0.0, -1.0, 2.5);
+
+    Cmd := VkDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    { 1. Hardware VK_KHR_ray_query inline compute }
+    VkDev.AccelerationStructureManager.ForceSoftwareFallback := False;
+    UsedHwRQ := VkDev.AccelerationStructureManager.DispatchRayQueryOrFallback(Cmd, ImgTexRQ, OrigScale, DirZ);
+    Cmd.TransitionTexture(ImgTexRQ, rsTransferSrc);
+
+    { 2. Hardware VK_KHR_ray_tracing_pipeline + SBT + vkCmdTraceRaysKHR }
+    VkDev.ShaderBindingTable.ForceSoftwareFallback := False;
+    UsedHwRTP := VkDev.ShaderBindingTable.DispatchHardwareTraceRaysOrFallback(
+      Cmd, VkDev.AccelerationStructureManager, ImgTexRTP, OrigScale, DirZ);
+    Cmd.TransitionTexture(ImgTexRTP, rsTransferSrc);
+
+    { 3. Software Compute Stackless LBVH Ray-Tracing Fallback }
+    VkDev.AccelerationStructureManager.ForceSoftwareFallback := True;
+    UsedSwLBVH := not VkDev.AccelerationStructureManager.DispatchRayQueryOrFallback(Cmd, ImgTexSW, OrigScale, DirZ);
+    Cmd.TransitionTexture(ImgTexSW, rsTransferSrc);
+    VkDev.AccelerationStructureManager.ForceSoftwareFallback := False;
+
+    VkDev.EndOffscreenFrame;
+    VkDev.WaitIdle;
+
+    if VkDev.Capabilities.SupportsRayQuery then
+      AssertTrue('Must execute live hardware VK_KHR_ray_query on RayQuery-capable GPU', UsedHwRQ);
+    if VkDev.Capabilities.SupportsRayTracingPipeline then
+    begin
+      AssertTrue('Must execute live hardware vkCmdTraceRaysKHR on RTPipeline-capable GPU', UsedHwRTP);
+      AssertTrue('SBT buffer GPU DeviceAddress must be non-zero',
+        VkDev.ShaderBindingTable.SBTBuffer.DeviceAddress <> 0);
+    end;
+    AssertTrue('ForceSoftwareFallback=True must execute Software Compute Stackless LBVH', UsedSwLBVH);
+
+    ReadRQ := VkDev.GrabTextureImage(ImgTexRQ, Rectangle(0, 0, 64, 64));
+    ReadRTP := VkDev.GrabTextureImage(ImgTexRTP, Rectangle(0, 0, 64, 64));
+    ReadSW := VkDev.GrabTextureImage(ImgTexSW, Rectangle(0, 0, 64, 64));
+
+    AssertSceneColors(ReadRQ, 'VK_KHR_ray_query');
+    AssertSceneColors(ReadRTP, 'VK_KHR_ray_tracing_pipeline');
+    AssertSceneColors(ReadSW, 'SoftwareLBVHCompute');
+
+    AssertTrue('Hardware VK_KHR_ray_query and vkCmdTraceRaysKHR must match pixel-for-pixel (RMSE <= 0.01)',
+      CompareImagesDetailedDiff(ReadRQ, ReadRTP, 0.01, Metrics));
+    AssertTrue('Hardware Ray Tracing and Software Compute Stackless LBVH must match pixel-for-pixel (RMSE <= 0.01)',
+      CompareImagesDetailedDiff(ReadRQ, ReadSW, 0.01, Metrics));
+
+    VkDev.AssertZeroValidationErrors('Phase117.HardwareRTAndSoftwareLBVHParity');
+  finally
+    FreeAndNil(ReadSW);
+    FreeAndNil(ReadRTP);
+    FreeAndNil(ReadRQ);
+    FreeAndNil(ImgTexSW);
+    FreeAndNil(ImgTexRTP);
+    FreeAndNil(ImgTexRQ);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeMeshShaderDrawMeshTasksIndirectAndSoftwareMeshletFallbackParityRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  Pos4, Col4: array[0..15] of TVector4;
+  Tris: array[0..7] of TCastleMeshletTriangle;
+  TexMeshDirect, TexTaskMesh, TexMeshIndirect, TexSwFallback: TVulkanRHITexture;
+  ImgMeshDirect, ImgTaskMesh, ImgMeshIndirect, ImgSwFallback: TRGBAlphaImage;
+  Metrics: TRHIVisualDiffMetrics;
+
+  procedure SetQuadMeshlet(const AMeshletIdx: Integer; const AX0, AX1: Single; const ACol: TVector4);
+  var
+    VBase, TBase, K: Integer;
+  begin
+    VBase := AMeshletIdx * 4;
+    TBase := AMeshletIdx * 2;
+    Pos4[VBase + 0] := Vector4(AX0, -0.60, 0.0, 1.0);
+    Pos4[VBase + 1] := Vector4(AX1, -0.60, 0.0, 1.0);
+    Pos4[VBase + 2] := Vector4(AX1,  0.60, 0.0, 1.0);
+    Pos4[VBase + 3] := Vector4(AX0,  0.60, 0.0, 1.0);
+    for K := 0 to 3 do
+      Col4[VBase + K] := ACol;
+    Tris[TBase + 0].V0 := 0; Tris[TBase + 0].V1 := 1; Tris[TBase + 0].V2 := 2; Tris[TBase + 0].Pad := 0;
+    Tris[TBase + 1].V0 := 0; Tris[TBase + 1].V1 := 2; Tris[TBase + 1].V2 := 3; Tris[TBase + 1].Pad := 0;
+  end;
+
+  function RenderModeToImage(const ATarget: TVulkanRHITexture;
+    const AForceSW, AUseTask, AUseIndirect: Boolean; out AUsedHw: Boolean): TRGBAlphaImage;
+  var
+    Cmd: TVulkanRHICommandList;
+    RInfo: TRHIRenderingInfo;
+  begin
+    VkDev.MeshletCuller.ForceSoftwareFallback := AForceSW;
+    VkDev.MeshletCuller.UseTaskShader := AUseTask;
+
+    Cmd := VkDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    if AForceSW or (not VkDev.Capabilities.SupportsMeshShaders) then
+      VkDev.MeshletCuller.PrepareSoftwareMeshletCulling(Cmd, Vector3(0, 0, 5), 20.0, True);
+
+    RInfo := Default(TRHIRenderingInfo);
+    RInfo.RenderArea := Rectangle(0, 0, 64, 64);
+    SetLength(RInfo.ColorAttachments, 1);
+    RInfo.ColorAttachments[0].Texture := ATarget;
+    RInfo.ColorAttachments[0].LoadOp := loClear;
+    RInfo.ColorAttachments[0].StoreOp := soStore;
+    RInfo.ColorAttachments[0].ClearColor := Vector4(0.06, 0.07, 0.10, 1.0);
+
+    Cmd.BeginRendering(RInfo);
+    Cmd.SetViewport(FloatRectangle(0, 0, 64, 64));
+    Cmd.SetScissor(Rectangle(0, 0, 64, 64));
+    AUsedHw := VkDev.MeshletCuller.RenderMeshlets(
+      Cmd, pfRGBA8_UNorm, Vector3(0, 0, 5), 20.0, True, AUseIndirect);
+    Cmd.EndRendering;
+    Cmd.TransitionTexture(ATarget, rsTransferSrc);
+
+    VkDev.EndOffscreenFrame;
+    VkDev.WaitIdle;
+    Result := VkDev.GrabTextureImage(ATarget, Rectangle(0, 0, 64, 64));
+  end;
+
+  procedure AssertMeshletPixels(const AImg: TRGBAlphaImage; const ALabel: String);
+  var
+    PLeft, PCenter, PRight: PVector4Byte;
+  begin
+    PLeft := AImg.PixelPtr(12, 32);
+    PCenter := AImg.PixelPtr(32, 32);
+    PRight := AImg.PixelPtr(52, 32);
+
+    AssertTrue(ALabel + ': Left visible Meshlet 0 (12,32) must be Coral (R>210, G<120)',
+      (PLeft^.X > 210) and (PLeft^.Y < 120));
+    AssertTrue(ALabel + ': Center culled Meshlets 1 & 3 (32,32) must remain cleared dark background (R<35, G<35, B<45)',
+      (PCenter^.X < 35) and (PCenter^.Y < 35) and (PCenter^.Z < 45));
+    AssertTrue(ALabel + ': Right visible Meshlet 2 (52,32) must be Cyan (R<70, G>175, B>210)',
+      (PRight^.X < 70) and (PRight^.Y > 175) and (PRight^.Z > 210));
+  end;
+
+var
+  UsedHw1, UsedHw2, UsedHw3, UsedHw4: Boolean;
+begin
+  VkDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(VkDev, True) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  TexMeshDirect := nil;
+  TexTaskMesh := nil;
+  TexMeshIndirect := nil;
+  TexSwFallback := nil;
+  ImgMeshDirect := nil;
+  ImgTaskMesh := nil;
+  ImgMeshIndirect := nil;
+  ImgSwFallback := nil;
+  try
+    SetRHIDevice(VkDev);
+    VkDev.MeshletCuller.ClearMeshlets;
+
+    { Meshlet 0: Left Coral quad, front-facing cone (+Z toward camera at (0,0,5)) -> VISIBLE }
+    VkDev.MeshletCuller.AddMeshlet(Vector3(0, 0, 0), 1.0, Vector3(0, 0, 1), 0.5, 0, 4, 0, 2);
+    SetQuadMeshlet(0, -0.85, -0.30, Vector4(0.95, 0.35, 0.25, 1.0));
+
+    { Meshlet 1: Center Magenta quad, back-facing cone (-Z away from camera: dot=1.0 >= 0.5) -> CONE-CULLED }
+    VkDev.MeshletCuller.AddMeshlet(Vector3(0, 0, 0), 1.0, Vector3(0, 0, -1), 0.5, 4, 4, 2, 2);
+    SetQuadMeshlet(1, -0.20, 0.20, Vector4(0.95, 0.10, 0.95, 1.0));
+
+    { Meshlet 2: Right Cyan quad, front-facing cone (+Z) -> VISIBLE }
+    VkDev.MeshletCuller.AddMeshlet(Vector3(0, 0, 0), 1.0, Vector3(0, 0, 1), 0.5, 8, 4, 4, 2);
+    SetQuadMeshlet(2, 0.30, 0.85, Vector4(0.15, 0.80, 0.95, 1.0));
+
+    { Meshlet 3: Center Yellow quad at z = -50 (dist - radius = 54 > maxDist 20) -> DISTANCE-CULLED }
+    VkDev.MeshletCuller.AddMeshlet(Vector3(0, 0, -50), 1.0, Vector3(0, 0, 1), 0.5, 12, 4, 6, 2);
+    SetQuadMeshlet(3, -0.20, 0.20, Vector4(1.0, 1.0, 0.10, 1.0));
+
+    AssertEquals('CPU reference meshlet culler must count exactly 2 visible meshlets (0 and 2)',
+      2, VkDev.MeshletCuller.EvaluateVisibleMeshletsCPU(Vector3(0, 0, 5), 20.0));
+
+    VkDev.MeshletCuller.UploadMeshletGeometry(Pos4, Col4, Tris);
+
+    TexMeshDirect := VkDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc])) as TVulkanRHITexture;
+    TexTaskMesh := VkDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc])) as TVulkanRHITexture;
+    TexMeshIndirect := VkDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc])) as TVulkanRHITexture;
+    TexSwFallback := VkDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc])) as TVulkanRHITexture;
+
+    ImgMeshDirect := RenderModeToImage(TexMeshDirect, False, False, False, UsedHw1);
+    ImgTaskMesh := RenderModeToImage(TexTaskMesh, False, True, False, UsedHw2);
+    ImgMeshIndirect := RenderModeToImage(TexMeshIndirect, False, False, True, UsedHw3);
+    ImgSwFallback := RenderModeToImage(TexSwFallback, True, False, False, UsedHw4);
+
+    if VkDev.Capabilities.SupportsMeshShaders then
+    begin
+      AssertTrue('vkCmdDrawMeshTasksEXT (Mesh+Frag) must execute on MeshShader-capable GPU', UsedHw1);
+      AssertTrue('vkCmdDrawMeshTasksEXT (Task+Mesh+Frag) must execute on MeshShader-capable GPU', UsedHw2);
+      AssertTrue('vkCmdDrawMeshTasksIndirectEXT must execute on MeshShader-capable GPU', UsedHw3);
+      AssertEquals('HardwareMeshDrawCount = 3', 3, VkDev.MeshletCuller.HardwareMeshDrawCount);
+    end;
+    AssertFalse('ForceSoftwareFallback=True must use Software Compute + DrawIndirect fallback', UsedHw4);
+    AssertTrue('SoftwareFallbackDrawCount >= 1', VkDev.MeshletCuller.SoftwareFallbackDrawCount >= 1);
+
+    AssertMeshletPixels(ImgMeshDirect, 'DrawMeshTasks(Mesh)');
+    AssertMeshletPixels(ImgTaskMesh, 'DrawMeshTasks(Task+Mesh)');
+    AssertMeshletPixels(ImgMeshIndirect, 'DrawMeshTasksIndirect');
+    AssertMeshletPixels(ImgSwFallback, 'SoftwareMeshletFallback');
+
+    AssertTrue('Task+Mesh and Mesh-only output must match pixel-for-pixel (RMSE <= 0.01)',
+      CompareImagesDetailedDiff(ImgMeshDirect, ImgTaskMesh, 0.01, Metrics));
+    AssertTrue('DrawMeshTasksIndirect and DrawMeshTasks must match pixel-for-pixel (RMSE <= 0.01)',
+      CompareImagesDetailedDiff(ImgMeshDirect, ImgMeshIndirect, 0.01, Metrics));
+    AssertTrue('Hardware VK_EXT_mesh_shader and Software Compute/Indirect fallback must match pixel-for-pixel (RMSE <= 0.01)',
+      CompareImagesDetailedDiff(ImgMeshDirect, ImgSwFallback, 0.01, Metrics));
+
+    VkDev.AssertZeroValidationErrors('Phase117.MeshShaderAndSoftwareFallbackParity');
+  finally
+    FreeAndNil(ImgSwFallback);
+    FreeAndNil(ImgMeshIndirect);
+    FreeAndNil(ImgTaskMesh);
+    FreeAndNil(ImgMeshDirect);
+    FreeAndNil(TexSwFallback);
+    FreeAndNil(TexMeshIndirect);
+    FreeAndNil(TexTaskMesh);
+    FreeAndNil(TexMeshDirect);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
     FreeAndNil(VkDev);
   end;
 end;
