@@ -76,6 +76,7 @@ type
     FOnGLContextEarlyOpen, FOnGLContextOpen, FOnGLContextClose: TGLContextEventList;
     FOnUpdate, FOnInitializeJavaActivity,
       FOnGLContextOpenObject, FOnGLContextCloseObject,
+      FOnRenderBackendChange,
       FOnPause, FOnResume, FOnUserInteraction: TNotifyEventList;
     FOnWarning: TWarningEventList;
     FOnLog: TLogEventList;
@@ -86,12 +87,14 @@ type
     FShowUserInterfaceToQuit: Boolean;
     FCaption: String;
     FRenderBackend: TRenderBackend;
+    FRenderBackendSwitchCount: Cardinal;
     // Maybe we will expose them as public read-only properties in the future.
     FInitializedDebug: Boolean;
     FInitializedRelease: Boolean;
     FPendingToFree: TComponentList;
     function GetApplicationName: String;
     procedure SetApplicationName(const Value: String);
+    procedure SetRenderBackend(const Value: TRenderBackend);
     procedure DoPendingFree;
   public
     const
@@ -125,8 +128,17 @@ type
 
     { Explicit rendering backend (Vulkan or OpenGL).
       Defaults to backendAuto, which uses Vulkan when supported by the hardware and driver,
-      falling back cleanly to OpenGL. }
-    property RenderBackend: TRenderBackend read FRenderBackend write FRenderBackend default backendAuto;
+      falling back cleanly to OpenGL.
+      Changing this property at runtime while windows or controls are open triggers
+      @link(OnRenderBackendChange), cleanly tearing down and recreating active GPU
+      resources without restarting the application. }
+    property RenderBackend: TRenderBackend read FRenderBackend write SetRenderBackend default backendAuto;
+
+    { Events called whenever @link(RenderBackend) changes at runtime. }
+    property OnRenderBackendChange: TNotifyEventList read FOnRenderBackendChange;
+
+    { Number of times @link(RenderBackend) was changed since application startup. }
+    property RenderBackendSwitchCount: Cardinal read FRenderBackendSwitchCount;
 
     { Initialized to @true on devices with a touch screen (Android, iOS, Nintendo Switch).
 
@@ -482,6 +494,7 @@ begin
   FOnGLContextOpenObject := TNotifyEventList.Create;
   FOnGLContextClose := TGLContextEventList.Create;
   FOnGLContextCloseObject := TNotifyEventList.Create;
+  FOnRenderBackendChange := TNotifyEventList.Create;
   FOnUpdate := TNotifyEventList.Create;
   FOnInitializeJavaActivity := TNotifyEventList.Create;
   FOnPause := TNotifyEventList.Create;
@@ -515,6 +528,7 @@ begin
   FreeAndNil(FOnGLContextOpenObject);
   FreeAndNil(FOnGLContextClose);
   FreeAndNil(FOnGLContextCloseObject);
+  FreeAndNil(FOnRenderBackendChange);
   FreeAndNil(FOnUpdate);
   FreeAndNil(FOnInitializeJavaActivity);
   FreeAndNil(FOnPause);
@@ -543,6 +557,17 @@ procedure TCastleApplicationProperties.SetApplicationName(const Value: String);
 begin
   OnGetApplicationName := @CastleGetApplicationName;
   CastleApplicationNameValue := Value;
+end;
+
+procedure TCastleApplicationProperties.SetRenderBackend(const Value: TRenderBackend);
+begin
+  if FRenderBackend <> Value then
+  begin
+    FRenderBackend := Value;
+    Inc(FRenderBackendSwitchCount);
+    if FOnRenderBackendChange <> nil then
+      FOnRenderBackendChange.ExecuteAll(Self);
+  end;
 end;
 
 procedure TCastleApplicationProperties._GLContextEarlyOpen;

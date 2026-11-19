@@ -294,6 +294,7 @@ type
     procedure AggressiveUpdate;
   private
     class function GetMainContainer: TCastleContainer;
+    class procedure HandleRenderBackendChange(Sender: TObject);
     procedure SystemSetMousePosition(const Value: TVector2);
     function IsVulkanBackendRequested: Boolean;
     function CreateVulkanSurface(const AInstance: VkInstance): VkSurfaceKHR;
@@ -350,6 +351,7 @@ type
     procedure SetCustomVulkanSurfaceDesc(const ADesc: TVulkanNativeSurfaceDesc);
     procedure ClearCustomVulkanSurfaceDesc;
     class function SharedVulkanDevice: TVulkanRHIDevice;
+    class function SwitchRenderBackend(const ANewBackend: TRenderBackend): Boolean;
     property OnCreateVulkanSurface: TVulkanCreateSurfaceEvent
       read FOnCreateVulkanSurface write FOnCreateVulkanSurface;
     property VulkanSwapchainSurface: TCastleVulkanSwapchainSurface read FVulkanSwapchainSurface;
@@ -881,6 +883,43 @@ end;
 class function TCastleControl.SharedVulkanDevice: TVulkanRHIDevice;
 begin
   Result := SharedControlVulkanDevice;
+end;
+
+class procedure TCastleControl.HandleRenderBackendChange(Sender: TObject);
+var
+  I: Integer;
+  Ctrl: TCastleControl;
+begin
+  if (ControlsList = nil) or (ControlsList.Count = 0) then
+    Exit;
+
+  for I := ControlsList.Count - 1 downto 0 do
+    if ControlsList[I] is TCastleControl then
+      TCastleControl(ControlsList[I]).FinalizeContextIfNeeded;
+
+  if ApplicationProperties.RenderBackend = backendVulkan then
+  begin
+    FreeAndNil(GLVersion);
+    FreeAndNil(GLFeatures);
+  end;
+
+  for I := 0 to ControlsList.Count - 1 do
+    if ControlsList[I] is TCastleControl then
+    begin
+      Ctrl := TCastleControl(ControlsList[I]);
+      Ctrl.FDisableVulkanForControl := False;
+      if Ctrl.HandleAllocated then
+        Ctrl.Invalidate;
+    end;
+end;
+
+class function TCastleControl.SwitchRenderBackend(const ANewBackend: TRenderBackend): Boolean;
+begin
+  if ApplicationProperties.RenderBackend <> ANewBackend then
+    ApplicationProperties.RenderBackend := ANewBackend
+  else
+    HandleRenderBackendChange(nil);
+  Result := (ANewBackend <> backendVulkan) or (SharedControlVulkanDevice <> nil) or (ControlsList.Count = 0);
 end;
 
 function TCastleControl.IsVulkanBackendRequested: Boolean;
@@ -1720,7 +1759,11 @@ initialization
   ControlsList := TComponentList.Create(false);
   InitializeClipboard;
   OnMainContainer := @TCastleControl(nil).GetMainContainer;
+  if ApplicationProperties <> nil then
+    ApplicationProperties.OnRenderBackendChange.Add(@TCastleControl(nil).HandleRenderBackendChange);
 finalization
+  if ApplicationProperties(false) <> nil then
+    ApplicationProperties(false).OnRenderBackendChange.Remove(@TCastleControl(nil).HandleRenderBackendChange);
   OnMainContainer := nil;
   if OwnsSharedControlVulkanDevice then
   begin

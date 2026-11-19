@@ -37,6 +37,7 @@ type
     function Focused: boolean; override;
     procedure SetInternalCursor(const Value: TMouseCursor); override;
     function SaveScreen(const SaveRect: TRectangle): TRGBImage; overload; override;
+    function SaveScreenRgba(const SaveRect: TRectangle): TRGBAlphaImage; overload; override;
     procedure SystemSetMousePosition(const Value: TVector2); override;
     function SettingMousePositionCausesMotion: Boolean; override;
   end;
@@ -84,6 +85,7 @@ end;
 
 function TWindowContainer.SaveScreen(const SaveRect: TRectangle): TRGBImage;
 begin
+  Parent.MakeCurrent;
   if (RHIDevice <> nil) and (ActiveCommandList = nil) then
     Exit(inherited SaveScreen(SaveRect));
 
@@ -96,6 +98,17 @@ begin
   EventBeforeRender;
   EventRender;
   Result := SaveScreen_NoFlush(SaveRect, Parent.SaveScreenBuffer);
+end;
+
+function TWindowContainer.SaveScreenRgba(const SaveRect: TRectangle): TRGBAlphaImage;
+begin
+  Parent.MakeCurrent;
+  if (RHIDevice <> nil) and (ActiveCommandList = nil) then
+    Exit(inherited SaveScreenRgba(SaveRect));
+
+  EventBeforeRender;
+  EventRender;
+  Result := SaveScreen_NoFlush(TRGBAlphaImage, SaveRect, Parent.SaveScreenBuffer) as TRGBAlphaImage;
 end;
 
 procedure TWindowContainer.SystemSetMousePosition(const Value: TVector2);

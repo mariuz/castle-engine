@@ -20,7 +20,7 @@
   - TCastleWindow cross-platform WSI VkSurfaceKHR descriptor resolution }
 program vulkan_3d_scene;
 
-{$I castleconf.inc}
+{$ifdef FPC}{$mode objfpc}{$H+}{$endif}
 
 uses
   {$if defined(FPC) and defined(UNIX) and (not defined(CASTLE_DISABLE_THREADS))}

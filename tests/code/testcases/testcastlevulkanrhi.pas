@@ -14,7 +14,7 @@
 { Test CastleInternalRHI and Vulkan backend subsystems. }
 unit TestCastleVulkanRHI;
 
-{$I castleconf.inc}
+{$I ../../../src/common_includes/castleconf.inc}
 
 interface
 
@@ -423,6 +423,9 @@ type
     procedure TestBufferDeviceAddressAccelerationStructureSBTAndMeshShaderHeadlessRHI;
     procedure TestRealLavapipeHardwareBLASCompactionTLASRayQueryTraceRaysAndSoftwareLBVHParityRHI;
     procedure TestRealLavapipeMeshShaderDrawMeshTasksIndirectAndSoftwareMeshletFallbackParityRHI;
+    procedure TestMemoryPoolDefragmentationHeadlessAndRealGpuBufferRelocationRHI;
+    procedure TestMultiWindowSharedVulkanDeviceSwapchainsResizeAndTeardownRHI;
+    procedure TestRuntimeRenderBackendHotSwitchOpenGLToVulkanToOpenGLVisualParityRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -35424,6 +35427,625 @@ begin
     SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
     FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMemoryPoolDefragmentationHeadlessAndRealGpuBufferRelocationRHI;
+const
+  HeadlessChunkCount = 24;
+  HeadlessChunkBytes = 8 * 1024;
+  GpuBufCount = 20;
+  GpuBufBytes = 64 * 1024;
+  GpuDwordCount = GpuBufBytes div SizeOf(Cardinal);
+  GpuBlockBytes = 512 * 1024;
+var
+  Allocator: TCastleVulkanMemoryAllocator;
+  MemReq: VkMemoryRequirements;
+  Allocs: array[0 .. HeadlessChunkCount - 1] of TVulkanMemoryAllocation;
+  StatsBefore, StatsAfter: TVulkanMemoryStats;
+  DefragBudgeted, DefragFull, GpuDefrag: TVulkanDefragmentStats;
+  LargestBefore, LargestAfter: UInt64;
+  FragBefore, FragAfter: Single;
+  I, J: Integer;
+  PData: PCardinal;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  VkDev: TVulkanRHIDevice;
+  FillerBufs: array of TVulkanRHIBuffer;
+  ProbeBuf: TVulkanRHIBuffer;
+  GpuBufs: array[0 .. GpuBufCount - 1] of TVulkanRHIBuffer;
+  ReadbackBuf: TVulkanRHIBuffer;
+  SrcPattern, DstPattern: array of Cardinal;
+  StorageBinding: TRHIDescriptorBindingDesc;
+  DescLayout: TRHIDescriptorSetLayout;
+  DescSet: TVulkanRHIDescriptorSet;
+  Cmd: VkCommandBuffer;
+  CopyReg: VkBufferCopy;
+  VkAllocsBefore, VkAllocsAfter: Cardinal;
+begin
+  { Part A: Headless TCastleVulkanMemoryAllocator.DefragmentPools (budgeted + full multi-block evacuation) }
+  FillChar(Allocs, SizeOf(Allocs), 0);
+  Allocator := TCastleVulkanMemoryAllocator.Create(nil, nil, 4096, True);
+  try
+    Allocator.PreferredHostVisibleBlockSize := 64 * 1024; // 64 KB blocks to exercise multi-block evacuation
+
+    FillChar(MemReq, SizeOf(MemReq), 0);
+    MemReq.size := HeadlessChunkBytes;
+    MemReq.alignment := 256;
+    MemReq.memoryTypeBits := $FFFFFFFF;
+
+    for I := 0 to HeadlessChunkCount - 1 do
+    begin
+      Allocs[I] := Allocator.Allocate(MemReq, muGpuToCpu, True, False, False, @Allocs[I]);
+      AssertTrue('Movable allocation must be valid', Allocs[I].IsValid);
+      AssertTrue('Host-visible simulated MappedPtr must be non-nil', Allocs[I].MappedPtr <> nil);
+      PData := PCardinal(Allocs[I].MappedPtr);
+      for J := 0 to (HeadlessChunkBytes div SizeOf(Cardinal)) - 1 do
+        PData[J] := Cardinal($A5000000) or (Cardinal(I) shl 16) or Cardinal(J);
+    end;
+
+    { Free 18 of the 24 chunks (every index where I mod 4 <> 0), leaving 6 sparse chunks across 3+ blocks }
+    for I := 0 to HeadlessChunkCount - 1 do
+      if (I mod 4) <> 0 then
+        Allocator.Free(Allocs[I]);
+
+    StatsBefore := Allocator.GetStats;
+    FragBefore := Allocator.ComputeLinearPoolFragmentation(LargestBefore);
+    AssertTrue('Fragmented pool must span multiple Linear blocks before defrag',
+      StatsBefore.LinearBlockCount >= 3);
+    AssertTrue('FragmentationRatioBefore must be > 0.20 across fragmented multi-block pool',
+      FragBefore > 0.20);
+
+    { 1. Budgeted incremental defragment pass (move at most 2 allocations / 16 KB) }
+    DefragBudgeted := Allocator.DefragmentPools(16 * 1024, 2);
+    AssertTrue('Budgeted DefragmentPools must move <= 2 allocations',
+      DefragBudgeted.RelocatedAllocations <= 2);
+    AssertTrue('Budgeted DefragmentPools must move <= 16 KB',
+      DefragBudgeted.RelocatedBytes <= 16 * 1024);
+
+    { 2. Full defragment pass: evacuates sparse blocks and frees emptied VkDeviceMemory blocks }
+    DefragFull := Allocator.DefragmentPools;
+    StatsAfter := Allocator.GetStats;
+    FragAfter := Allocator.ComputeLinearPoolFragmentation(LargestAfter);
+
+    AssertTrue('DefragmentPools must free at least 1 emptied block',
+      (DefragBudgeted.FreedBlocks + DefragFull.FreedBlocks) >= 1);
+    AssertTrue('TotalVkAllocationCount must decrease after freeing evacuated blocks',
+      StatsAfter.TotalVkAllocationCount < StatsBefore.TotalVkAllocationCount);
+    AssertTrue('FragmentationRatioAfter must be strictly lower than FragmentationRatioBefore',
+      FragAfter < FragBefore);
+
+    { Verify 100% payload preservation across all 6 surviving relocated chunks }
+    for I := 0 to HeadlessChunkCount - 1 do
+      if (I mod 4) = 0 then
+      begin
+        AssertTrue('Surviving allocation must remain valid after defrag', Allocs[I].IsValid);
+        PData := PCardinal(Allocs[I].MappedPtr);
+        for J := 0 to (HeadlessChunkBytes div SizeOf(Cardinal)) - 1 do
+          AssertEquals('Surviving payload word must match after compaction',
+            Int64(Cardinal($A5000000) or (Cardinal(I) shl 16) or Cardinal(J)),
+            Int64(PData[J]));
+        Allocator.Free(Allocs[I]);
+      end;
+  finally
+    FreeAndNil(Allocator);
+  end;
+
+  { Part B: Live Vulkan GPU TVulkanRHIDevice.DefragmentMemoryPools with vkCmdCopyBuffer & DescriptorSet refresh }
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  FillerBufs := nil;
+  ProbeBuf := nil;
+  FillChar(GpuBufs, SizeOf(GpuBufs), 0);
+  ReadbackBuf := nil;
+  DescSet := nil;
+  DescLayout := nil;
+  VkDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(VkDev, True) then
+    Exit;
+  try
+    SetRHIDevice(VkDev);
+    VkDev.ResetValidationCounters;
+    VkDev.MemoryAllocator.PreferredGpuOnlyBlockSize := GpuBlockBytes;
+    VkDev.MemoryAllocator.PreferredHostVisibleBlockSize := GpuBlockBytes;
+
+    { On UMA GPUs (such as Mesa Lavapipe), memoryTypeIndex 0 already holds the 16 MB startup
+      ring-buffer block; top off any pre-existing >512 KB block with pinned filler chunks so
+      subsequent GpuBufs[0..19] deterministically span 3 fresh 512 KB VkDeviceMemory blocks. }
+    for I := 0 to 255 do
+    begin
+      ProbeBuf := VkDev.CreateBuffer(
+        TRHIBufferDesc.Create(128 * 1024, [buAccelerationStructureStorage],
+          muGpuOnly, 'DefragStartupFiller_' + IntToStr(I))) as TVulkanRHIBuffer;
+      if (ProbeBuf.Allocation.Block <> nil) and
+         (ProbeBuf.Allocation.Block.Size <= GpuBlockBytes) then
+      begin
+        FreeAndNil(ProbeBuf);
+        VkDev.FlushAllDeferredDeletions;
+        Break;
+      end;
+      SetLength(FillerBufs, Length(FillerBufs) + 1);
+      FillerBufs[High(FillerBufs)] := ProbeBuf;
+      ProbeBuf := nil;
+    end;
+
+    SetLength(SrcPattern, GpuDwordCount);
+    SetLength(DstPattern, GpuDwordCount);
+
+    for I := 0 to GpuBufCount - 1 do
+    begin
+      for J := 0 to GpuDwordCount - 1 do
+        SrcPattern[J] := Cardinal($5C000000) or (Cardinal(I) shl 16) or Cardinal(J);
+      GpuBufs[I] := VkDev.CreateBuffer(
+        TRHIBufferDesc.Create(GpuBufBytes, [buStorage, buVertex, buShaderDeviceAddress],
+          muGpuOnly, 'DefragGpuBuf_' + IntToStr(I)),
+        @SrcPattern[0]) as TVulkanRHIBuffer;
+    end;
+    VkDev.FlushStagingUploads(nil);
+    VkDev.WaitIdle;
+
+    { Bind tail-block buffer GpuBufs[16] into a persistent TVulkanRHIDescriptorSet }
+    FillChar(StorageBinding, SizeOf(StorageBinding), 0);
+    StorageBinding.Binding := 0;
+    StorageBinding.DescriptorType := dtStorageBuffer;
+    StorageBinding.Count := 1;
+    StorageBinding.StageFlags := [ssCompute];
+    DescLayout := VkDev.CreateDescriptorSetLayout([StorageBinding]);
+    DescSet := VkDev.CreateDescriptorSet(DescLayout) as TVulkanRHIDescriptorSet;
+    DescSet.BindStorageBuffer(0, GpuBufs[16]);
+    DescSet.Update;
+
+    { Free 15 of the 20 VRAM buffers so 5 surviving 64 KB buffers (320 KB total) fit into 1 x 512 KB block }
+    for I := 0 to GpuBufCount - 1 do
+      if (I mod 4) <> 0 then
+        FreeAndNil(GpuBufs[I]);
+    VkDev.FlushAllDeferredDeletions;
+
+    VkAllocsBefore := VkDev.MemoryAllocator.TotalVkAllocationCount;
+    GpuDefrag := VkDev.DefragmentMemoryPools;
+    VkAllocsAfter := VkDev.MemoryAllocator.TotalVkAllocationCount;
+
+    AssertTrue('Live GPU DefragmentMemoryPools must relocate >= 1 muGpuOnly VkBuffer',
+      GpuDefrag.RelocatedAllocations >= 1);
+    AssertTrue('Live GPU DefragmentMemoryPools must free >= 1 emptied VkDeviceMemory block',
+      (GpuDefrag.FreedBlocks >= 1) and (VkAllocsAfter < VkAllocsBefore));
+    AssertTrue('Bound persistent TVulkanRHIDescriptorSet must auto-refresh UpdateCount on relocation',
+      DescSet.UpdateCount >= 2);
+    if VkDev.Capabilities.SupportsBufferDeviceAddress then
+      AssertTrue('Relocated buffer DeviceAddress must remain valid non-zero',
+        GpuBufs[16].DeviceAddress <> 0);
+
+    { Read back all 4 surviving muGpuOnly buffers from GPU VRAM via vkCmdCopyBuffer and verify bit-exact contents }
+    ReadbackBuf := VkDev.CreateBuffer(
+      TRHIBufferDesc.Create(GpuBufBytes, [buTransferDst], muGpuToCpu, 'DefragReadback')) as TVulkanRHIBuffer;
+
+    for I := 0 to GpuBufCount - 1 do
+      if GpuBufs[I] <> nil then
+      begin
+        Cmd := VkDev.BeginSingleTimeCommands;
+        FillChar(CopyReg, SizeOf(CopyReg), 0);
+        CopyReg.size := GpuBufBytes;
+        vkCmdCopyBuffer(Cmd, GpuBufs[I].Handle, ReadbackBuf.Handle, 1, @CopyReg);
+        VkDev.EndSingleTimeCommands(Cmd);
+
+        VkDev.MemoryAllocator.InvalidateAllocation(ReadbackBuf.Allocation, 0, GpuBufBytes);
+        PData := PCardinal(ReadbackBuf.Map);
+        Move(PData^, DstPattern[0], GpuBufBytes);
+        ReadbackBuf.Unmap;
+
+        for J := 0 to GpuDwordCount - 1 do
+          if DstPattern[J] <> (Cardinal($5C000000) or (Cardinal(I) shl 16) or Cardinal(J)) then
+            Fail(Format('GPU buffer %d word %d corrupted during vkCmdCopyBuffer defragmentation (expected $%x, got $%x)',
+              [I, J, Cardinal($5C000000) or (Cardinal(I) shl 16) or Cardinal(J), DstPattern[J]]));
+      end;
+
+    VkDev.AssertZeroValidationErrors('Phase118.MemoryPoolDefragmentationGpu');
+  finally
+    FreeAndNil(ProbeBuf);
+    FreeAndNil(ReadbackBuf);
+    FreeAndNil(DescSet);
+    FreeAndNil(DescLayout);
+    for I := 0 to GpuBufCount - 1 do
+      FreeAndNil(GpuBufs[I]);
+    for I := 0 to High(FillerBufs) do
+      FreeAndNil(FillerBufs[I]);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiWindowSharedVulkanDeviceSwapchainsResizeAndTeardownRHI;
+
+  procedure PopulateLitBoxWindow(const AWin: TCastleWindow; const AColor: TVector3);
+  var
+    Vp: TCastleViewport;
+    Box: TCastleBox;
+    Light: TCastleDirectionalLight;
+  begin
+    Vp := TCastleViewport.Create(AWin);
+    Vp.FullSize := True;
+    Vp.BackgroundColor := Vector4(0.05, 0.05, 0.08, 1.0);
+    AWin.Controls.InsertFront(Vp);
+
+    Vp.Camera.SetWorldView(Vector3(0.0, 0.0, 3.2), Vector3(0.0, 0.0, -1.0), Vector3(0.0, 1.0, 0.0));
+
+    Light := TCastleDirectionalLight.Create(AWin);
+    Light.Direction := Vector3(0.2, 0.3, 1.0).Normalize;
+    Light.Intensity := 2.8;
+    Vp.Items.Add(Light);
+
+    Box := TCastleBox.Create(AWin);
+    Box.Size := Vector3(1.8, 1.8, 1.2);
+    Box.Color := Vector4(AColor, 1.0);
+    Vp.Items.Add(Box);
+  end;
+
+var
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedOnInit: TProcedure;
+  WinA, WinB: TCastleWindow;
+  SharedDev: TVulkanRHIDevice;
+  OverlayB: TCastleShape;
+  ShotA, ShotB, ShotBAfterCloseA: TRGBAlphaImage;
+  CenterA, CenterB, CornerB, CenterB2: TVector4Byte;
+  I: Integer;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  SurfDescB: TVulkanNativeSurfaceDesc;
+  {$endif}
+begin
+  if not CanCreateWindowForTest then
+    Exit;
+  if not Application.MultipleWindowsPossible then
+    Exit;
+
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+  if not HasDisplay then
+    Exit;
+  {$endif}
+
+  try
+    if not LoadVulkan then
+      Exit;
+  except
+    on Exception do
+      Exit;
+  end;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedOnInit := Application.OnInitialize;
+  WinA := nil;
+  WinB := nil;
+  ShotA := nil;
+  ShotB := nil;
+  ShotBAfterCloseA := nil;
+  try
+    SetActiveCommandList(nil);
+    SetRHIDevice(nil);
+    ApplicationProperties.RenderBackend := backendVulkan;
+    Application.OnInitialize := nil;
+    Application.Initialize;
+
+    WinA := CreateWindowForTest;
+    WinA.Width := 128;
+    WinA.Height := 96;
+    WinA.Caption := 'Phase118_WinA';
+    WinA.Open;
+    if not (RHIDevice is TVulkanRHIDevice) then
+    begin
+      WinA.Close(False);
+      Exit;
+    end;
+
+    SharedDev := TCastleWindow.SharedVulkanDevice;
+    AssertTrue('SharedVulkanDevice must be initialized on first Vulkan TCastleWindow.Open',
+      SharedDev <> nil);
+    SharedDev.ResetValidationCounters;
+
+    WinB := TCastleWindow.Create(nil);
+    WinB.Width := 160;
+    WinB.Height := 120;
+    WinB.Caption := 'Phase118_WinB';
+    WinB.Open;
+
+    AssertEquals('Both WinA and WinB must be open simultaneously', 2, Application.OpenWindowsCount);
+    AssertTrue('Both windows must share the exact same TVulkanRHIDevice instance',
+      (TCastleWindow.SharedVulkanDevice = SharedDev) and (RHIDevice = SharedDev));
+    AssertEquals('SharedVulkanDevice must host 2 active swapchain surfaces',
+      2, SharedDev.SwapchainSurfaceCount);
+    AssertTrue('WinA and WinB must have distinct TCastleVulkanSwapchainSurface instances',
+      (WinA.VulkanSwapchainSurface <> nil) and
+      (WinB.VulkanSwapchainSurface <> nil) and
+      (WinA.VulkanSwapchainSurface <> WinB.VulkanSwapchainSurface));
+    AssertTrue('Pure-Vulkan multi-window mode must keep GLFeatures = nil', GLFeatures = nil);
+
+    { Populate WinA with Red 3D Box and WinB with Blue 3D Box + Green 2D UI badge }
+    PopulateLitBoxWindow(WinA, Vector3(0.95, 0.05, 0.04));
+    PopulateLitBoxWindow(WinB, Vector3(0.04, 0.20, 0.95));
+    OverlayB := TCastleShape.Create(WinB);
+    OverlayB.ShapeType := stRectangle;
+    OverlayB.Color := Vector4(0.10, 0.92, 0.15, 1.0);
+    OverlayB.Width := 36;
+    OverlayB.Height := 28;
+    OverlayB.Anchor(hpLeft, 4);
+    OverlayB.Anchor(vpBottom, 4);
+    WinB.Controls.InsertFront(OverlayB);
+
+    for I := 0 to 1 do
+    begin
+      WinA.Invalidate;
+      WinB.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+
+    { Resize WinB swapchain while WinA stays at 128x96 }
+    {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+    SurfDescB := WinB.BuildVulkanNativeSurfaceDesc;
+    if (SurfDescB.Platform = vwsiXlib) and (SurfDescB.XlibDisplay <> nil) and (SurfDescB.XlibWindow <> 0) then
+    begin
+      XResizeWindow(PDisplay(SurfDescB.XlibDisplay), TWindow(SurfDescB.XlibWindow), 192, 144);
+      XSync(PDisplay(SurfDescB.XlibDisplay), False);
+    end else
+      WinB.VulkanSwapchainSurface.Resize(192, 144);
+    {$else}
+    WinB.VulkanSwapchainSurface.Resize(192, 144);
+    {$endif}
+    for I := 0 to 1 do
+    begin
+      WinA.Invalidate;
+      WinB.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+
+    AssertTrue('Both Vulkan windows must have presented swapchain frames',
+      (WinA.VulkanFramesRenderedCount >= 2) and (WinB.VulkanFramesRenderedCount >= 2));
+
+    ShotA := WinA.Container.SaveScreenRgba;
+    ShotB := WinB.Container.SaveScreenRgba;
+    AssertEquals('ShotA width = 128', 128, ShotA.Width);
+    AssertEquals('WinB resized swapchain width = 192', 192, Integer(WinB.VulkanSwapchainSurface.SwapchainExtent.width));
+
+    CenterA := ShotA.PixelPtr(ShotA.Width div 2, ShotA.Height div 2)^;
+    CenterB := ShotB.PixelPtr(ShotB.Width div 2, ShotB.Height div 2)^;
+    CornerB := ShotB.PixelPtr(16, 16)^;
+    AssertTrue(Format('WinA center must show lit Red box (got R=%d G=%d B=%d)',
+      [CenterA.X, CenterA.Y, CenterA.Z]),
+      (CenterA.X > 110) and (CenterA.X > CenterA.Z + 60));
+    AssertTrue(Format('WinB center must show lit Blue box (got R=%d G=%d B=%d)',
+      [CenterB.X, CenterB.Y, CenterB.Z]),
+      (CenterB.Z > 110) and (CenterB.Z > CenterB.X + 60));
+    AssertTrue(Format('WinB bottom-left UI overlay must show Green badge (got R=%d G=%d B=%d)',
+      [CornerB.X, CornerB.Y, CornerB.Z]),
+      (CornerB.Y > 170) and (CornerB.X < 60));
+
+    { Close WinA mid-session while WinB remains open and continues rendering }
+    WinA.Close(False);
+    AssertEquals('OpenWindowsCount = 1 after closing WinA', 1, Application.OpenWindowsCount);
+    AssertTrue('SharedVulkanDevice must stay alive for remaining open WinB',
+      (TCastleWindow.SharedVulkanDevice = SharedDev) and (SharedDev.SwapchainSurfaceCount = 1));
+
+    WinB.Invalidate;
+    Application.ProcessAllMessages;
+    ShotBAfterCloseA := WinB.Container.SaveScreenRgba;
+    CenterB2 := ShotBAfterCloseA.PixelPtr(ShotBAfterCloseA.Width div 2, ShotBAfterCloseA.Height div 2)^;
+    AssertTrue(Format('WinB must continue rendering cleanly after WinA closes (got R=%d G=%d B=%d)',
+      [CenterB2.X, CenterB2.Y, CenterB2.Z]),
+      (CenterB2.Z > 110) and (CenterB2.Z > CenterB2.X + 60));
+
+    SharedDev.AssertZeroValidationErrors('Phase118.MultiWindowSharedVulkanSwapchains');
+
+    WinB.Close(False);
+    AssertTrue('SharedVulkanDevice and RHIDevice must be torn down after last Vulkan window closes',
+      (TCastleWindow.SharedVulkanDevice = nil) and (RHIDevice = nil));
+  finally
+    FreeAndNil(ShotBAfterCloseA);
+    FreeAndNil(ShotB);
+    FreeAndNil(ShotA);
+    if WinB <> nil then
+    begin
+      if not WinB.Closed then
+        WinB.Close(False);
+      FreeAndNil(WinB);
+    end;
+    if (WinA <> nil) and (not WinA.Closed) then
+      WinA.Close(False);
+    DestroyWindowForTest(WinA);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRuntimeRenderBackendHotSwitchOpenGLToVulkanToOpenGLVisualParityRHI;
+var
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedOnInit: TProcedure;
+  Win: TCastleWindow;
+  Vp: TCastleViewport;
+  Box: TCastleBox;
+  Sphere: TCastleSphere;
+  Light: TCastleDirectionalLight;
+  UiRect: TCastleShape;
+  ImgGLBefore, ImgVulkanMid, ImgGLAfter: TRGBAlphaImage;
+  MetricsGLVk, MetricsGLRoundtrip: TRHIVisualDiffMetrics;
+  PxBox, PxSphere, PxUi: TVector4Byte;
+  HotSwitchesBefore: Cardinal;
+  I: Integer;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {$endif}
+begin
+  if not CanCreateWindowForTest then
+    Exit;
+
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+  if not HasDisplay then
+    Exit;
+  {$endif}
+
+  try
+    if not LoadVulkan then
+      Exit;
+  except
+    on Exception do
+      Exit;
+  end;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedOnInit := Application.OnInitialize;
+  Win := nil;
+  ImgGLBefore := nil;
+  ImgVulkanMid := nil;
+  ImgGLAfter := nil;
+  try
+    SetActiveCommandList(nil);
+    SetRHIDevice(nil);
+    ApplicationProperties.RenderBackend := backendOpenGL;
+    Application.OnInitialize := nil;
+    Application.Initialize;
+    HotSwitchesBefore := Application.RenderBackendHotSwitchCount;
+
+    { 1. Open TCastleWindow on OpenGL 4.5 with persistent 3D Viewport + Scene + 2D UI tree }
+    Win := CreateWindowForTest;
+    Win.Width := 160;
+    Win.Height := 120;
+    Win.AntiAliasing := aaNone;
+    Win.Open;
+
+    AssertTrue('Initial backendOpenGL must have GLFeatures <> nil and RHIDevice = nil',
+      (GLFeatures <> nil) and (RHIDevice = nil));
+
+    Vp := TCastleViewport.Create(Win);
+    Vp.FullSize := True;
+    Vp.BackgroundColor := Vector4(0.08, 0.10, 0.14, 1.0);
+    Win.Controls.InsertFront(Vp);
+
+    Vp.Camera.SetWorldView(Vector3(0.0, 0.0, 4.2), Vector3(0.0, 0.0, -1.0), Vector3(0.0, 1.0, 0.0));
+
+    Light := TCastleDirectionalLight.Create(Win);
+    Light.Direction := Vector3(0.25, 0.35, 1.0).Normalize;
+    Light.Intensity := 2.8;
+    Vp.Items.Add(Light);
+
+    Box := TCastleBox.Create(Win);
+    Box.Size := Vector3(1.5, 1.5, 1.2);
+    Box.Translation := Vector3(-1.05, 0.0, 0.0);
+    Box.Color := Vector4(0.95, 0.08, 0.05, 1.0);
+    Vp.Items.Add(Box);
+
+    Sphere := TCastleSphere.Create(Win);
+    Sphere.Radius := 0.85;
+    Sphere.Translation := Vector3(1.05, 0.0, 0.0);
+    Sphere.Color := Vector4(0.05, 0.35, 0.95, 1.0);
+    Vp.Items.Add(Sphere);
+
+    UiRect := TCastleShape.Create(Win);
+    UiRect.ShapeType := stRectangle;
+    UiRect.Color := Vector4(0.95, 0.85, 0.12, 1.0);
+    UiRect.Width := 32;
+    UiRect.Height := 22;
+    UiRect.Anchor(hpLeft, 6);
+    UiRect.Anchor(vpBottom, 6);
+    Win.Controls.InsertFront(UiRect);
+
+    for I := 0 to 1 do
+    begin
+      Win.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+    ImgGLBefore := Win.Container.SaveScreenRgba;
+
+    { 2. Live hot-switch OpenGL -> Vulkan WITHOUT closing/destroying user Scene or UI objects }
+    ApplicationProperties.RenderBackend := backendVulkan;
+    if not (RHIDevice is TVulkanRHIDevice) then
+    begin
+      Win.Close(False);
+      Exit;
+    end;
+
+    AssertFalse('Window must remain open after live OpenGL -> Vulkan hot-switch', Win.Closed);
+    AssertEquals('RenderBackendHotSwitchCount must increment by 1',
+      Integer(HotSwitchesBefore + 1), Integer(Application.RenderBackendHotSwitchCount));
+    AssertEquals('Win.BackendSwitchCount = 1', 1, Integer(Win.BackendSwitchCount));
+    AssertTrue('Pure-Vulkan mode must clear GLFeatures/GLVersion and create VulkanSwapchainSurface',
+      (GLFeatures = nil) and (GLVersion = nil) and (Win.VulkanSwapchainSurface <> nil));
+
+    TVulkanRHIDevice(RHIDevice).ResetValidationCounters;
+    for I := 0 to 1 do
+    begin
+      Win.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+    AssertTrue('VulkanFramesRenderedCount >= 2 after hot-switch',
+      Win.VulkanFramesRenderedCount >= 2);
+    ImgVulkanMid := Win.Container.SaveScreenRgba;
+
+    PxBox := ImgVulkanMid.PixelPtr(46, 60)^;
+    PxSphere := ImgVulkanMid.PixelPtr(114, 60)^;
+    PxUi := ImgVulkanMid.PixelPtr(18, 16)^;
+    AssertTrue(Format('Hot-switched Vulkan frame must render left Red box (got R=%d G=%d B=%d)',
+      [PxBox.X, PxBox.Y, PxBox.Z]),
+      (PxBox.X >= 105) and (PxBox.X > PxBox.Z + 55));
+    AssertTrue(Format('Hot-switched Vulkan frame must render right Blue sphere (got R=%d G=%d B=%d)',
+      [PxSphere.X, PxSphere.Y, PxSphere.Z]),
+      (PxSphere.Z >= 105) and (PxSphere.Z > PxSphere.X + 55));
+    AssertTrue(Format('Hot-switched Vulkan frame must render Yellow 2D UI badge (got R=%d G=%d B=%d)',
+      [PxUi.X, PxUi.Y, PxUi.Z]),
+      (PxUi.X > 180) and (PxUi.Y > 160) and (PxUi.Z < 60));
+
+    CompareImagesDetailedDiff(ImgGLBefore, ImgVulkanMid, 0.08, MetricsGLVk);
+    AssertTrue(Format('Live hot-switched Vulkan output must visually match OpenGL output (RMSE=%.5f <= 0.08)',
+      [MetricsGLVk.NormalizedRMSE]),
+      MetricsGLVk.Passed);
+    TVulkanRHIDevice(RHIDevice).AssertZeroValidationErrors('Phase118.HotSwitchOpenGLToVulkan');
+
+    { 3. Live hot-switch Vulkan -> OpenGL back again on the exact same open window & scene }
+    ApplicationProperties.RenderBackend := backendOpenGL;
+
+    AssertFalse('Window must remain open after live Vulkan -> OpenGL hot-switch', Win.Closed);
+    AssertEquals('RenderBackendHotSwitchCount must increment by 2',
+      Integer(HotSwitchesBefore + 2), Integer(Application.RenderBackendHotSwitchCount));
+    AssertEquals('Win.BackendSwitchCount = 2', 2, Integer(Win.BackendSwitchCount));
+    AssertTrue('Vulkan device must be torn down and GLFeatures restored after switching back to OpenGL',
+      (RHIDevice = nil) and (TCastleWindow.SharedVulkanDevice = nil) and
+      (GLFeatures <> nil) and (GLVersion <> nil));
+
+    for I := 0 to 1 do
+    begin
+      Win.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+    ImgGLAfter := Win.Container.SaveScreenRgba;
+
+    AssertTrue('Round-trip OpenGL -> Vulkan -> OpenGL output must match original OpenGL pixel-for-pixel (RMSE <= 0.01)',
+      CompareImagesDetailedDiff(ImgGLBefore, ImgGLAfter, 0.01, MetricsGLRoundtrip));
+
+    Win.Close(False);
+  finally
+    FreeAndNil(ImgGLAfter);
+    FreeAndNil(ImgVulkanMid);
+    FreeAndNil(ImgGLBefore);
+    if (Win <> nil) and (not Win.Closed) then
+      Win.Close(False);
+    DestroyWindowForTest(Win);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
   end;
 end;
 

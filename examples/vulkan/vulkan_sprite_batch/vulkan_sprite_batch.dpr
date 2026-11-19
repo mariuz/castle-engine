@@ -16,7 +16,7 @@
   multi-batch draw call coalescing on the Vulkan 1.3+ RHI backend. }
 program vulkan_sprite_batch;
 
-{$I castleconf.inc}
+{$ifdef FPC}{$mode objfpc}{$H+}{$endif}
 
 uses
   SysUtils, Classes, Math,

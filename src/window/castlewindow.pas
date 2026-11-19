@@ -556,10 +556,12 @@ type
     FCustomVulkanSurfaceDesc: TVulkanNativeSurfaceDesc;
     FHasCustomVulkanSurfaceDesc: Boolean;
     FOnCreateVulkanSurface: TVulkanCreateSurfaceEvent;
+    FVulkanSwapchainSurface: TCastleVulkanSwapchainSurface;
     FVulkanSurfaceHandle: VkSurfaceKHR;
     FOwnsVulkanRHIDevice: Boolean;
     FDisableVulkanForCurrentOpen: Boolean;
     FVulkanFramesRenderedCount: Cardinal;
+    FBackendSwitchCount: Cardinal;
     function GetColorBits: Cardinal;
     procedure SetColorBits(const Value: Cardinal);
     procedure SetAntiAliasing(const Value: TAntiAliasing);
@@ -1680,11 +1682,20 @@ type
       advancing the frame ring index and incrementing VulkanFramesRenderedCount. }
     procedure EndVulkanFrameIfNeeded;
 
+    { Returns the shared WSI-capable TVulkanRHIDevice used across open Vulkan TCastleWindow instances. }
+    class function SharedVulkanDevice: TVulkanRHIDevice;
+
+    { Hot-switches the active rendering backend (e.g. backendOpenGL <-> backendVulkan) across open
+      windows at runtime without restarting the application or losing UI/scene-graph state. }
+    function SwitchRenderBackend(const ANewBackend: TRenderBackend): Boolean;
+
     property OnCreateVulkanSurface: TVulkanCreateSurfaceEvent
       read FOnCreateVulkanSurface write FOnCreateVulkanSurface;
+    property VulkanSwapchainSurface: TCastleVulkanSwapchainSurface read FVulkanSwapchainSurface;
     property VulkanSurfaceHandle: VkSurfaceKHR read FVulkanSurfaceHandle;
     property HasCustomVulkanSurfaceDesc: Boolean read FHasCustomVulkanSurfaceDesc;
     property VulkanFramesRenderedCount: Cardinal read FVulkanFramesRenderedCount;
+    property BackendSwitchCount: Cardinal read FBackendSwitchCount;
 
     { Create the window with associated rendering context and show it.
 
@@ -2186,8 +2197,13 @@ type
       do not read or write this field directly. }
     FPendingDropFiles: TCastleStringList;
     FPageUrlParameters: TStringStringMap;
+    FSwitchingRenderBackend: Boolean;
+    FPendingRenderBackendSwitch: Boolean;
+    FRenderBackendHotSwitchCount: Cardinal;
 
     FOpenWindows: TWindowList;
+    procedure HandleApplicationRenderBackendChange(Sender: TObject);
+    procedure PerformRenderBackendHotSwitch;
     function GetOpenWindows(Index: integer): TCastleWindow;
     { Run @link(OnInitialize) and
       @link(TCastleApplicationProperties.OnInitializeJavaActivity) callbacks,
@@ -2675,6 +2691,11 @@ end.
     }
     function PageUrlParameters: TStringStringMap;
 
+    { Hot-switches ApplicationProperties.RenderBackend at runtime across all currently open
+      TCastleWindow instances (GLContextClose -> device teardown/recreation -> resource re-prep). }
+    function SwitchRenderBackend(const ANewBackend: TRenderBackend): Boolean;
+    property RenderBackendHotSwitchCount: Cardinal read FRenderBackendHotSwitchCount;
+
     {$ifdef FPC}
     property LimitFPS: Single read GetLimitFPS write SetLimitFPS;
       deprecated 'use ApplicationProperties.LimitFps';
@@ -2729,6 +2750,9 @@ uses
 
 var
   UnitFinalization: Boolean;
+  SharedWindowVulkanDevice: TVulkanRHIDevice;
+  SharedWindowVulkanOpenCount: Cardinal;
+  OwnsSharedWindowVulkanDevice: Boolean;
 
 {$I castlewindow_container.inc}
 {$I castlewindowmenu.inc}
@@ -3111,6 +3135,12 @@ begin
   if FClosed then Exit;
 
   try
+    if (FVulkanSwapchainSurface <> nil) and (SharedWindowVulkanDevice <> nil) then
+    begin
+      SharedWindowVulkanDevice.WaitIdle;
+      SharedWindowVulkanDevice.ActiveSwapchainSurface := FVulkanSwapchainSurface;
+      SharedWindowVulkanDevice.DeferResourceDestruction := False;
+    end else
     if FOwnsVulkanRHIDevice and (RHIDevice is TVulkanRHIDevice) then
     begin
       RHIDevice.WaitIdle;
@@ -3128,6 +3158,26 @@ begin
     { call CloseBackend, controlling FInCloseBackend around }
     FInCloseBackend := true;
     try
+      if FVulkanSwapchainSurface <> nil then
+      begin
+        if SharedWindowVulkanDevice <> nil then
+          SharedWindowVulkanDevice.DestroySwapchainSurface(FVulkanSwapchainSurface)
+        else
+          FreeAndNil(FVulkanSwapchainSurface);
+        if SharedWindowVulkanOpenCount > 0 then
+          Dec(SharedWindowVulkanOpenCount);
+        if SharedWindowVulkanOpenCount = 0 then
+        begin
+          if OwnsSharedWindowVulkanDevice and (SharedWindowVulkanDevice <> nil) then
+          begin
+            if RHIDevice = SharedWindowVulkanDevice then
+              SetRHIDevice(nil);
+            FreeAndNil(SharedWindowVulkanDevice);
+            OwnsSharedWindowVulkanDevice := False;
+          end else
+            SharedWindowVulkanDevice := nil;
+        end;
+      end else
       if FOwnsVulkanRHIDevice and (RHIDevice <> nil) then
       begin
         RHIDevice.Free;
@@ -3162,6 +3212,8 @@ begin
   if Application.Current <> Self then
   begin
     BackendMakeCurrent;
+    if (FVulkanSwapchainSurface <> nil) and (SharedWindowVulkanDevice <> nil) then
+      SharedWindowVulkanDevice.ActiveSwapchainSurface := FVulkanSwapchainSurface;
     RenderContext := Container.Context;
     Application.Current := Self;
   end;
@@ -3237,6 +3289,8 @@ const
 begin
   FAntiAliasing := Value;
   MultiSampling := AntiAliasingToMultiSampling[Value];
+  if FVulkanSwapchainSurface <> nil then
+    FVulkanSwapchainSurface.SampleCount := MultiSampling;
   if (RHIDevice <> nil) and (RHIDevice is TVulkanRHIDevice) then
     TVulkanRHIDevice(RHIDevice).AntiAliasing := Value;
 end;
@@ -3301,6 +3355,16 @@ begin
   FVulkanSurfaceHandle := Result;
 end;
 
+class function TCastleWindow.SharedVulkanDevice: TVulkanRHIDevice;
+begin
+  Result := SharedWindowVulkanDevice;
+end;
+
+function TCastleWindow.SwitchRenderBackend(const ANewBackend: TRenderBackend): Boolean;
+begin
+  Result := Application.SwitchRenderBackend(ANewBackend);
+end;
+
 function TCastleWindow.IsVulkanBackendRequested: Boolean;
 begin
   Result := (ApplicationProperties.RenderBackend = backendVulkan) and
@@ -3309,16 +3373,18 @@ end;
 
 procedure TCastleWindow.InitializeVulkanRHIDeviceIfNeeded;
 var
-  VkDev: TVulkanRHIDevice;
   Desc: TVulkanNativeSurfaceDesc;
+  CreatedSharedDevice: Boolean;
+  WinDebugName: String;
 begin
   if not IsVulkanBackendRequested then
     Exit;
 
-  if RHIDevice <> nil then
+  if FVulkanSwapchainSurface <> nil then
   begin
-    if RHIDevice is TVulkanRHIDevice then
-      TVulkanRHIDevice(RHIDevice).AntiAliasing := FAntiAliasing;
+    FVulkanSwapchainSurface.SampleCount := MultiSampling;
+    if SharedWindowVulkanDevice <> nil then
+      SharedWindowVulkanDevice.AntiAliasing := FAntiAliasing;
     Exit;
   end;
 
@@ -3326,22 +3392,65 @@ begin
   if (not Assigned(FOnCreateVulkanSurface)) and
      (not ValidateVulkanNativeSurfaceDesc(Desc)) then
   begin
+    if (RHIDevice <> nil) and (RHIDevice is TVulkanRHIDevice) then
+    begin
+      TVulkanRHIDevice(RHIDevice).AntiAliasing := FAntiAliasing;
+      Exit;
+    end;
     WritelnLog('Vulkan', 'Skipping automatic TVulkanRHIDevice creation: native window surface handle is not initialized');
     Exit;
   end;
 
+  CreatedSharedDevice := False;
   try
-    VkDev := TVulkanRHIDevice.Create(
+    if Name <> '' then
+      WinDebugName := 'CastleWindow_' + Name
+    else if FCaption[cpPublic] <> '' then
+      WinDebugName := 'CastleWindow_' + FCaption[cpPublic]
+    else
+      WinDebugName := 'CastleWindow';
+
+    if SharedWindowVulkanDevice = nil then
+    begin
+      if (RHIDevice <> nil) and (RHIDevice is TVulkanRHIDevice) then
+      begin
+        SharedWindowVulkanDevice := TVulkanRHIDevice(RHIDevice);
+        OwnsSharedWindowVulkanDevice := False;
+      end else
+      begin
+        SharedWindowVulkanDevice := TVulkanRHIDevice.CreateSharedWithWSI(
+          False, {$ifdef FPC}@{$endif}CreateVulkanSurface);
+        OwnsSharedWindowVulkanDevice := True;
+        CreatedSharedDevice := True;
+      end;
+    end;
+
+    FVulkanSwapchainSurface := SharedWindowVulkanDevice.CreateSwapchainSurface(
       {$ifdef FPC}@{$endif}CreateVulkanSurface,
       Cardinal(Max(1, FWidth)),
       Cardinal(Max(1, FHeight)),
-      False);
-    VkDev.AntiAliasing := FAntiAliasing;
-    SetRHIDevice(VkDev);
-    FOwnsVulkanRHIDevice := True;
+      WinDebugName);
+    FVulkanSurfaceHandle := FVulkanSwapchainSurface.SurfaceHandle;
+    FVulkanSwapchainSurface.SampleCount := MultiSampling;
+    SharedWindowVulkanDevice.AntiAliasing := FAntiAliasing;
+    SharedWindowVulkanDevice.ActiveSwapchainSurface := FVulkanSwapchainSurface;
+    SetRHIDevice(SharedWindowVulkanDevice);
+    Inc(SharedWindowVulkanOpenCount);
   except
     on E: Exception do
+    begin
       WritelnLog('Vulkan', 'Automatic Vulkan WSI surface / device initialization fell back cleanly: ' + E.Message);
+      if (SharedWindowVulkanDevice <> nil) and (FVulkanSwapchainSurface <> nil) then
+        SharedWindowVulkanDevice.DestroySwapchainSurface(FVulkanSwapchainSurface)
+      else
+        FreeAndNil(FVulkanSwapchainSurface);
+      FVulkanSurfaceHandle := VK_NULL_HANDLE;
+      if CreatedSharedDevice and (SharedWindowVulkanOpenCount = 0) then
+      begin
+        FreeAndNil(SharedWindowVulkanDevice);
+        OwnsSharedWindowVulkanDevice := False;
+      end;
+    end;
   end;
 end;
 
@@ -3358,6 +3467,46 @@ begin
   Result := False;
   if not IsVulkanBackendRequested then
     Exit;
+
+  if (FVulkanSwapchainSurface <> nil) and (SharedWindowVulkanDevice <> nil) then
+  begin
+    if FVulkanSwapchainSurface.SampleCount <> MultiSampling then
+      FVulkanSwapchainSurface.SampleCount := MultiSampling;
+    if SharedWindowVulkanDevice.AntiAliasing <> FAntiAliasing then
+      SharedWindowVulkanDevice.AntiAliasing := FAntiAliasing;
+
+    Cmd := SharedWindowVulkanDevice.BeginSurfaceFrame(FVulkanSwapchainSurface);
+    if Cmd = nil then
+      Exit;
+
+    Result := True;
+    ColorTex := FVulkanSwapchainSurface.GetCurrentColorTexture;
+    if (ColorTex <> nil) and (not Cmd.IsRendering) then
+    begin
+      if FWidth > 0 then
+        TargetW := Min(Integer(ColorTex.Desc.Width), FWidth)
+      else
+        TargetW := Max(1, Integer(ColorTex.Desc.Width));
+      if FHeight > 0 then
+        TargetH := Min(Integer(ColorTex.Desc.Height), FHeight)
+      else
+        TargetH := Max(1, Integer(ColorTex.Desc.Height));
+      PassArea := Rectangle(0, 0, Max(1, TargetW), Max(1, TargetH));
+      if (Container <> nil) and Container.BackgroundEnable then
+        ClearCol := Container.BackgroundColor
+      else
+        ClearCol := Vector4(0.0, 0.0, 0.0, 1.0);
+      PassInfo := FVulkanSwapchainSurface.BuildRenderingInfo(
+        PassArea, ClearCol, loClear, loClear, 1.0);
+      Cmd.BeginRendering(PassInfo);
+      Cmd.SetViewport(FloatRectangle(PassArea), 0.0, 1.0);
+      Cmd.SetScissor(PassArea);
+      if RenderContext <> nil then
+        RenderContext.Viewport := PassArea;
+    end;
+    Exit;
+  end;
+
   if not (RHIDevice is TVulkanRHIDevice) then
     Exit;
   VkDev := TVulkanRHIDevice(RHIDevice);
@@ -3394,6 +3543,15 @@ end;
 
 procedure TCastleWindow.EndVulkanFrameIfNeeded;
 begin
+  if (FVulkanSwapchainSurface <> nil) and (SharedWindowVulkanDevice <> nil) then
+  begin
+    TDrawableImage.BatchingFlush;
+    if (ActiveCommandList <> nil) and ActiveCommandList.IsRendering then
+      ActiveCommandList.EndRendering;
+    SharedWindowVulkanDevice.EndSurfaceFrameAndPresent(FVulkanSwapchainSurface);
+    Inc(FVulkanFramesRenderedCount);
+    Exit;
+  end;
   if not (RHIDevice is TVulkanRHIDevice) then
     Exit;
   TDrawableImage.BatchingFlush;
@@ -3466,6 +3624,15 @@ begin
   if (not FirstResizeAfterOpen) and (ResizeAllowed <> raAllowed) then Exit;
 
   MakeCurrent;
+  if FVulkanSwapchainSurface <> nil then
+  begin
+    if (AWidth <= 0) or (AHeight <= 0) then
+      FVulkanSwapchainSurface.Resize(0, 0)
+    else if (not FirstResizeAfterOpen) or
+            (FVulkanSwapchainSurface.SwapchainExtent.width <> Cardinal(Max(1, FWidth))) or
+            (FVulkanSwapchainSurface.SwapchainExtent.height <> Cardinal(Max(1, FHeight))) then
+      FVulkanSwapchainSurface.Resize(Cardinal(Max(1, FWidth)), Cardinal(Max(1, FHeight)));
+  end else
   if (RHIDevice <> nil) and (RHIDevice is TVulkanRHIDevice) then
   begin
     if (AWidth <= 0) or (AHeight <= 0) then
@@ -3558,6 +3725,10 @@ begin
     Container.Fps.InternalRenderEnd;
     FrameProfiler.Stop(fmRender);
   end;
+
+  if (not UnitFinalization) and Application.FPendingRenderBackendSwitch and
+     (ActiveCommandList = nil) then
+    Application.PerformRenderBackendHotSwitch;
 end;
 
 procedure TCastleWindow.DoKeyDown(const Key: TKey; const KeyString: String);
@@ -4470,10 +4641,16 @@ begin
   FPageUrlParameters := TStringStringMap.Create;
   CreateBackend;
   OnMainContainer := {$ifdef FPC}@{$endif}GetMainContainer;
+  if ApplicationProperties <> nil then
+    ApplicationProperties.OnRenderBackendChange.Add(
+      {$ifdef FPC}@{$endif}HandleApplicationRenderBackendChange);
 end;
 
 destructor TCastleApplication.Destroy;
 begin
+  if ApplicationProperties(false) <> nil then
+    ApplicationProperties(false).OnRenderBackendChange.Remove(
+      {$ifdef FPC}@{$endif}HandleApplicationRenderBackendChange);
   OnMainContainer := nil;
 
   { Close any windows possibly open now.
@@ -4482,6 +4659,14 @@ begin
     may, and usually will, fail with very strange errors when called
     after freeing central Application). }
   CloseAllOpenWindows;
+
+  if OwnsSharedWindowVulkanDevice and (SharedWindowVulkanDevice <> nil) then
+  begin
+    if RHIDevice = SharedWindowVulkanDevice then
+      SetRHIDevice(nil);
+    FreeAndNil(SharedWindowVulkanDevice);
+    OwnsSharedWindowVulkanDevice := False;
+  end;
 
   { unregister free notification from these objects }
   MainWindow := nil;
@@ -4496,6 +4681,95 @@ begin
   FreeAndNil(FOpenWindows);
   FreeAndNil(FPendingDropFiles);
   inherited;
+end;
+
+procedure TCastleApplication.HandleApplicationRenderBackendChange(Sender: TObject);
+begin
+  if (FOpenWindows = nil) or (OpenWindowsCount = 0) or FSwitchingRenderBackend then
+    Exit;
+  if ActiveCommandList <> nil then
+    FPendingRenderBackendSwitch := True
+  else
+    PerformRenderBackendHotSwitch;
+end;
+
+procedure TCastleApplication.PerformRenderBackendHotSwitch;
+type
+  TSavedWindowGeom = record
+    Win: TCastleWindow;
+    Left, Top, Width, Height: Integer;
+    FullScreen: Boolean;
+  end;
+var
+  Saved: array of TSavedWindowGeom;
+  SavedMain: TCastleWindow;
+  I: Integer;
+begin
+  if FSwitchingRenderBackend then
+    Exit;
+  FPendingRenderBackendSwitch := False;
+  if (FOpenWindows = nil) or (OpenWindowsCount = 0) then
+    Exit;
+
+  FSwitchingRenderBackend := True;
+  try
+    SavedMain := FMainWindow;
+    SetLength(Saved, OpenWindowsCount);
+    for I := 0 to OpenWindowsCount - 1 do
+    begin
+      Saved[I].Win := OpenWindows[I];
+      Saved[I].Left := OpenWindows[I].FLeft;
+      Saved[I].Top := OpenWindows[I].FTop;
+      Saved[I].Width := OpenWindows[I].FWidth;
+      Saved[I].Height := OpenWindows[I].FHeight;
+      Saved[I].FullScreen := OpenWindows[I].FFullScreenWanted;
+    end;
+
+    { 1. Tear down all open windows in reverse order so the final Close(false)
+         fires EventClose(1) / OnGLContextClose while the old backend is still active }
+    for I := High(Saved) downto 0 do
+      if not Saved[I].Win.Closed then
+        Saved[I].Win.Close(false);
+
+    if ApplicationProperties.RenderBackend = backendVulkan then
+    begin
+      FreeAndNil(GLVersion);
+      FreeAndNil(GLFeatures);
+    end;
+
+    { 2. Reopen all windows in forward order on the newly selected backend }
+    for I := 0 to High(Saved) do
+    begin
+      Saved[I].Win.FDisableVulkanForCurrentOpen := False;
+      Saved[I].Win.FLeft := Saved[I].Left;
+      Saved[I].Win.FTop := Saved[I].Top;
+      Saved[I].Win.FWidth := Saved[I].Width;
+      Saved[I].Win.FHeight := Saved[I].Height;
+      Saved[I].Win.FFullScreenWanted := Saved[I].FullScreen;
+      Saved[I].Win.FFullScreenBackend := Saved[I].FullScreen;
+      Saved[I].Win.Open;
+      Inc(Saved[I].Win.FBackendSwitchCount);
+      Saved[I].Win.Invalidate;
+    end;
+
+    if (SavedMain <> nil) and (not SavedMain.Closed) then
+      MainWindow := SavedMain;
+
+    Inc(FRenderBackendHotSwitchCount);
+  finally
+    FSwitchingRenderBackend := False;
+  end;
+end;
+
+function TCastleApplication.SwitchRenderBackend(const ANewBackend: TRenderBackend): Boolean;
+begin
+  if ApplicationProperties.RenderBackend <> ANewBackend then
+    ApplicationProperties.RenderBackend := ANewBackend
+  else if OpenWindowsCount > 0 then
+    PerformRenderBackendHotSwitch;
+  if FPendingRenderBackendSwitch and (ActiveCommandList = nil) then
+    PerformRenderBackendHotSwitch;
+  Result := (ANewBackend <> backendVulkan) or (RHIDevice is TVulkanRHIDevice);
 end;
 
 function TCastleApplication.GetMainContainer: TCastleContainer;

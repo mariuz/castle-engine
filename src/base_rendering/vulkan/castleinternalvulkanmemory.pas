@@ -36,6 +36,8 @@ type
     ChunkId: Cardinal;
     Offset: VkDeviceSize;
     Size: VkDeviceSize;
+    Alignment: VkDeviceSize;
+    UserData: Pointer;
     IsFree: Boolean;
     IsBufferImageGranularityTainted: Boolean;
     Prev: PVulkanSubAllocationNode;
@@ -43,6 +45,7 @@ type
   end;
 
   { Represents a single sub-allocation (or dedicated allocation) of Vulkan memory. }
+  PVulkanMemoryAllocation = ^TVulkanMemoryAllocation;
   TVulkanMemoryAllocation = record
     { Underlying VkDeviceMemory handle (owned by Block, or standalone if IsDedicated) }
     DeviceMemory: VkDeviceMemory;
@@ -56,6 +59,8 @@ type
     Block: TCastleVulkanMemoryBlock;
     { Direct pointer to the doubly-linked sub-allocation node for O(1) free & coalescing }
     Node: PVulkanSubAllocationNode;
+    { Optional owner handle (e.g. TVulkanRHIBuffer or PVulkanMemoryAllocation) for DefragmentPools }
+    UserData: Pointer;
     { Internal chunk ID for validation / fallback lookup }
     ChunkId: Cardinal;
     { True if this allocation bypassed the pool and owns its own VkDeviceMemory }
@@ -68,6 +73,27 @@ type
     MemoryTypeIndex: Cardinal;
     function IsValid: Boolean;
   end;
+
+  { Compaction and block-reclamation metrics returned by TCastleVulkanMemoryAllocator.DefragmentPools }
+  TVulkanDefragmentStats = record
+    RelocatedAllocations: Cardinal;
+    RelocatedBytes: UInt64;
+    FreedBlocks: Cardinal;
+    FreedBlockBytes: UInt64;
+    LargestFreeChunkBefore: UInt64;
+    LargestFreeChunkAfter: UInt64;
+    FragmentationRatioBefore: Single;
+    FragmentationRatioAfter: Single;
+  end;
+
+  { Invoked per relocated movable allocation during DefragmentPools before source memory is freed.
+    Return False to veto relocating this allocation. }
+  TVulkanRelocateAllocationCallback = function(const AUserData: Pointer;
+    const AOldAlloc, ANewAlloc: TVulkanMemoryAllocation): Boolean of object;
+
+  { Invoked after a non-overlapping batch of relocations has been staged so GPU vkCmdCopyBuffer
+    commands can execute and retire old VkBuffer handles before source sub-allocations/blocks free. }
+  TVulkanFinalizeDefragmentCallback = procedure of object;
 
   { Fast per-frame bump/ring allocation result for transient UBOs & dynamic vertices }
   TVulkanTransientAllocation = record
@@ -121,12 +147,14 @@ type
     { Attempts to sub-allocate Size bytes aligned to Alignment (and respecting
       bufferImageGranularity). Returns True on success. }
     function TrySubAllocate(const ASize, AAlignment, AGranularity: VkDeviceSize;
-      const AIsLinearResource: Boolean; out AAlloc: TVulkanMemoryAllocation): Boolean;
+      const AIsLinearResource: Boolean; out AAlloc: TVulkanMemoryAllocation;
+      const AUserData: Pointer = nil): Boolean;
 
     { Frees a previously sub-allocated chunk in O(1) time and coalesces adjacent free nodes. }
     procedure FreeSubAllocation(const AAlloc: TVulkanMemoryAllocation);
 
     function IsEmpty: Boolean;
+    function LargestFreeChunkSize: VkDeviceSize;
 
     property DeviceMemory: VkDeviceMemory read FDeviceMemory;
     property MemoryTypeIndex: Cardinal read FMemoryTypeIndex;
@@ -198,6 +226,12 @@ type
     FDedicatedBytes: UInt64;
     FTotalVkAllocationCount: Cardinal;
     FSubAllocationCount: Cardinal;
+    FGpuOnlyBlockSize: VkDeviceSize;
+    FHostVisibleBlockSize: VkDeviceSize;
+    FTotalDefragmentRuns: Cardinal;
+    FTotalDefragmentedAllocations: Cardinal;
+    FTotalDefragmentedBytes: UInt64;
+    FTotalDefragmentFreedBlocks: Cardinal;
     FSupportsMemoryBudgetExt: Boolean;
     FSupportsBufferDeviceAddress: Boolean;
 
@@ -208,7 +242,8 @@ type
     function AllocateInternal(const AMemReq: VkMemoryRequirements;
       const AUsage: TRHIMemoryUsage; const AIsLinearResource: Boolean;
       const APrefersDedicated, ARequiresDedicated: Boolean;
-      const ADedicatedBuffer: VkBuffer; const ADedicatedImage: VkImage): TVulkanMemoryAllocation;
+      const ADedicatedBuffer: VkBuffer; const ADedicatedImage: VkImage;
+      const AUserData: Pointer = nil): TVulkanMemoryAllocation;
   public
     constructor Create(const APhysicalDevice: VkPhysicalDevice; const ADevice: VkDevice;
       const AMaxMemoryAllocationCount: Cardinal = 4096;
@@ -220,7 +255,8 @@ type
       const AUsage: TRHIMemoryUsage;
       const AIsLinearResource: Boolean = True;
       const APrefersDedicated: Boolean = False;
-      const ARequiresDedicated: Boolean = False): TVulkanMemoryAllocation;
+      const ARequiresDedicated: Boolean = False;
+      const AUserData: Pointer = nil): TVulkanMemoryAllocation;
 
     { Queries vkGetBufferMemoryRequirements2 (with VkMemoryDedicatedRequirements)
       and sub-allocates (or dedicated-allocates) memory for ABuffer, enforcing
@@ -228,7 +264,8 @@ type
     function AllocateBufferMemory(const ABuffer: VkBuffer;
       const ASize: VkDeviceSize; const AUsage: TRHIMemoryUsage;
       const AForceDedicated: Boolean = False;
-      const AMinAlignment: VkDeviceSize = 0): TVulkanMemoryAllocation;
+      const AMinAlignment: VkDeviceSize = 0;
+      const AUserData: Pointer = nil): TVulkanMemoryAllocation;
 
     { Queries vkGetImageMemoryRequirements2 (with VkMemoryDedicatedRequirements)
       and sub-allocates (or dedicated-allocates) memory for AImage. }
@@ -264,10 +301,33 @@ type
     { Releases completely empty blocks back to the Vulkan driver. }
     procedure TrimEmptyBlocks;
 
+    { Tags a sub-allocation with an owner handle (e.g. TVulkanRHIBuffer or PVulkanMemoryAllocation)
+      so DefragmentPools knows it is movable and can notify or update its owner on relocation. }
+    procedure SetAllocationUserData(var AAlloc: TVulkanMemoryAllocation; const AUserData: Pointer);
+
+    { Computes current external fragmentation ratio [0..1] and largest free contiguous range
+      across pooled Linear memory blocks. }
+    function ComputeLinearPoolFragmentation(out ALargestFreeChunk: UInt64): Single;
+
+    { Compacts movable Linear sub-allocations out of sparse blocks and downward across free holes
+      within the supplied byte/allocation budgets, invoking AOnRelocate + AOnFinalizeMoves before
+      releasing old sub-allocations and freeing emptied VkDeviceMemory blocks (Phase 118). }
+    function DefragmentPools(
+      const AMaxBytesToMove: UInt64 = High(UInt64);
+      const AMaxAllocationsToMove: Cardinal = High(Cardinal);
+      const AOnRelocate: TVulkanRelocateAllocationCallback = nil;
+      const AOnFinalizeMoves: TVulkanFinalizeDefragmentCallback = nil): TVulkanDefragmentStats;
+
     { Retrieves live memory budget and utilization statistics. }
     function GetStats: TVulkanMemoryStats;
 
     property Device: VkDevice read FDevice;
+    property PreferredGpuOnlyBlockSize: VkDeviceSize read FGpuOnlyBlockSize write FGpuOnlyBlockSize;
+    property PreferredHostVisibleBlockSize: VkDeviceSize read FHostVisibleBlockSize write FHostVisibleBlockSize;
+    property TotalDefragmentRuns: Cardinal read FTotalDefragmentRuns;
+    property TotalDefragmentedAllocations: Cardinal read FTotalDefragmentedAllocations;
+    property TotalDefragmentedBytes: UInt64 read FTotalDefragmentedBytes;
+    property TotalDefragmentFreedBlocks: Cardinal read FTotalDefragmentFreedBlocks;
     property BufferImageGranularity: VkDeviceSize read FBufferImageGranularity write FBufferImageGranularity;
     property MinUniformBufferAlignment: VkDeviceSize read FMinUniformBufferAlignment write FMinUniformBufferAlignment;
     property MinStorageBufferAlignment: VkDeviceSize read FMinStorageBufferAlignment write FMinStorageBufferAlignment;
@@ -414,6 +474,8 @@ begin
   FHead^.ChunkId := 0;
   FHead^.Offset := 0;
   FHead^.Size := ABlockSize;
+  FHead^.Alignment := 0;
+  FHead^.UserData := nil;
   FHead^.IsFree := True;
   FHead^.IsBufferImageGranularityTainted := False;
   FHead^.Prev := nil;
@@ -452,9 +514,24 @@ begin
   Result := (FHead <> nil) and FHead^.IsFree and (FHead^.Next = nil);
 end;
 
+function TCastleVulkanMemoryBlock.LargestFreeChunkSize: VkDeviceSize;
+var
+  Curr: PVulkanSubAllocationNode;
+begin
+  Result := 0;
+  Curr := FHead;
+  while Curr <> nil do
+  begin
+    if Curr^.IsFree and (Curr^.Size > Result) then
+      Result := Curr^.Size;
+    Curr := Curr^.Next;
+  end;
+end;
+
 function TCastleVulkanMemoryBlock.TrySubAllocate(
   const ASize, AAlignment, AGranularity: VkDeviceSize;
-  const AIsLinearResource: Boolean; out AAlloc: TVulkanMemoryAllocation): Boolean;
+  const AIsLinearResource: Boolean; out AAlloc: TVulkanMemoryAllocation;
+  const AUserData: Pointer): Boolean;
 var
   Curr, SplitStartNode, SplitEndNode: PVulkanSubAllocationNode;
   AlignedOffset, PaddingFront, PaddingBack, EffectiveAlignment: VkDeviceSize;
@@ -494,6 +571,8 @@ begin
           SplitStartNode^.ChunkId := 0;
           SplitStartNode^.Offset := Curr^.Offset;
           SplitStartNode^.Size := PaddingFront;
+          SplitStartNode^.Alignment := 0;
+          SplitStartNode^.UserData := nil;
           SplitStartNode^.IsFree := True;
           SplitStartNode^.IsBufferImageGranularityTainted := False;
           SplitStartNode^.Prev := Curr^.Prev;
@@ -516,6 +595,8 @@ begin
           SplitEndNode^.ChunkId := 0;
           SplitEndNode^.Offset := AlignedOffset + ASize;
           SplitEndNode^.Size := PaddingBack;
+          SplitEndNode^.Alignment := 0;
+          SplitEndNode^.UserData := nil;
           SplitEndNode^.IsFree := True;
           SplitEndNode^.IsBufferImageGranularityTainted := False;
           SplitEndNode^.Prev := Curr;
@@ -529,6 +610,8 @@ begin
 
         { 3. Mark Curr as allocated }
         Curr^.IsFree := False;
+        Curr^.Alignment := EffectiveAlignment;
+        Curr^.UserData := AUserData;
         Curr^.IsBufferImageGranularityTainted := not AIsLinearResource;
         Curr^.ChunkId := FNextChunkId;
         Inc(FNextChunkId);
@@ -542,6 +625,7 @@ begin
         AAlloc.Size := Curr^.Size;
         AAlloc.Block := Self;
         AAlloc.Node := Curr;
+        AAlloc.UserData := AUserData;
         AAlloc.ChunkId := Curr^.ChunkId;
         AAlloc.IsDedicated := False;
         AAlloc.IsHostCoherent := FIsHostCoherent;
@@ -580,6 +664,8 @@ begin
   begin
     Curr^.IsFree := True;
     Curr^.ChunkId := 0;
+    Curr^.Alignment := 0;
+    Curr^.UserData := nil;
     Dec(FUsedBytes, Curr^.Size);
     if FActiveSubAllocations > 0 then
       Dec(FActiveSubAllocations);
@@ -718,6 +804,8 @@ begin
   FPhysicalDevice := APhysicalDevice;
   FDevice := ADevice;
   FSupportsBufferDeviceAddress := ASupportsBufferDeviceAddress;
+  FGpuOnlyBlockSize := GPU_ONLY_BLOCK_SIZE;
+  FHostVisibleBlockSize := HOST_VISIBLE_BLOCK_SIZE;
   FLock := TCriticalSection.Create;
   FMaxMemoryAllocationCount := AMaxMemoryAllocationCount;
   if FMaxMemoryAllocationCount = 0 then
@@ -871,9 +959,18 @@ function TCastleVulkanMemoryAllocator.GetPreferredBlockSize(
   const AUsage: TRHIMemoryUsage): VkDeviceSize;
 begin
   if AUsage = muGpuOnly then
-    Result := GPU_ONLY_BLOCK_SIZE
-  else
-    Result := HOST_VISIBLE_BLOCK_SIZE;
+  begin
+    if FGpuOnlyBlockSize > 0 then
+      Result := FGpuOnlyBlockSize
+    else
+      Result := GPU_ONLY_BLOCK_SIZE;
+  end else
+  begin
+    if FHostVisibleBlockSize > 0 then
+      Result := FHostVisibleBlockSize
+    else
+      Result := HOST_VISIBLE_BLOCK_SIZE;
+  end;
 end;
 
 function TCastleVulkanMemoryAllocator.CanAllocateDedicated(
@@ -889,7 +986,8 @@ function TCastleVulkanMemoryAllocator.AllocateInternal(
   const AMemReq: VkMemoryRequirements; const AUsage: TRHIMemoryUsage;
   const AIsLinearResource: Boolean;
   const APrefersDedicated, ARequiresDedicated: Boolean;
-  const ADedicatedBuffer: VkBuffer; const ADedicatedImage: VkImage): TVulkanMemoryAllocation;
+  const ADedicatedBuffer: VkBuffer; const ADedicatedImage: VkImage;
+  const AUserData: Pointer): TVulkanMemoryAllocation;
 var
   MemTypeIdx: Cardinal;
   IsHostVisible, IsHostCoherent, WantDedicated: Boolean;
@@ -956,6 +1054,7 @@ begin
 
       Result.Offset := 0;
       Result.Size := AMemReq.size;
+      Result.UserData := AUserData;
       Result.IsDedicated := True;
       Result.IsHostCoherent := IsHostCoherent;
       Result.MemoryTypeIndex := MemTypeIdx;
@@ -973,7 +1072,7 @@ begin
       Block := Pool[I];
       if Block.TrySubAllocate(AMemReq.size, AMemReq.alignment,
            1 { Granularity=1 since Linear and NonLinear are in separate blocks },
-           AIsLinearResource, Result) then
+           AIsLinearResource, Result, AUserData) then
       begin
         Inc(FSubAllocationCount);
         Exit;
@@ -1012,7 +1111,7 @@ begin
     Inc(FTotalVkAllocationCount);
 
     if not NewBlock.TrySubAllocate(AMemReq.size, AMemReq.alignment,
-         1, AIsLinearResource, Result) then
+         1, AIsLinearResource, Result, AUserData) then
       raise ERHIOutOfMemory.Create('Sub-allocation failed on freshly created memory block');
     Inc(FSubAllocationCount);
   finally
@@ -1023,15 +1122,17 @@ end;
 function TCastleVulkanMemoryAllocator.Allocate(
   const AMemReq: VkMemoryRequirements; const AUsage: TRHIMemoryUsage;
   const AIsLinearResource: Boolean;
-  const APrefersDedicated, ARequiresDedicated: Boolean): TVulkanMemoryAllocation;
+  const APrefersDedicated, ARequiresDedicated: Boolean;
+  const AUserData: Pointer): TVulkanMemoryAllocation;
 begin
   Result := AllocateInternal(AMemReq, AUsage, AIsLinearResource,
-    APrefersDedicated, ARequiresDedicated, VK_NULL_HANDLE, VK_NULL_HANDLE);
+    APrefersDedicated, ARequiresDedicated, VK_NULL_HANDLE, VK_NULL_HANDLE, AUserData);
 end;
 
 function TCastleVulkanMemoryAllocator.AllocateBufferMemory(const ABuffer: VkBuffer;
   const ASize: VkDeviceSize; const AUsage: TRHIMemoryUsage;
-  const AForceDedicated: Boolean; const AMinAlignment: VkDeviceSize): TVulkanMemoryAllocation;
+  const AForceDedicated: Boolean; const AMinAlignment: VkDeviceSize;
+  const AUserData: Pointer): TVulkanMemoryAllocation;
 var
   Info2: VkBufferMemoryRequirementsInfo2;
   Req2: VkMemoryRequirements2;
@@ -1085,7 +1186,7 @@ begin
     MemReq.alignment := FNonCoherentAtomSize;
 
   Result := AllocateInternal(MemReq, AUsage, True { Linear },
-    PrefersDed, RequiresDed, ABuffer, VK_NULL_HANDLE);
+    PrefersDed, RequiresDed, ABuffer, VK_NULL_HANDLE, AUserData);
 end;
 
 function TCastleVulkanMemoryAllocator.AllocateImageMemory(const AImage: VkImage;
@@ -1346,8 +1447,8 @@ begin
       begin
         Pool := FPools[I, IsLinear];
         { Keep at least 1 block per active pool to avoid thrashing vkAllocateMemory }
-        for J := Pool.Count - 1 downto 1 do
-          if Pool[J].IsEmpty then
+        for J := Pool.Count - 1 downto 0 do
+          if Pool[J].IsEmpty and (Pool.Count > 1) then
           begin
             Pool.Delete(J);
             if FTotalVkAllocationCount > 0 then
@@ -1357,6 +1458,360 @@ begin
   finally
     FLock.Release;
   end;
+end;
+
+procedure TCastleVulkanMemoryAllocator.SetAllocationUserData(
+  var AAlloc: TVulkanMemoryAllocation; const AUserData: Pointer);
+begin
+  FLock.Acquire;
+  try
+    AAlloc.UserData := AUserData;
+    if (AAlloc.Node <> nil) and (not AAlloc.Node^.IsFree) and
+       (AAlloc.Node^.ChunkId = AAlloc.ChunkId) then
+      AAlloc.Node^.UserData := AUserData;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TCastleVulkanMemoryAllocator.ComputeLinearPoolFragmentation(
+  out ALargestFreeChunk: UInt64): Single;
+var
+  I, J: Integer;
+  Pool: TCastleVulkanBlockList;
+  Blk: TCastleVulkanMemoryBlock;
+  PoolFree, PoolMaxFree, BlkFree, BlkMaxFree: UInt64;
+  PoolFrag: Single;
+begin
+  ALargestFreeChunk := 0;
+  Result := 0.0;
+  FLock.Acquire;
+  try
+    for I := 0 to VK_MAX_MEMORY_TYPES - 1 do
+    begin
+      Pool := FPools[I, True];
+      PoolFree := 0;
+      PoolMaxFree := 0;
+      for J := 0 to Pool.Count - 1 do
+      begin
+        Blk := Pool[J];
+        if Blk.Size > Blk.UsedBytes then
+          BlkFree := Blk.Size - Blk.UsedBytes
+        else
+          BlkFree := 0;
+        Inc(PoolFree, BlkFree);
+        BlkMaxFree := Blk.LargestFreeChunkSize;
+        if BlkMaxFree > PoolMaxFree then
+          PoolMaxFree := BlkMaxFree;
+        if BlkMaxFree > ALargestFreeChunk then
+          ALargestFreeChunk := BlkMaxFree;
+      end;
+      if (PoolFree > 0) and (PoolMaxFree < PoolFree) then
+      begin
+        PoolFrag := Single(1.0 - (Double(PoolMaxFree) / Double(PoolFree)));
+        if PoolFrag > Result then
+          Result := PoolFrag;
+      end;
+    end;
+  finally
+    FLock.Release;
+  end;
+end;
+
+function TCastleVulkanMemoryAllocator.DefragmentPools(
+  const AMaxBytesToMove: UInt64;
+  const AMaxAllocationsToMove: Cardinal;
+  const AOnRelocate: TVulkanRelocateAllocationCallback;
+  const AOnFinalizeMoves: TVulkanFinalizeDefragmentCallback): TVulkanDefragmentStats;
+type
+  TPendingFreeEntry = record
+    Block: TCastleVulkanMemoryBlock;
+    Alloc: TVulkanMemoryAllocation;
+  end;
+var
+  PendingFrees: array of TPendingFreeEntry;
+  Stats: TVulkanDefragmentStats;
+
+  function BuildNodeAllocation(const ABlock: TCastleVulkanMemoryBlock;
+    const ANode: PVulkanSubAllocationNode): TVulkanMemoryAllocation;
+  begin
+    FillChar(Result, SizeOf(Result), 0);
+    Result.DeviceMemory := ABlock.FDeviceMemory;
+    Result.Offset := ANode^.Offset;
+    Result.Size := ANode^.Size;
+    Result.Block := ABlock;
+    Result.Node := ANode;
+    Result.UserData := ANode^.UserData;
+    Result.ChunkId := ANode^.ChunkId;
+    Result.IsDedicated := False;
+    Result.IsHostCoherent := ABlock.FIsHostCoherent;
+    Result.MemoryTypeIndex := ABlock.FMemoryTypeIndex;
+    if ABlock.FBaseMappedPtr <> nil then
+      Result.MappedPtr := ABlock.FBaseMappedPtr + ANode^.Offset;
+  end;
+
+  function AcceptMove(const ASrcBlock: TCastleVulkanMemoryBlock;
+    const ASrcNode: PVulkanSubAllocationNode;
+    const ANewAlloc: TVulkanMemoryAllocation): Boolean;
+  var
+    OldAlloc: TVulkanMemoryAllocation;
+    AllocPtr: PVulkanMemoryAllocation;
+    NewIdx: Integer;
+  begin
+    OldAlloc := BuildNodeAllocation(ASrcBlock, ASrcNode);
+
+    { Copy persistently mapped / simulated host bytes when host-visible and either
+      running in headless mode or no custom GPU copy callback is provided }
+    if (OldAlloc.MappedPtr <> nil) and (ANewAlloc.MappedPtr <> nil) and
+       ((FDevice = nil) or (not Assigned(AOnRelocate))) then
+    begin
+      InvalidateAllocation(OldAlloc, 0, OldAlloc.Size);
+      Move(OldAlloc.MappedPtr^, ANewAlloc.MappedPtr^, PtrUInt(OldAlloc.Size));
+      FlushAllocation(ANewAlloc, 0, ANewAlloc.Size);
+    end;
+
+    if Assigned(AOnRelocate) then
+    begin
+      if not AOnRelocate(ASrcNode^.UserData, OldAlloc, ANewAlloc) then
+        Exit(False);
+    end else
+    if ASrcNode^.UserData <> nil then
+    begin
+      AllocPtr := PVulkanMemoryAllocation(ASrcNode^.UserData);
+      if (AllocPtr^.DeviceMemory = OldAlloc.DeviceMemory) and
+         (AllocPtr^.ChunkId = OldAlloc.ChunkId) then
+        AllocPtr^ := ANewAlloc;
+    end;
+
+    { Mark retiring source node non-movable until Phase C frees it }
+    ASrcNode^.UserData := nil;
+    NewIdx := Length(PendingFrees);
+    SetLength(PendingFrees, NewIdx + 1);
+    PendingFrees[NewIdx].Block := ASrcBlock;
+    PendingFrees[NewIdx].Alloc := OldAlloc;
+    Inc(Stats.RelocatedAllocations);
+    Inc(Stats.RelocatedBytes, OldAlloc.Size);
+    Result := True;
+  end;
+
+var
+  PassIdx, MemIdx, OrdIdx, DstOrd, SrcIdx, DstIdx, BIdx, CIdx, FIdx, J, K, TempIdx: Integer;
+  IsLinear, SeenFreeHole, MovedAnyFromSrc, HasSurvivingOther: Boolean;
+  Pool: TCastleVulkanBlockList;
+  SrcBlock, DstBlock: TCastleVulkanMemoryBlock;
+  Curr: PVulkanSubAllocationNode;
+  Candidates: array of PVulkanSubAllocationNode;
+  BlockOrder: array of Integer;
+  Evacuating: array of Boolean;
+  NewAlloc: TVulkanMemoryAllocation;
+  ReqAlign: VkDeviceSize;
+begin
+  FillChar(Stats, SizeOf(Stats), 0);
+  Stats.FragmentationRatioBefore := ComputeLinearPoolFragmentation(Stats.LargestFreeChunkBefore);
+  Inc(FTotalDefragmentRuns);
+
+  if (AMaxBytesToMove > 0) and (AMaxAllocationsToMove > 0) then
+  begin
+    for PassIdx := 1 to 4 do
+    begin
+      if (Stats.RelocatedAllocations >= AMaxAllocationsToMove) or
+         (Stats.RelocatedBytes >= AMaxBytesToMove) then
+        Break;
+
+      SetLength(PendingFrees, 0);
+
+      { Phase A: Stage non-overlapping relocations while keeping source ranges occupied }
+      FLock.Acquire;
+      try
+        for MemIdx := 0 to VK_MAX_MEMORY_TYPES - 1 do
+        begin
+          Pool := FPools[MemIdx, True];
+          if Pool.Count = 0 then
+            Continue;
+
+          { A1. Multi-block evacuation: pack sparsest blocks into fuller surviving blocks }
+          if Pool.Count > 1 then
+          begin
+            SetLength(BlockOrder, Pool.Count);
+            SetLength(Evacuating, Pool.Count);
+            for J := 0 to Pool.Count - 1 do
+            begin
+              BlockOrder[J] := J;
+              Evacuating[J] := False;
+            end;
+            { Insertion sort BlockOrder by UsedBytes ascending }
+            for J := 1 to High(BlockOrder) do
+            begin
+              TempIdx := BlockOrder[J];
+              K := J - 1;
+              while (K >= 0) and (Pool[BlockOrder[K]].UsedBytes > Pool[TempIdx].UsedBytes) do
+              begin
+                BlockOrder[K + 1] := BlockOrder[K];
+                Dec(K);
+              end;
+              BlockOrder[K + 1] := TempIdx;
+            end;
+
+            for OrdIdx := 0 to High(BlockOrder) do
+            begin
+              if Stats.RelocatedAllocations >= AMaxAllocationsToMove then
+                Break;
+              SrcIdx := BlockOrder[OrdIdx];
+              SrcBlock := Pool[SrcIdx];
+
+              HasSurvivingOther := False;
+              for DstOrd := OrdIdx + 1 to High(BlockOrder) do
+                if not Evacuating[BlockOrder[DstOrd]] then
+                begin
+                  HasSurvivingOther := True;
+                  Break;
+                end;
+              if not HasSurvivingOther then
+                Break;
+
+              SetLength(Candidates, 0);
+              Curr := SrcBlock.FHead;
+              while Curr <> nil do
+              begin
+                if (not Curr^.IsFree) and (Curr^.UserData <> nil) then
+                begin
+                  CIdx := Length(Candidates);
+                  SetLength(Candidates, CIdx + 1);
+                  Candidates[CIdx] := Curr;
+                end;
+                Curr := Curr^.Next;
+              end;
+
+              MovedAnyFromSrc := False;
+              for CIdx := 0 to High(Candidates) do
+              begin
+                if Stats.RelocatedAllocations >= AMaxAllocationsToMove then
+                  Break;
+                if Stats.RelocatedBytes + Candidates[CIdx]^.Size > AMaxBytesToMove then
+                  Continue;
+
+                ReqAlign := Candidates[CIdx]^.Alignment;
+                if ReqAlign < 1 then
+                  ReqAlign := 1;
+
+                for DstOrd := High(BlockOrder) downto OrdIdx + 1 do
+                begin
+                  DstIdx := BlockOrder[DstOrd];
+                  if Evacuating[DstIdx] or (DstIdx = SrcIdx) then
+                    Continue;
+                  DstBlock := Pool[DstIdx];
+                  if DstBlock.TrySubAllocate(Candidates[CIdx]^.Size, ReqAlign,
+                       1, True, NewAlloc, Candidates[CIdx]^.UserData) then
+                  begin
+                    if AcceptMove(SrcBlock, Candidates[CIdx], NewAlloc) then
+                    begin
+                      MovedAnyFromSrc := True;
+                      Break;
+                    end else
+                      DstBlock.FreeSubAllocation(NewAlloc);
+                  end;
+                end;
+              end;
+
+              if MovedAnyFromSrc then
+                Evacuating[SrcIdx] := True;
+            end;
+          end;
+
+          { A2. Intra-block downward compaction across free holes }
+          for BIdx := 0 to Pool.Count - 1 do
+          begin
+            if Stats.RelocatedAllocations >= AMaxAllocationsToMove then
+              Break;
+            SrcBlock := Pool[BIdx];
+            SetLength(Candidates, 0);
+            SeenFreeHole := False;
+            Curr := SrcBlock.FHead;
+            while Curr <> nil do
+            begin
+              if Curr^.IsFree then
+                SeenFreeHole := True
+              else if SeenFreeHole and (Curr^.UserData <> nil) then
+              begin
+                CIdx := Length(Candidates);
+                SetLength(Candidates, CIdx + 1);
+                Candidates[CIdx] := Curr;
+              end;
+              Curr := Curr^.Next;
+            end;
+
+            for CIdx := 0 to High(Candidates) do
+            begin
+              if Stats.RelocatedAllocations >= AMaxAllocationsToMove then
+                Break;
+              if Stats.RelocatedBytes + Candidates[CIdx]^.Size > AMaxBytesToMove then
+                Continue;
+
+              ReqAlign := Candidates[CIdx]^.Alignment;
+              if ReqAlign < 1 then
+                ReqAlign := 1;
+
+              if SrcBlock.TrySubAllocate(Candidates[CIdx]^.Size, ReqAlign,
+                   1, True, NewAlloc, Candidates[CIdx]^.UserData) then
+              begin
+                if NewAlloc.Offset < Candidates[CIdx]^.Offset then
+                begin
+                  if not AcceptMove(SrcBlock, Candidates[CIdx], NewAlloc) then
+                    SrcBlock.FreeSubAllocation(NewAlloc);
+                end else
+                  SrcBlock.FreeSubAllocation(NewAlloc);
+              end;
+            end;
+          end;
+        end;
+      finally
+        FLock.Release;
+      end;
+
+      if Length(PendingFrees) = 0 then
+        Break;
+
+      { Phase B: Execute batched GPU vkCmdCopyBuffer commands & destroy retired VkBuffers }
+      if Assigned(AOnFinalizeMoves) then
+        AOnFinalizeMoves();
+
+      { Phase C: Free retired source sub-allocations and coalesce free ranges }
+      FLock.Acquire;
+      try
+        for FIdx := 0 to High(PendingFrees) do
+          PendingFrees[FIdx].Block.FreeSubAllocation(PendingFrees[FIdx].Alloc);
+      finally
+        FLock.Release;
+      end;
+    end;
+  end;
+
+  { Reclaim all emptied blocks across pools (keeping at least 1 block per active pool) }
+  FLock.Acquire;
+  try
+    for MemIdx := 0 to VK_MAX_MEMORY_TYPES - 1 do
+      for IsLinear := Low(Boolean) to High(Boolean) do
+      begin
+        Pool := FPools[MemIdx, IsLinear];
+        for J := Pool.Count - 1 downto 0 do
+          if Pool[J].IsEmpty and (Pool.Count > 1) then
+          begin
+            Inc(Stats.FreedBlocks);
+            Inc(Stats.FreedBlockBytes, Pool[J].Size);
+            Pool.Delete(J);
+            if FTotalVkAllocationCount > 0 then
+              Dec(FTotalVkAllocationCount);
+          end;
+      end;
+    Inc(FTotalDefragmentedAllocations, Stats.RelocatedAllocations);
+    Inc(FTotalDefragmentedBytes, Stats.RelocatedBytes);
+    Inc(FTotalDefragmentFreedBlocks, Stats.FreedBlocks);
+  finally
+    FLock.Release;
+  end;
+
+  Stats.FragmentationRatioAfter := ComputeLinearPoolFragmentation(Stats.LargestFreeChunkAfter);
+  Result := Stats;
 end;
 
 procedure AggregateDeviceLocalMemoryBudget(

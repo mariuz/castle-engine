@@ -42,7 +42,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get --no-install-recommends -y install \
-            libgl-dev libx11-dev xvfb xauth \
+            libgl-dev libx11-dev libxmu-dev libxxf86vm-dev xvfb xauth \
             libvulkan1 libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers vulkan-tools
       - name: Set environment
         run: echo "CASTLE_ENGINE_PATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV

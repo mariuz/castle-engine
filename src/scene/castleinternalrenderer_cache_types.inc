@@ -299,9 +299,9 @@
     procedure SetTexCoordGenProjectorMatrix(const AMatrix: TMatrix4);
     procedure SetMirrorPlaneUniforms(
       const AHasMirrorUniforms: Boolean;
-      const ANormalizedPlane: TVector4;
-      const ACameraPositionOnPlane, ACameraSide, ACameraUp: TVector3;
-      const AFrustumDimensions: TVector4);
+      {$ifdef FPC}constref{$else}const{$endif} ANormalizedPlane: TVector4;
+      {$ifdef FPC}constref{$else}const{$endif} ACameraPositionOnPlane, ACameraSide, ACameraUp: TVector3;
+      {$ifdef FPC}constref{$else}const{$endif} AFrustumDimensions: TVector4);
     procedure SetPointSize(const APointSize: Single);
     procedure SetLineType(const ALineType: TLineType);
     procedure SetParallaxBumpMapping(const AEnabled, ASteep: Boolean; const AHeight: Single); overload;
@@ -1162,11 +1162,14 @@ begin
   end;
 end;
 
+{ Workaround FPC bug on Darwin for AArch64 ("Fatal: Internal error 2014121702"
+  when passing 5 HFA vector records exceeding v0..v7 onto packed ARM64 stack):
+  pass vector parameters via constref on FPC. }
 procedure TShapeCache.SetMirrorPlaneUniforms(
   const AHasMirrorUniforms: Boolean;
-  const ANormalizedPlane: TVector4;
-  const ACameraPositionOnPlane, ACameraSide, ACameraUp: TVector3;
-  const AFrustumDimensions: TVector4);
+  {$ifdef FPC}constref{$else}const{$endif} ANormalizedPlane: TVector4;
+  {$ifdef FPC}constref{$else}const{$endif} ACameraPositionOnPlane, ACameraSide, ACameraUp: TVector3;
+  {$ifdef FPC}constref{$else}const{$endif} AFrustumDimensions: TVector4);
 begin
   if (FRHIHasMirrorPlaneUniforms <> AHasMirrorUniforms) or
      (not TVector4.Equals(FRHIMirrorNormalizedPlane, ANormalizedPlane, 1e-5)) or
@@ -1176,11 +1179,14 @@ begin
      (not TVector4.Equals(FRHIMirrorFrustumDimensions, AFrustumDimensions, 1e-5)) then
   begin
     FRHIHasMirrorPlaneUniforms := AHasMirrorUniforms;
-    FRHIMirrorNormalizedPlane := ANormalizedPlane;
-    FRHIMirrorCameraPositionOnPlane := ACameraPositionOnPlane;
-    FRHIMirrorCameraSide := ACameraSide;
-    FRHIMirrorCameraUp := ACameraUp;
-    FRHIMirrorFrustumDimensions := AFrustumDimensions;
+    FRHIMirrorNormalizedPlane := Vector4(
+      ANormalizedPlane.X, ANormalizedPlane.Y, ANormalizedPlane.Z, ANormalizedPlane.W);
+    FRHIMirrorCameraPositionOnPlane := Vector3(
+      ACameraPositionOnPlane.X, ACameraPositionOnPlane.Y, ACameraPositionOnPlane.Z);
+    FRHIMirrorCameraSide := Vector3(ACameraSide.X, ACameraSide.Y, ACameraSide.Z);
+    FRHIMirrorCameraUp := Vector3(ACameraUp.X, ACameraUp.Y, ACameraUp.Z);
+    FRHIMirrorFrustumDimensions := Vector4(
+      AFrustumDimensions.X, AFrustumDimensions.Y, AFrustumDimensions.Z, AFrustumDimensions.W);
     FRHIShadersInitialized := False;
     FRHIAltShadersInitialized := False;
   end;

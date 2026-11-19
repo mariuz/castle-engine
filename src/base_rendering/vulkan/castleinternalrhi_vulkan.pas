@@ -52,6 +52,9 @@ type
     FMappedPtr: Pointer;
     FDeviceAddress: UInt64;
     function VulkanDevice: TVulkanRHIDevice;
+    function BuildVkUsageFlags: VkBufferUsageFlags;
+    procedure RelocateToAllocation(const ANewHandle: VkBuffer;
+      const ANewAlloc: TVulkanMemoryAllocation);
   protected
     procedure ReleaseDeviceResources; override;
     function GetDeviceAddress: UInt64; override;
@@ -198,6 +201,14 @@ type
 
   TVulkanDescriptorPoolAllocator = class;
 
+  TVulkanBoundBufferEntry = record
+    Binding: Cardinal;
+    IsStorage: Boolean;
+    Buffer: TVulkanRHIBuffer;
+    Offset: PtrUInt;
+    Range: PtrUInt;
+  end;
+
   TVulkanRHIDescriptorSet = class(TRHIDescriptorSet)
   private
     FHandle: VkDescriptorSet;
@@ -211,10 +222,15 @@ type
     FImageInfos: array of VkDescriptorImageInfo;
     FAccelStructHandles: array of VkAccelerationStructureKHR;
     FAccelStructWrites: array of VkWriteDescriptorSetAccelerationStructureKHR;
+    FBoundBuffers: array of TVulkanBoundBufferEntry;
     FUpdateCount: Cardinal;
     FLastBoundTexture: TRHITexture;
     FLastBoundSampler: TRHISampler;
     function VulkanDevice: TVulkanRHIDevice;
+    procedure RecordBoundBuffer(const ABinding: Cardinal; const AIsStorage: Boolean;
+      const ABuffer: TVulkanRHIBuffer; const AOffset, ARange: PtrUInt);
+    procedure ClearBoundBuffer(const ABuffer: TVulkanRHIBuffer);
+    procedure RefreshRelocatedBuffer(const ABuffer: TVulkanRHIBuffer);
   protected
     procedure ReleaseDeviceResources; override;
   public
@@ -4338,6 +4354,13 @@ type
 
   TVulkanSwapchainSurfaceList = {$ifdef FPC}specialize{$endif} TObjectList<TCastleVulkanSwapchainSurface>;
 
+  TVulkanPendingBufferRelocation = record
+    Buffer: TVulkanRHIBuffer;
+    OldVkBuffer: VkBuffer;
+    NewVkBuffer: VkBuffer;
+    CopySize: VkDeviceSize;
+  end;
+
   TVulkanRHIDevice = class(TRHIDevice)
   private
     FInstance: VkInstance;
@@ -4526,7 +4549,16 @@ type
     FValidationWarningCount: Cardinal;
     FValidationInfoCount: Cardinal;
     FValidationMessages: array of String;
+    FLiveDescriptorSets: TFPList;
+    FPendingRelocations: array of TVulkanPendingBufferRelocation;
+    FRelocatedBuffers: array of TVulkanRHIBuffer;
 
+    procedure RegisterLiveDescriptorSet(const ASet: TVulkanRHIDescriptorSet);
+    procedure UnregisterLiveDescriptorSet(const ASet: TVulkanRHIDescriptorSet);
+    procedure UnbindDestroyedBufferFromDescriptorSets(const ABuffer: TVulkanRHIBuffer);
+    function HandleDefragmentRelocate(const AUserData: Pointer;
+      const AOldAlloc, ANewAlloc: TVulkanMemoryAllocation): Boolean;
+    procedure HandleDefragmentFinalizeMoves;
     procedure CreateInstance(const EnableValidation: Boolean;
       const ARequireSurfaceExtensions: Boolean = True);
     function GetValidationMessageCount: Integer;
@@ -4535,7 +4567,10 @@ type
     procedure CreateSwapchain(const Width, Height: Cardinal);
     procedure DestroySwapchainResources(const ADestroySwapchainHandle: Boolean = True);
     procedure DestroySwapchain;
+    function GetSurfaceHandle: VkSurfaceKHR;
+    function GetSwapchainHandle: VkSwapchainKHR;
     function GetSwapchainImageCount: Cardinal;
+    function GetSwapchainExtent: VkExtent2D;
     procedure EnsureMSAATargets(const AWidth, AHeight: Cardinal;
       const AColorFormat, ADepthFormat: TRHIPixelFormat);
     procedure CreateFrameContexts;
@@ -4690,6 +4725,13 @@ type
       Returns True if VK_EXT_memory_budget was used. }
     function QueryMemoryBudget(out AUsedBytes, ABudgetBytes: UInt64;
       out AUsedMB, ABudgetMB: Cardinal): Boolean;
+
+    { Compacts fragmented Linear sub-allocations across TCastleVulkanMemoryAllocator blocks,
+      relocating live TVulkanRHIBuffer handles via batched vkCmdCopyBuffer commands, refreshing
+      any persistent TVulkanRHIDescriptorSet bindings, and freeing emptied VkDeviceMemory blocks (Phase 118). }
+    function DefragmentMemoryPools(
+      const AMaxBytesToMove: UInt64 = High(UInt64);
+      const AMaxAllocationsToMove: Cardinal = High(Cardinal)): TVulkanDefragmentStats;
 
     { Records diagnostic counters for testing or custom pass tracking. }
     procedure RecordDiagnostics(const APipelineHits, APipelineMisses,
@@ -4851,13 +4893,13 @@ type
     property InstanceHandle: VkInstance read FInstance;
     property Handle: VkDevice read FDevice;
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
-    property SurfaceHandle: VkSurfaceKHR read FSurface;
-    property SwapchainHandle: VkSwapchainKHR read FSwapchain;
+    property SurfaceHandle: VkSurfaceKHR read GetSurfaceHandle;
+    property SwapchainHandle: VkSwapchainKHR read GetSwapchainHandle;
     property ActiveSwapchainSurface: TCastleVulkanSwapchainSurface
       read FActiveSwapchainSurface write FActiveSwapchainSurface;
     property SwapchainSurfaceCount: Cardinal read GetSwapchainSurfaceCount;
     property SwapchainImageCount: Cardinal read GetSwapchainImageCount;
-    property SwapchainExtent: VkExtent2D read FSwapchainExtent;
+    property SwapchainExtent: VkExtent2D read GetSwapchainExtent;
     property InstanceApiVersion: Cardinal read FInstanceApiVersion;
     property DeviceApiVersion: Cardinal read FDeviceApiVersion write FDeviceApiVersion;
     property AntiAliasing: TAntiAliasing read FAntiAliasing write SetAntiAliasing;
@@ -6571,6 +6613,53 @@ begin
   Result := TVulkanRHIDevice(Device);
 end;
 
+function TVulkanRHIBuffer.BuildVkUsageFlags: VkBufferUsageFlags;
+var
+  ADevice: TVulkanRHIDevice;
+begin
+  Result := 0;
+  ADevice := VulkanDevice;
+  if buVertex in FDesc.Usage then Result := Result or VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+  if buIndex in FDesc.Usage then Result := Result or VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+  if buUniform in FDesc.Usage then Result := Result or VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+  if buStorage in FDesc.Usage then Result := Result or VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+  if buIndirect in FDesc.Usage then Result := Result or VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+  if buTransferSrc in FDesc.Usage then Result := Result or VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+  if (buTransferDst in FDesc.Usage) or (FDesc.MemoryUsage = muGpuOnly) then
+    Result := Result or VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  if not (buAccelerationStructureStorage in FDesc.Usage) then
+    Result := Result or VK_BUFFER_USAGE_TRANSFER_SRC_BIT or VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  if (ADevice <> nil) and ADevice.SupportsBufferDeviceAddress and
+     ((buShaderDeviceAddress in FDesc.Usage) or
+      (buAccelerationStructureBuildInput in FDesc.Usage) or
+      (buAccelerationStructureStorage in FDesc.Usage) or
+      (buShaderBindingTable in FDesc.Usage)) then
+    Result := Result or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  if (ADevice <> nil) and ADevice.SupportsAccelerationStructure and
+     (buAccelerationStructureBuildInput in FDesc.Usage) then
+    Result := Result or VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+  if (ADevice <> nil) and ADevice.SupportsAccelerationStructure and
+     (buAccelerationStructureStorage in FDesc.Usage) then
+    Result := Result or VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+  if (ADevice <> nil) and ADevice.SupportsRayTracingPipeline and
+     (buShaderBindingTable in FDesc.Usage) then
+    Result := Result or VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+end;
+
+procedure TVulkanRHIBuffer.RelocateToAllocation(const ANewHandle: VkBuffer;
+  const ANewAlloc: TVulkanMemoryAllocation);
+begin
+  FHandle := ANewHandle;
+  FAllocation := ANewAlloc;
+  FDeviceMemory := ANewAlloc.DeviceMemory;
+  FMemoryOffset := ANewAlloc.Offset;
+  FAllocatedSize := ANewAlloc.Size;
+  FMappedPtr := ANewAlloc.MappedPtr;
+  FDeviceAddress := 0;
+  if (VulkanDevice <> nil) and (FDesc.DebugName <> '') and (FHandle <> VK_NULL_HANDLE) then
+    VulkanDevice.SetDebugObjectName(VK_OBJECT_TYPE_BUFFER, FHandle, FDesc.DebugName);
+end;
+
 constructor TVulkanRHIBuffer.Create(const ADevice: TVulkanRHIDevice;
   const ADesc: TRHIBufferDesc; const InitialData: Pointer);
 var
@@ -6579,6 +6668,7 @@ var
   AllocInfo: VkMemoryAllocateInfo;
   MemProps: VkMemoryPropertyFlags;
   RequiredAlign: VkDeviceSize;
+  MovableOwner: Pointer;
 begin
   inherited Create(ADevice, ADesc);
 
@@ -6588,27 +6678,7 @@ begin
     BufInfo.sType := VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     BufInfo.size := ADesc.Size;
     BufInfo.sharingMode := VK_SHARING_MODE_EXCLUSIVE;
-
-    if buVertex in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    if buIndex in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    if buUniform in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    if buStorage in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    if buIndirect in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-    if (buTransferSrc in ADesc.Usage) then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    if (buTransferDst in ADesc.Usage) or (ADesc.MemoryUsage = muGpuOnly) then
-      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if ADevice.SupportsBufferDeviceAddress and
-       ((buShaderDeviceAddress in ADesc.Usage) or
-        (buAccelerationStructureBuildInput in ADesc.Usage) or
-        (buAccelerationStructureStorage in ADesc.Usage) or
-        (buShaderBindingTable in ADesc.Usage)) then
-      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    if ADevice.SupportsAccelerationStructure and (buAccelerationStructureBuildInput in ADesc.Usage) then
-      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-    if ADevice.SupportsAccelerationStructure and (buAccelerationStructureStorage in ADesc.Usage) then
-      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
-    if ADevice.SupportsRayTracingPipeline and (buShaderBindingTable in ADesc.Usage) then
-      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+    BufInfo.usage := BuildVkUsageFlags;
 
     CheckVk(vkCreateBuffer(ADevice.Handle, @BufInfo, nil, @FHandle), 'vkCreateBuffer');
   end else
@@ -6630,10 +6700,15 @@ begin
     if buShaderBindingTable in ADesc.Usage then
       RequiredAlign := Max(RequiredAlign, VkDeviceSize(64));
 
+    if buAccelerationStructureStorage in ADesc.Usage then
+      MovableOwner := nil
+    else
+      MovableOwner := Self;
+
     { Sub-allocate from pooled VkDeviceMemory blocks via TCastleVulkanMemoryAllocator
       to stay well below Windows WDDM's 4096 maxMemoryAllocationCount limit }
     FAllocation := ADevice.MemoryAllocator.AllocateBufferMemory(
-      FHandle, ADesc.Size, ADesc.MemoryUsage, False, RequiredAlign);
+      FHandle, ADesc.Size, ADesc.MemoryUsage, False, RequiredAlign, MovableOwner);
     FDeviceMemory := FAllocation.DeviceMemory;
     FMemoryOffset := FAllocation.Offset;
     FAllocatedSize := FAllocation.Size;
@@ -6675,6 +6750,7 @@ begin
     Unmap;
   if VulkanDevice <> nil then
   begin
+    VulkanDevice.UnbindDestroyedBufferFromDescriptorSets(Self);
     if VulkanDevice.StagingUploader <> nil then
       VulkanDevice.StagingUploader.CancelPendingUploadsForBuffer(Self);
     if (FHandle <> VK_NULL_HANDLE) or (FDeviceMemory <> VK_NULL_HANDLE) or (FAllocatedSize > 0) then
@@ -8112,6 +8188,8 @@ begin
     FOwnerPool := VK_NULL_HANDLE;
     FHandle := VkDescriptorSet(PtrUInt(Self));
   end;
+  if (ADevice <> nil) and (not AIsTransient) then
+    ADevice.RegisterLiveDescriptorSet(Self);
 end;
 
 constructor TVulkanRHIDescriptorSet.CreateFromCustomPool(
@@ -8143,12 +8221,17 @@ begin
       'vkAllocateDescriptorSets(CustomPool)');
   end else
     FHandle := VkDescriptorSet(PtrUInt(Self));
+  if ADevice <> nil then
+    ADevice.RegisterLiveDescriptorSet(Self);
 end;
 
 procedure TVulkanRHIDescriptorSet.ReleaseDeviceResources;
 var
   LocalSet: VkDescriptorSet;
 begin
+  if VulkanDevice <> nil then
+    VulkanDevice.UnregisterLiveDescriptorSet(Self);
+  SetLength(FBoundBuffers, 0);
   if FUsesCustomPool then
   begin
     if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
@@ -8174,7 +8257,64 @@ begin
   SetLength(FImageInfos, 0);
   SetLength(FAccelStructHandles, 0);
   SetLength(FAccelStructWrites, 0);
+  SetLength(FBoundBuffers, 0);
   inherited;
+end;
+
+procedure TVulkanRHIDescriptorSet.RecordBoundBuffer(const ABinding: Cardinal;
+  const AIsStorage: Boolean; const ABuffer: TVulkanRHIBuffer;
+  const AOffset, ARange: PtrUInt);
+var
+  I, NewIdx: Integer;
+begin
+  if FIsTransient then
+    Exit;
+  for I := 0 to High(FBoundBuffers) do
+    if FBoundBuffers[I].Binding = ABinding then
+    begin
+      FBoundBuffers[I].IsStorage := AIsStorage;
+      FBoundBuffers[I].Buffer := ABuffer;
+      FBoundBuffers[I].Offset := AOffset;
+      FBoundBuffers[I].Range := ARange;
+      Exit;
+    end;
+  NewIdx := Length(FBoundBuffers);
+  SetLength(FBoundBuffers, NewIdx + 1);
+  FBoundBuffers[NewIdx].Binding := ABinding;
+  FBoundBuffers[NewIdx].IsStorage := AIsStorage;
+  FBoundBuffers[NewIdx].Buffer := ABuffer;
+  FBoundBuffers[NewIdx].Offset := AOffset;
+  FBoundBuffers[NewIdx].Range := ARange;
+end;
+
+procedure TVulkanRHIDescriptorSet.ClearBoundBuffer(const ABuffer: TVulkanRHIBuffer);
+var
+  I: Integer;
+begin
+  for I := 0 to High(FBoundBuffers) do
+    if FBoundBuffers[I].Buffer = ABuffer then
+      FBoundBuffers[I].Buffer := nil;
+end;
+
+procedure TVulkanRHIDescriptorSet.RefreshRelocatedBuffer(const ABuffer: TVulkanRHIBuffer);
+var
+  I: Integer;
+  AnyRebound: Boolean;
+begin
+  if (ABuffer = nil) or (FHandle = VK_NULL_HANDLE) then
+    Exit;
+  AnyRebound := False;
+  for I := 0 to High(FBoundBuffers) do
+    if FBoundBuffers[I].Buffer = ABuffer then
+    begin
+      if FBoundBuffers[I].IsStorage then
+        BindStorageBuffer(FBoundBuffers[I].Binding, ABuffer, FBoundBuffers[I].Offset, FBoundBuffers[I].Range)
+      else
+        BindUniformBuffer(FBoundBuffers[I].Binding, ABuffer, FBoundBuffers[I].Offset, FBoundBuffers[I].Range);
+      AnyRebound := True;
+    end;
+  if AnyRebound then
+    Update;
 end;
 
 procedure TVulkanRHIDescriptorSet.BindUniformBuffer(const Binding: Cardinal;
@@ -8183,6 +8323,7 @@ var
   Idx, WriteIdx: Integer;
 begin
   if Buffer = nil then Exit;
+  RecordBoundBuffer(Binding, False, Buffer as TVulkanRHIBuffer, Offset, Range);
   Idx := Length(FBufferInfos);
   SetLength(FBufferInfos, Idx + 1);
   FillChar(FBufferInfos[Idx], SizeOf(VkDescriptorBufferInfo), 0);
@@ -8212,6 +8353,7 @@ var
   Idx, WriteIdx: Integer;
 begin
   if Buffer = nil then Exit;
+  RecordBoundBuffer(Binding, True, Buffer as TVulkanRHIBuffer, Offset, Range);
   Idx := Length(FBufferInfos);
   SetLength(FBufferInfos, Idx + 1);
   FillChar(FBufferInfos[Idx], SizeOf(VkDescriptorBufferInfo), 0);
@@ -10798,7 +10940,8 @@ begin
     Result.Handle := VkDescriptorPool(PtrUInt($50000000) + PtrUInt(FTotalPoolCount) + 1);
 
   Inc(FTotalPoolCount);
-  FCurrentMaxSets := Min(FMaxSetsCap, Max(FCurrentMaxSets + (FCurrentMaxSets div 2), FCurrentMaxSets + 1));
+  FCurrentMaxSets := Cardinal(Min(UInt64(FMaxSetsCap),
+    Max(UInt64(FCurrentMaxSets) + UInt64(FCurrentMaxSets div 2), UInt64(FCurrentMaxSets) + UInt64(1))));
 end;
 
 procedure TVulkanDescriptorPoolAllocator.AcquireNextReadyOrNewPage;
@@ -11258,7 +11401,7 @@ begin
   begin
     if FOwnsMaterialSSBOBuffer then
       FreeAndNil(FMaterialSSBOBuffer);
-    AllocBytes := Max(PtrUInt(64 * SizeOf(TCastleBindlessMaterialEntry)), RequiredBytes * 2);
+    AllocBytes := PtrUInt(Max(UInt64(64 * SizeOf(TCastleBindlessMaterialEntry)), UInt64(RequiredBytes) * UInt64(2)));
     BufDesc := Default(TRHIBufferDesc);
     BufDesc.Size := AllocBytes;
     BufDesc.Usage := [buStorage, buTransferDst];
@@ -22527,7 +22670,7 @@ begin
   FreeAndNil(FDenoisedOutputTexture);
   FreeAndNil(FMLPWeightsBuffer);
 
-  WeightBytes := Max(Cardinal(64), FHiddenUnits * FHiddenUnits * SizeOf(Single));
+  WeightBytes := Cardinal(Max(UInt64(64), UInt64(FHiddenUnits) * UInt64(FHiddenUnits) * UInt64(SizeOf(Single))));
   BufDesc := TRHIBufferDesc.Create(WeightBytes,
     [buStorage, buTransferDst], muCpuToGpu, 'NeuralMLPWeightsSSBO');
   FMLPWeightsBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
@@ -23102,7 +23245,7 @@ begin
     FUploadedMaterialIDs[I] := AMaterialIDs[I];
 
   if Count > FMaxElements then
-    FMaxElements := Max(Count, FMaxElements * 2);
+    FMaxElements := Cardinal(Max(UInt64(Count), UInt64(FMaxElements) * UInt64(2)));
 
   EnsureStreamBinningPipelines;
   if (Count > 0) and (FMaterialIDsBuffer <> nil) then
@@ -25241,6 +25384,7 @@ begin
   FFragmentOutputLibMap := TVulkanPipelineLibraryMap.Create;
   FRenderPassMap := TVulkanRenderPassMap.Create;
   FFramebufferMap := TVulkanFramebufferMap.Create;
+  FLiveDescriptorSets := TFPList.Create;
   FSupportsDynamicRendering := True;
   FAntiAliasing := aaNone;
   FSampleCount := 1;
@@ -25293,6 +25437,7 @@ begin
   FFragmentOutputLibMap := TVulkanPipelineLibraryMap.Create;
   FRenderPassMap := TVulkanRenderPassMap.Create;
   FFramebufferMap := TVulkanFramebufferMap.Create;
+  FLiveDescriptorSets := TFPList.Create;
   FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
   FSupportsDynamicRendering := True;
   FRequireWSISwapchain := True;
@@ -25367,6 +25512,7 @@ begin
   FFragmentOutputLibMap := TVulkanPipelineLibraryMap.Create;
   FRenderPassMap := TVulkanRenderPassMap.Create;
   FFramebufferMap := TVulkanFramebufferMap.Create;
+  FLiveDescriptorSets := TFPList.Create;
   FSupportsDynamicRendering := True;
   FAntiAliasing := aaNone;
   FSampleCount := 1;
@@ -25436,6 +25582,7 @@ begin
   FFragmentOutputLibMap := TVulkanPipelineLibraryMap.Create;
   FRenderPassMap := TVulkanRenderPassMap.Create;
   FFramebufferMap := TVulkanFramebufferMap.Create;
+  FLiveDescriptorSets := TFPList.Create;
   FAntiAliasing := aaNone;
   FSampleCount := 1;
   FSwapchainFormat := pfBGRA8_UNorm;
@@ -25753,6 +25900,159 @@ begin
     Result := FStagingUploader.FlushPendingUploads(ACommandList)
   else
     Result := 0;
+end;
+
+procedure TVulkanRHIDevice.RegisterLiveDescriptorSet(const ASet: TVulkanRHIDescriptorSet);
+begin
+  if (FLiveDescriptorSets <> nil) and (ASet <> nil) and
+     (FLiveDescriptorSets.IndexOf(ASet) < 0) then
+    FLiveDescriptorSets.Add(ASet);
+end;
+
+procedure TVulkanRHIDevice.UnregisterLiveDescriptorSet(const ASet: TVulkanRHIDescriptorSet);
+begin
+  if (FLiveDescriptorSets <> nil) and (ASet <> nil) then
+    FLiveDescriptorSets.Remove(ASet);
+end;
+
+procedure TVulkanRHIDevice.UnbindDestroyedBufferFromDescriptorSets(const ABuffer: TVulkanRHIBuffer);
+var
+  I: Integer;
+begin
+  if (FLiveDescriptorSets = nil) or (ABuffer = nil) then
+    Exit;
+  for I := 0 to FLiveDescriptorSets.Count - 1 do
+    TVulkanRHIDescriptorSet(FLiveDescriptorSets[I]).ClearBoundBuffer(ABuffer);
+end;
+
+function TVulkanRHIDevice.HandleDefragmentRelocate(const AUserData: Pointer;
+  const AOldAlloc, ANewAlloc: TVulkanMemoryAllocation): Boolean;
+var
+  Buf: TVulkanRHIBuffer;
+  BufInfo: VkBufferCreateInfo;
+  NewVkBuffer, OldVkBuffer: VkBuffer;
+  Idx, BIdx: Integer;
+  AlreadyListed: Boolean;
+begin
+  Result := False;
+  if (AUserData = nil) or not (TObject(AUserData) is TVulkanRHIBuffer) then
+    Exit;
+  Buf := TVulkanRHIBuffer(AUserData);
+  OldVkBuffer := Buf.Handle;
+  NewVkBuffer := VK_NULL_HANDLE;
+
+  if (FDevice <> nil) and Assigned(vkCreateBuffer) and Assigned(vkBindBufferMemory) then
+  begin
+    FillChar(BufInfo, SizeOf(BufInfo), 0);
+    BufInfo.sType := VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    BufInfo.size := Buf.Desc.Size;
+    BufInfo.sharingMode := VK_SHARING_MODE_EXCLUSIVE;
+    BufInfo.usage := Buf.BuildVkUsageFlags;
+    if vkCreateBuffer(FDevice, @BufInfo, nil, @NewVkBuffer) <> VK_SUCCESS then
+      Exit(False);
+    if vkBindBufferMemory(FDevice, NewVkBuffer, ANewAlloc.DeviceMemory, ANewAlloc.Offset) <> VK_SUCCESS then
+    begin
+      if Assigned(vkDestroyBuffer) then
+        vkDestroyBuffer(FDevice, NewVkBuffer, nil);
+      Exit(False);
+    end;
+  end else
+    NewVkBuffer := VkBuffer(PtrUInt(Buf) xor PtrUInt(ANewAlloc.ChunkId shl 4));
+
+  Idx := Length(FPendingRelocations);
+  SetLength(FPendingRelocations, Idx + 1);
+  FPendingRelocations[Idx].Buffer := Buf;
+  FPendingRelocations[Idx].OldVkBuffer := OldVkBuffer;
+  FPendingRelocations[Idx].NewVkBuffer := NewVkBuffer;
+  FPendingRelocations[Idx].CopySize := Buf.Desc.Size;
+
+  AlreadyListed := False;
+  for BIdx := 0 to High(FRelocatedBuffers) do
+    if FRelocatedBuffers[BIdx] = Buf then
+    begin
+      AlreadyListed := True;
+      Break;
+    end;
+  if not AlreadyListed then
+  begin
+    BIdx := Length(FRelocatedBuffers);
+    SetLength(FRelocatedBuffers, BIdx + 1);
+    FRelocatedBuffers[BIdx] := Buf;
+  end;
+
+  Buf.RelocateToAllocation(NewVkBuffer, ANewAlloc);
+  Result := True;
+end;
+
+procedure TVulkanRHIDevice.HandleDefragmentFinalizeMoves;
+var
+  Cmd: VkCommandBuffer;
+  CopyRegion: VkBufferCopy;
+  I: Integer;
+begin
+  if Length(FPendingRelocations) = 0 then
+    Exit;
+
+  if (FDevice <> nil) and Assigned(vkCmdCopyBuffer) then
+  begin
+    Cmd := BeginSingleTimeCommands;
+    for I := 0 to High(FPendingRelocations) do
+      if (FPendingRelocations[I].OldVkBuffer <> VK_NULL_HANDLE) and
+         (FPendingRelocations[I].NewVkBuffer <> VK_NULL_HANDLE) and
+         (FPendingRelocations[I].CopySize > 0) then
+      begin
+        FillChar(CopyRegion, SizeOf(CopyRegion), 0);
+        CopyRegion.srcOffset := 0;
+        CopyRegion.dstOffset := 0;
+        CopyRegion.size := FPendingRelocations[I].CopySize;
+        vkCmdCopyBuffer(Cmd, FPendingRelocations[I].OldVkBuffer,
+          FPendingRelocations[I].NewVkBuffer, 1, @CopyRegion);
+      end;
+    EndSingleTimeCommands(Cmd);
+
+    { Destroy retired VkBuffer handles BEFORE Phase C frees source sub-allocations/blocks (VUID-vkFreeMemory-memory-00677) }
+    if Assigned(vkDestroyBuffer) then
+      for I := 0 to High(FPendingRelocations) do
+        if FPendingRelocations[I].OldVkBuffer <> VK_NULL_HANDLE then
+          vkDestroyBuffer(FDevice, FPendingRelocations[I].OldVkBuffer, nil);
+  end;
+
+  SetLength(FPendingRelocations, 0);
+end;
+
+function TVulkanRHIDevice.DefragmentMemoryPools(
+  const AMaxBytesToMove: UInt64;
+  const AMaxAllocationsToMove: Cardinal): TVulkanDefragmentStats;
+var
+  I, J: Integer;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  if FMemoryAllocator = nil then
+    Exit;
+
+  if (FStagingUploader <> nil) and
+     not ((ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+    FlushStagingUploads(nil);
+  WaitIdle;
+  FlushAllDeferredDeletions;
+
+  SetLength(FPendingRelocations, 0);
+  SetLength(FRelocatedBuffers, 0);
+  try
+    Result := FMemoryAllocator.DefragmentPools(
+      AMaxBytesToMove,
+      AMaxAllocationsToMove,
+      {$ifdef FPC}@{$endif}HandleDefragmentRelocate,
+      {$ifdef FPC}@{$endif}HandleDefragmentFinalizeMoves);
+
+    if (FLiveDescriptorSets <> nil) and (Length(FRelocatedBuffers) > 0) then
+      for I := 0 to High(FRelocatedBuffers) do
+        for J := 0 to FLiveDescriptorSets.Count - 1 do
+          TVulkanRHIDescriptorSet(FLiveDescriptorSets[J]).RefreshRelocatedBuffer(FRelocatedBuffers[I]);
+  finally
+    SetLength(FPendingRelocations, 0);
+    SetLength(FRelocatedBuffers, 0);
+  end;
 end;
 
 function TVulkanRHIDevice.GetPendingDeferredDeletionCount: Cardinal;
@@ -26504,6 +26804,9 @@ begin
   FDeferResourceDestruction := False;
   ReleaseRemainingDeviceResources;
   FlushAllDeferredDeletions;
+  FreeAndNil(FLiveDescriptorSets);
+  SetLength(FPendingRelocations, 0);
+  SetLength(FRelocatedBuffers, 0);
 
   for I := 0 to MaxFramesInFlight - 1 do
   begin
@@ -28619,9 +28922,37 @@ begin
   DestroySwapchainResources(True);
 end;
 
+function TVulkanRHIDevice.GetSurfaceHandle: VkSurfaceKHR;
+begin
+  if (FSurface = VK_NULL_HANDLE) and (FActiveSwapchainSurface <> nil) then
+    Result := FActiveSwapchainSurface.SurfaceHandle
+  else
+    Result := FSurface;
+end;
+
+function TVulkanRHIDevice.GetSwapchainHandle: VkSwapchainKHR;
+begin
+  if (FSwapchain = VK_NULL_HANDLE) and (FActiveSwapchainSurface <> nil) then
+    Result := FActiveSwapchainSurface.SwapchainHandle
+  else
+    Result := FSwapchain;
+end;
+
 function TVulkanRHIDevice.GetSwapchainImageCount: Cardinal;
 begin
-  Result := Cardinal(Length(FSwapchainColorTextures));
+  if (Length(FSwapchainColorTextures) = 0) and (FActiveSwapchainSurface <> nil) then
+    Result := FActiveSwapchainSurface.SwapchainImageCount
+  else
+    Result := Cardinal(Length(FSwapchainColorTextures));
+end;
+
+function TVulkanRHIDevice.GetSwapchainExtent: VkExtent2D;
+begin
+  if (FSwapchain = VK_NULL_HANDLE) and (Length(FSwapchainColorTextures) = 0) and
+     (FActiveSwapchainSurface <> nil) then
+    Result := FActiveSwapchainSurface.SwapchainExtent
+  else
+    Result := FSwapchainExtent;
 end;
 
 procedure TVulkanRHIDevice.CreateFrameContexts;
@@ -29030,6 +29361,12 @@ procedure TVulkanRHIDevice.ResizeSwapchain(const NewWidth, NewHeight: Cardinal);
 var
   SimCount: Cardinal;
 begin
+  if (FSurface = VK_NULL_HANDLE) and (Length(FSwapchainColorTextures) = 0) and
+     (FActiveSwapchainSurface <> nil) then
+  begin
+    FActiveSwapchainSurface.Resize(NewWidth, NewHeight);
+    Exit;
+  end;
   if (NewWidth = 0) or (NewHeight = 0) then
   begin
     FSwapchainMinimized := True;

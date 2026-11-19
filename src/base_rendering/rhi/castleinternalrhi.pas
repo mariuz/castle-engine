@@ -1887,14 +1887,24 @@ end;
 { TRHIResource }
 
 var
+  {$if defined(FPC) and not defined(CPU64)}
+  GlobalRHIResourceSerial32: LongInt = 0;
+  {$else}
   GlobalRHIResourceSerial: Int64 = 0;
+  {$endif}
 
 constructor TRHIResource.Create(const ADevice: TRHIDevice; const ADebugName: String);
 begin
   inherited Create;
   FDevice := ADevice;
   FDebugName := ADebugName;
+  {$if defined(FPC) and defined(CPU64)}
   FUniqueId := QWord(InterlockedIncrement64(GlobalRHIResourceSerial));
+  {$elseif defined(FPC)}
+  FUniqueId := QWord(Cardinal(InterlockedIncrement(GlobalRHIResourceSerial32)));
+  {$else}
+  FUniqueId := UInt64(AtomicIncrement(GlobalRHIResourceSerial));
+  {$endif}
   if (FDevice <> nil) and (FDevice.FResources <> nil) then
     FDevice.FResources.Add(Self);
 end;

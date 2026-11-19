@@ -16,7 +16,7 @@
   or headless rendering via Vulkan 1.3+ / OpenGL. }
 program vulkan_triangle;
 
-{$I castleconf.inc}
+{$ifdef FPC}{$mode objfpc}{$H+}{$endif}
 
 uses
   SysUtils, Classes, Math,

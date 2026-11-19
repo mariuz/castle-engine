@@ -386,7 +386,7 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
         Idx := -1;
         if Node is TAbstractDirectionalLightNode then
         begin
-          Dir := LightToEyeSpace.MultDirection(TAbstractDirectionalLightNode(Node).FdDirection.Value);
+          Dir := LightToEyeSpace.MultDirection(Light^.Direction);
           Idx := UniformBlock.AddDirectionalLight(Dir, Color3, AmbientColor3);
         end else
         if Node is TSpotLightNode_1 then

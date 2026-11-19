@@ -60,7 +60,7 @@ This is the same license as used by Lazarus LCL and FPC RTL.
 See https://castle-engine.io/license for details.
 "/>
     <Version Major="6" Minor="93" Release="1"/>
-    <Files Count="1218">
+    <Files Count="1228">
       <Item1>
         <Filename Value="../../src/audio/castleinternalabstractsoundbackend.pas"/>
         <UnitName Value="CastleInternalAbstractSoundBackend"/>
@@ -4963,6 +4963,46 @@ See https://castle-engine.io/license for details.
         <Filename Value="../../src/services/castlelocalnotifications.pas"/>
         <UnitName Value="CastleLocalNotifications"/>
       </Item1218>
+      <Item1219>
+        <Filename Value="../../src/base_rendering/opengl/castleinternalrhi_opengl.pas"/>
+        <UnitName Value="CastleInternalRHI_OpenGL"/>
+      </Item1219>
+      <Item1220>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalbatch2drhi.pas"/>
+        <UnitName Value="CastleInternalBatch2DRHI"/>
+      </Item1220>
+      <Item1221>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalrenderdoc.pas"/>
+        <UnitName Value="CastleInternalRenderDoc"/>
+      </Item1221>
+      <Item1222>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalrhi.pas"/>
+        <UnitName Value="CastleInternalRHI"/>
+      </Item1222>
+      <Item1223>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalshaderrhi.pas"/>
+        <UnitName Value="CastleInternalShaderRHI"/>
+      </Item1223>
+      <Item1224>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalrhi_vulkan.pas"/>
+        <UnitName Value="CastleInternalRHI_Vulkan"/>
+      </Item1224>
+      <Item1225>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalshadercompiler.pas"/>
+        <UnitName Value="CastleInternalShaderCompiler"/>
+      </Item1225>
+      <Item1226>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkan.pas"/>
+        <UnitName Value="CastleInternalVulkan"/>
+      </Item1226>
+      <Item1227>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkanmemory.pas"/>
+        <UnitName Value="CastleInternalVulkanMemory"/>
+      </Item1227>
+      <Item1228>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkanwsi.pas"/>
+        <UnitName Value="CastleInternalVulkanWSI"/>
+      </Item1228>
     </Files>
     <CompatibilityMode Value="True"/>
     <RequiredPkgs Count="1">

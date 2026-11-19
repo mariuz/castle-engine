@@ -773,7 +773,7 @@
       An example:
       @includeCode(../../examples/short_api_samples/save_screen_rgba/save_screen_rgba.dpr)
       @groupBegin }
-    function SaveScreenRgba(const SaveRect: TRectangle): TRGBAlphaImage; overload;
+    function SaveScreenRgba(const SaveRect: TRectangle): TRGBAlphaImage; overload; virtual;
     function SaveScreenRgba: TRGBAlphaImage; overload;
     { @groupEnd }
 
@@ -2454,15 +2454,13 @@ begin
   ProcessViewChanges;
 
   if InitializedContextsCount = 1 then
-  begin
     ApplicationProperties._GLContextClose;
 
-    { recreate FContext instance, to reset every variable when context is closed }
-    if RenderContext = FContext then
-      RenderContext := nil;
-    FreeAndNil(FContext);
-    FContext := TRenderContext.Create(nil);
-  end;
+  { Recreate FContext instance on every container close so cached GL/RHI state is reset }
+  if RenderContext = FContext then
+    RenderContext := nil;
+  FreeAndNil(FContext);
+  FContext := TRenderContext.Create(nil);
 end;
 
 function TCastleContainer.AllowSuspendForInput: Boolean;
@@ -3126,8 +3124,7 @@ begin
   OffscreenColorTex := nil;
   OffscreenDepthTex := nil;
   try
-    if RenderContext = nil then
-      RenderContext := Context;
+    RenderContext := Context;
 
     TargetW := Cardinal(Max(1, Max(PixelsWidth, Max(0, SaveRect.Left) + Max(1, SaveRect.Width))));
     TargetH := Cardinal(Max(1, Max(PixelsHeight, Max(0, SaveRect.Bottom) + Max(1, SaveRect.Height))));
