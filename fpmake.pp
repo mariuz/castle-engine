@@ -595,6 +595,7 @@ begin
     P.Targets.AddUnit('castlegravityfield.pas');
     P.Targets.AddUnit('castlecloudshadows.pas');
     P.Targets.AddUnit('castletrailstamper.pas');
+    P.Targets.AddUnit('castlecoverpointscanner.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

@@ -4750,6 +4750,13 @@ Phase 383 adds Unreal Engine 6.0+ RVT Snow Trail-style **Persistent 2D Ground Fu
 - **Volume-Conserving Furrows & Collar Berms (`StampFurrowSegmentWorld`)**: Carves smooth depressions (`< 0.0m`) with raised outer collar berms (`> 0.0m`) while preserving deeper existing ruts and bilinearly evaluating central-difference normals.
 - **Gradual Weather Refill (`StepWeatherRefill`)**: Smoothly relaxes depressions, raised berms, and compaction back toward undisturbed `0.0m` under active snowfall or wind-blown sand.
 
+## 66DE. Phase 384: Tactical Cover Point Scanner, Crouch-Peek / Corner-Lean & Threat Exposure Studio
+
+Phase 384 adds Unreal Engine 6.0+ EQS Tactical Cover-style **Automated `WorldRay` Waist/Full Cover Baking & Multi-Threat Flanking Evaluation** via `TCastleCoverPointScanner` (`src/scene/castlecoverpointscanner.pas`), `TCoverPointScannerHelper` (`tools/common-code/toolcoverpointscanner.pas`), and `TCoverPointScannerForm` (`tools/castle-editor/code/formcoverpointscanner.pas`), accessible from **`CoverAI`** in the top viewport toolbar, **`Design -> Tactical Cover Point Scanner & Flanking Studio...`**, or `LaunchStudioById('cover_point_scanner')`.
+
+- **Waist Over-Peek vs. Full Standing Corner-Lean (`BakeCoverNodes`)**: Probes waist and standing eye heights plus lateral offsets to classify `cpkWaistCrouchOverPeek` barriers (`CanPeekOverTop`) vs. `cpkFullStandingCornerLean` pillars (`CanLeanLeft` / `CanLeanRight`).
+- **Multi-Threat Crossfire Filtering (`EvaluateBestCoverAgainstThreats`)**: Rejects nodes flanked by any hostile threat and verifies crouch-height `WorldRay` line-of-sight occlusion.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4921,4 +4928,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolgravityfield.pas`](../tests/code/testcases/testtoolgravityfield.pas) (`TTestToolGravityField` — 2 tests)**: Verifies 360-degree spherical planetoid walking (North Pole, East Equator, upside-down South Pole), exact $r = 2R$ inverse-square falloff (`2.45 m/s^2`), hollow O'Neill cylinder interior ceiling `Up` vectors, `Priority = 50` zone overrides, antipodal-safe `StepSmoothUpVectorSlerp`, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcloudshadows.pas`](../tests/code/testcases/testtoolcloudshadows.pas) (`TTestToolCloudShadows` — 2 tests)**: Verifies `90°` zenith (`0m` offset) vs. `45°` (`+300m` horizontal offset) solar cloud-shadow projection, `0% -> 52% -> 100%` coverage monotonicity, wind advection scrolling, `> 10x` forward Henyey-Greenstein crepuscular shaft gain vs. backscatter, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltrailstamper.pas`](../tests/code/testcases/testtooltrailstamper.pas) (`TTestToolTrailStamper` — 2 tests)**: Verifies continuous sled/wheel furrow depressions (`< -0.30m`, compaction `> 0.85`), raised side rim berms (`> +0.04m`), central-difference slope normals, gradual snowfall refill back to `0` active cells, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcoverpointscanner.pas`](../tests/code/testcases/testtoolcoverpointscanner.pas) (`TTestToolCoverPointScanner` — 2 tests)**: Verifies `1.15m` waist barrier `cpkWaistCrouchOverPeek` (`CanPeekOverTop`) vs. `2.60m` concrete pillar `cpkFullStandingCornerLean` (`CanLeanLeft` / `CanLeanRight`), North sniper +Z sheltering vs. rear +Z pincer flank invalidation, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

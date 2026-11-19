@@ -697,6 +697,7 @@ type
       MenuItemGravityField: TMenuItem;
       MenuItemCloudShadows: TMenuItem;
       MenuItemTrailStamper: TMenuItem;
+      MenuItemCoverPointScanner: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -814,6 +815,7 @@ type
     procedure MenuItemGravityFieldClick(Sender: TObject);
     procedure MenuItemCloudShadowsClick(Sender: TObject);
     procedure MenuItemTrailStamperClick(Sender: TObject);
+    procedure MenuItemCoverPointScannerClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2923,6 +2925,11 @@ begin
   MenuItemTrailStamper.Caption := 'Interactive Snow, Mud & Sand Trail Stamper Studio...';
   MenuItemTrailStamper.OnClick := @MenuItemTrailStamperClick;
   MenuItemDesign.Add(MenuItemTrailStamper);
+
+  MenuItemCoverPointScanner := TMenuItem.Create(MenuItemDesign);
+  MenuItemCoverPointScanner.Caption := 'Tactical Cover Point Scanner & Flanking Studio...';
+  MenuItemCoverPointScanner.OnClick := @MenuItemCoverPointScannerClick;
+  MenuItemDesign.Add(MenuItemCoverPointScanner);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6481,6 +6488,12 @@ procedure TProjectForm.MenuItemTrailStamperClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowTrailStamperDialog;
+end;
+
+procedure TProjectForm.MenuItemCoverPointScannerClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCoverPointScannerDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -210,6 +210,7 @@ uses
   TestToolGravityField,
   TestToolCloudShadows,
   TestToolTrailStamper,
+  TestToolCoverPointScanner,
   TestCastleVulkanRHI;
 
 implementation
