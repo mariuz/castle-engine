@@ -4785,6 +4785,13 @@ Phase 388 adds **Physical Room Acoustics & UTD Portal Diffraction** via `TCastle
 - **Fibonacci-Sphere `WorldRay` Reverberation (`BakeRoomAcoustics`)**: Estimates enclosing volume, surface area, material absorption, sky-escape leak (`OutdoorLeak01`), and Sabine/Eyring-Norris $RT_{60}$ decay across 3 presets (`acpCathedralStoneNave`, `acpPaddedRecordingBooth`, `acpOpenCanyonEcho`).
 - **Doorway Diffraction & Wall Muffling (`EvaluateSourceObstruction`)**: Computes Fresnel detour excess $\Delta L = (d_1 + d_2) - d_{\text{direct}}$ and Kurze-Anderson UTD low-pass filter rolloff (`LowPassCutoffHz`) around wall doorways vs. sealed masonry.
 
+## 66DJ. Phase 389: Procedural Rope Suspension Bridge, Live-Load Plank Deflection, Roll Tilt & Broken-Slat Hazard Studio
+
+Phase 389 adds **Interactive Rope & Chain Suspension Bridges** via `TCastleSuspensionBridge` (`src/scene/castlesuspensionbridge.pas`), `TSuspensionBridgeHelper` (`tools/common-code/toolsuspensionbridge.pas`), and `TSuspensionBridgeForm` (`tools/castle-editor/code/formsuspensionbridge.pas`), accessible from **`Bridge`** in the top viewport toolbar, **`Design -> Procedural Rope Suspension Bridge & Live-Load Studio...`**, or `LaunchStudioById('suspension_bridge')`.
+
+- **Green's-Function Live-Load Depression & Torsional Roll (`EvaluateDeckAtNormalizedT`)**: Evaluates continuous taut-cable Green's kernel $G(t, t_0)$ with pinned `0`-drop abutments and off-center torsional roll tilt across 3 presets (`sbpJungleVineFootbridge`, `sbpDwarvenIronChainSpan`, `sbpRottedChasmTrapBridge`).
+- **Deterministic Broken-Plank Chasm Gaps (`IsPlankBroken`)**: Seeds missing interior slats while preserving walkable start/end abutment planks.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4961,4 +4968,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolprefabdiffmerge.pas`](../tests/code/testcases/testtoolprefabdiffmerge.pas) (`TTestToolPrefabDiffMerge` — 2 tests)**: Verifies structural 3-way `Base` / `Ours` / `Theirs` non-conflicting `Translation` + `Scale` + added-child (`WatchtowerTheirs`) auto-merging, `mcpPreferOurs` (`42`) vs. `mcpPreferTheirs` (`99`) conflict resolution, `StringToComponent` live rehydration, the unified **106-Studio Hub** catalog (`Phases 1–386`), and the **20th MCP tool** `cge_diff_merge_scene` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolballisticstudio.pas`](../tests/code/testcases/testtoolballisticstudio.pas) (`TTestToolBallisticStudio` — 2 tests)**: Verifies `WorldRay` `0.18m` thin-cover penetration + `2.2m` concrete backstop embed, `-10°` steel-plate grazing ricochet, crosswind + Magnus lateral drift, moving-target low/high-arc mortar intercept lead solving, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolacousticspace.pas`](../tests/code/testcases/testtoolacousticspace.pas) (`TTestToolAcousticSpace` — 2 tests)**: Verifies stone cathedral (`RT60 > 2.0s`) vs. padded foam booth (`< 0.8s`) vs. open-sky (`0.0s`, `100%` leak) Sabine/Eyring scaling, direct (`20 kHz`) vs. doorway-diffracted (`750..8500 Hz`) vs. sealed-wall (`380 Hz`) LPF obstruction, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsuspensionbridge.pas`](../tests/code/testcases/testtoolsuspensionbridge.pas) (`TTestToolSuspensionBridge` — 2 tests)**: Verifies pinned `t = 0` / `t = 1` abutment invariance, Green's-function `280 kg` point-load depression & lateral roll tilt, Dwarven iron vs. jungle vine stiffness scaling, deterministic interior broken-plank gaps, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

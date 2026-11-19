@@ -215,6 +215,7 @@ uses
   TestToolPrefabDiffMerge,
   TestToolBallisticStudio,
   TestToolAcousticSpace,
+  TestToolSuspensionBridge,
   TestCastleVulkanRHI;
 
 implementation

@@ -599,6 +599,7 @@ begin
     P.Targets.AddUnit('castlecatenarycable.pas');
     P.Targets.AddUnit('castleballisticsolver.pas');
     P.Targets.AddUnit('castleacousticspace.pas');
+    P.Targets.AddUnit('castlesuspensionbridge.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

@@ -702,6 +702,7 @@ type
       MenuItemPrefabDiffMerge: TMenuItem;
       MenuItemBallisticStudio: TMenuItem;
       MenuItemAcousticSpace: TMenuItem;
+      MenuItemSuspensionBridge: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -824,6 +825,7 @@ type
     procedure MenuItemPrefabDiffMergeClick(Sender: TObject);
     procedure MenuItemBallisticStudioClick(Sender: TObject);
     procedure MenuItemAcousticSpaceClick(Sender: TObject);
+    procedure MenuItemSuspensionBridgeClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2958,6 +2960,11 @@ begin
   MenuItemAcousticSpace.Caption := 'Acoustic Raytraced Reverb (RT60) & Diffraction Studio...';
   MenuItemAcousticSpace.OnClick := @MenuItemAcousticSpaceClick;
   MenuItemDesign.Add(MenuItemAcousticSpace);
+
+  MenuItemSuspensionBridge := TMenuItem.Create(MenuItemDesign);
+  MenuItemSuspensionBridge.Caption := 'Procedural Rope Suspension Bridge & Live-Load Studio...';
+  MenuItemSuspensionBridge.OnClick := @MenuItemSuspensionBridgeClick;
+  MenuItemDesign.Add(MenuItemSuspensionBridge);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6546,6 +6553,12 @@ procedure TProjectForm.MenuItemAcousticSpaceClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowAcousticSpaceDialog;
+end;
+
+procedure TProjectForm.MenuItemSuspensionBridgeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSuspensionBridgeDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
