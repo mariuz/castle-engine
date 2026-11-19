@@ -700,6 +700,7 @@ type
       MenuItemCoverPointScanner: TMenuItem;
       MenuItemCatenaryCable: TMenuItem;
       MenuItemPrefabDiffMerge: TMenuItem;
+      MenuItemBallisticStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -820,6 +821,7 @@ type
     procedure MenuItemCoverPointScannerClick(Sender: TObject);
     procedure MenuItemCatenaryCableClick(Sender: TObject);
     procedure MenuItemPrefabDiffMergeClick(Sender: TObject);
+    procedure MenuItemBallisticStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2944,6 +2946,11 @@ begin
   MenuItemPrefabDiffMerge.Caption := 'Three-Way Scene & Prefab Diff/Merge & 106-Studio Hub...';
   MenuItemPrefabDiffMerge.OnClick := @MenuItemPrefabDiffMergeClick;
   MenuItemDesign.Add(MenuItemPrefabDiffMerge);
+
+  MenuItemBallisticStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemBallisticStudio.Caption := 'Ballistic Trajectory & Ricochet/Penetration Studio...';
+  MenuItemBallisticStudio.OnClick := @MenuItemBallisticStudioClick;
+  MenuItemDesign.Add(MenuItemBallisticStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6520,6 +6527,12 @@ procedure TProjectForm.MenuItemPrefabDiffMergeClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowPrefabDiffMergeDialog;
+end;
+
+procedure TProjectForm.MenuItemBallisticStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowBallisticStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

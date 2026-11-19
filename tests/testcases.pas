@@ -213,6 +213,7 @@ uses
   TestToolCoverPointScanner,
   TestToolCatenaryCable,
   TestToolPrefabDiffMerge,
+  TestToolBallisticStudio,
   TestCastleVulkanRHI;
 
 implementation

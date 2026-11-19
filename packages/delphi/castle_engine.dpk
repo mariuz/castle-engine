@@ -376,6 +376,7 @@ contains
   castletrailstamper in '..\..\src\scene\castletrailstamper.pas',
   castlecoverpointscanner in '..\..\src\scene\castlecoverpointscanner.pas',
   castlecatenarycable in '..\..\src\scene\castlecatenarycable.pas',
+  castleballisticsolver in '..\..\src\scene\castleballisticsolver.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',
