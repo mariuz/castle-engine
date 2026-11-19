@@ -1,6 +1,6 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
-        <ProjectGuid>{CEE301FA-A9BD-4EAA-9085-A29C54CA8BEF}</ProjectGuid>
+        <ProjectGuid>{FF394411-D147-CFB4-C330-E9560F7C35A2}</ProjectGuid>
         <MainSource>vulkan_triangle.dpr</MainSource>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Debug</Config>

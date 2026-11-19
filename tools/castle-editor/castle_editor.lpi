@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="233">
+    <Units Count="235">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1247,6 +1247,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormFootstepDirector"/>
       </Unit232>
+      <Unit233>
+        <Filename Value="../common-code/toolgravityfield.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGravityField"/>
+      </Unit233>
+      <Unit234>
+        <Filename Value="code/formgravityfield.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGravityField"/>
+      </Unit234>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -1,6 +1,6 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
-        <ProjectGuid>{2F9939B2-F0DC-4D1C-9687-6DD812C0F3DD}</ProjectGuid>
+        <ProjectGuid>{3DD34768-77C2-7955-20B3-46D96CFF9225}</ProjectGuid>
         <MainSource>vulkan_3d_scene.dpr</MainSource>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Debug</Config>

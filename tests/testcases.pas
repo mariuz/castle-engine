@@ -207,6 +207,7 @@ uses
   TestToolSensoryPerception,
   TestToolIvyClimber,
   TestToolFootstepDirector,
+  TestToolGravityField,
   TestCastleVulkanRHI;
 
 implementation

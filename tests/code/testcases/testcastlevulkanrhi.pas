@@ -30,7 +30,7 @@ uses
   CastleRendererInternalLights, X3DNodes,
   CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
-  ToolManifest, CastleInternalRenderDoc;
+  CastleUriUtils, ToolManifest, CastleInternalRenderDoc;
 
 type
   TTestCastleVulkanRHI = class(TCastleTestCase)
@@ -1136,6 +1136,8 @@ procedure TTestCastleVulkanRHI.TestNintendoSwitchViSurfaceAndManifestPrewarm;
 var
   ViCreateInfo: VkViSurfaceCreateInfoNN;
   Manifest: TCastleManifest;
+  ManifestPath, TempDir: String;
+  SL: TStringList;
   RaisedError: Boolean;
 begin
   { 1. Verify Nintendo Switch VK_NN_vi_surface ABI layout and constants }
@@ -1145,7 +1147,7 @@ begin
   FillChar(ViCreateInfo, SizeOf(ViCreateInfo), 0);
   ViCreateInfo.sType := VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN;
   ViCreateInfo.window := Pointer($1234);
-  AssertEquals('ViCreateInfo.sType', 1000062000, ViCreateInfo.sType);
+  AssertEquals('ViCreateInfo.sType', 1000062000, VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN);
   AssertTrue('ViCreateInfo.window pointer matches', ViCreateInfo.window = Pointer($1234));
 
   RaisedError := False;
@@ -1158,13 +1160,38 @@ begin
   AssertTrue('CreateVulkanViSurface raises ERHIError when vkCreateViSurfaceNN is not loaded', RaisedError);
 
   { 2. Verify TCastleManifest loading of vulkan_3d_scene and ShouldPrewarmVulkanShaders }
-  Manifest := TCastleManifest.CreateFromUrl('examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml');
+  TempDir := '';
+  if FileExists('examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml') then
+    ManifestPath := 'examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml'
+  else if FileExists('../examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml') then
+    ManifestPath := '../examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml'
+  else
+  begin
+    TempDir := IncludeTrailingPathDelimiter(GetTempDir(False)) + 'cge_vk_manifest_test';
+    ForceDirectories(TempDir);
+    ManifestPath := IncludeTrailingPathDelimiter(TempDir) + 'CastleEngineManifest.xml';
+    SL := TStringList.Create;
+    try
+      SL.Add('<?xml version="1.0" encoding="utf-8"?>');
+      SL.Add('<project name="vulkan_3d_scene" standalone_source="vulkan_3d_scene.dpr" render_backend="vulkan"/>');
+      SL.SaveToFile(ManifestPath);
+    finally
+      FreeAndNil(SL);
+    end;
+  end;
+
+  Manifest := TCastleManifest.CreateFromUrl(FilenameToUriSafe(ExpandFileName(ManifestPath)));
   try
     AssertEquals('Manifest name', 'vulkan_3d_scene', Manifest.Name);
     AssertEquals('Manifest RenderBackend is backendVulkan', Ord(backendVulkan), Ord(Manifest.RenderBackend));
     AssertTrue('ShouldPrewarmVulkanShaders is True for backendVulkan', Manifest.ShouldPrewarmVulkanShaders);
   finally
     FreeAndNil(Manifest);
+    if TempDir <> '' then
+    begin
+      DeleteFile(ManifestPath);
+      RemoveDir(TempDir);
+    end;
   end;
 end;
 

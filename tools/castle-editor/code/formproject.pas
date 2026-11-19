@@ -694,6 +694,7 @@ type
       MenuItemSensoryPerception: TMenuItem;
       MenuItemIvyClimber: TMenuItem;
       MenuItemFootstepDirector: TMenuItem;
+      MenuItemGravityField: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -808,6 +809,7 @@ type
     procedure MenuItemSensoryPerceptionClick(Sender: TObject);
     procedure MenuItemIvyClimberClick(Sender: TObject);
     procedure MenuItemFootstepDirectorClick(Sender: TObject);
+    procedure MenuItemGravityFieldClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2903,6 +2905,11 @@ begin
   MenuItemFootstepDirector.OnClick := @MenuItemFootstepDirectorClick;
   MenuItemDesign.Add(MenuItemFootstepDirector);
 
+  MenuItemGravityField := TMenuItem.Create(MenuItemDesign);
+  MenuItemGravityField.Caption := 'Dynamic Gravity Well & Planetary Walk Studio...';
+  MenuItemGravityField.OnClick := @MenuItemGravityFieldClick;
+  MenuItemDesign.Add(MenuItemGravityField);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -4155,7 +4162,7 @@ var
   ComboOrientation: TComboBox;
   CheckFullscreenImmersive: TCheckBox;
   BtnOpenXml, BtnOk, BtnCancel: TButton;
-  ParsedVersionCode: Cardinal;
+  ParsedVersionCode: Int64;
 begin
   ManifestFile := CombinePaths(ProjectPath, 'CastleEngineManifest.xml');
   if not RegularFileExists(ManifestFile) then
@@ -4380,9 +4387,9 @@ begin
               if VersionEl = nil then
                 VersionEl := RootEl.CreateChild('version');
               VersionEl.AttributeSet('value', Trim(EditVersionValue.Text));
-              if TryStrToUInt(Trim(EditVersionCode.Text), ParsedVersionCode) and
+              if TryStrToInt64(Trim(EditVersionCode.Text), ParsedVersionCode) and (ParsedVersionCode >= 0) and
                  ((ParsedVersionCode > 1) or VersionEl.HasAttribute('code')) then
-                VersionEl.AttributeSet('code', ParsedVersionCode);
+                VersionEl.AttributeSet('code', Cardinal(ParsedVersionCode));
             end;
 
             if Trim(EditIconPath.Text) <> '' then
@@ -6442,6 +6449,12 @@ procedure TProjectForm.MenuItemFootstepDirectorClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowFootstepDirectorDialog;
+end;
+
+procedure TProjectForm.MenuItemGravityFieldClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowGravityFieldDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

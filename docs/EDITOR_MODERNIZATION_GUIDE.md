@@ -4729,6 +4729,13 @@ Phase 380 adds Unreal Engine 6.0+ AnimNotify-style **Stride-Phase Footstep Detec
 - **Alternating Gait Crossings & `WorldRay` Surface Lookup (`AdvanceLocomotionCycle`)**: Fires Left (`0.25`) and Right (`0.75`) boot strikes proportional to horizontal speed, probing ground elevation and surface material (`Snow`, `ShallowPuddle`, `MetalGrating`, `ForestLoam`, `StoneCobble`).
 - **Speed & Armor Acoustic Scaling**: Scales footstep impact gain and splash/dust particle counts by locomotion speed and armor weight while maintaining a 24-slot footprint decal ring.
 
+## 66DB. Phase 381: Dynamic Gravity Well, Planetary Spherical Walk & Tube Up-Vector Blending Studio
+
+Phase 381 adds Unreal Engine 6.0+ Custom Gravity Mover-style **Planetary, Hollow-Tube & Priority-Zone Gravity Fields** via `TCastleGravityField` (`src/scene/castlegravityfield.pas`), `TGravityFieldHelper` (`tools/common-code/toolgravityfield.pas`), and `TGravityFieldForm` (`tools/castle-editor/code/formgravityfield.pas`), accessible from **`Gravity`** in the top viewport toolbar, **`Design -> Dynamic Gravity Well & Planetary Walk Studio...`**, or `LaunchStudioById('gravity_field')`.
+
+- **Spherical Planetoids, Ringworld Tubes & Ceiling Zones (`SampleFieldAtWorld`)**: Evaluates radial spherical point-attractors with $(R / r)^2$ inverse-square falloff, hollow spinning O'Neill cylinder interiors with inward-pointing `Up`, and priority-layered directional box zones.
+- **Antipodal-Safe Up-Vector Slerp (`StepSmoothUpVectorSlerp`)**: Smoothly rotates character `Up` vectors across arbitrary $180^\circ$ gravity inversions without singularities.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4897,4 +4904,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolsensoryperception.pas`](../tests/code/testcases/testtoolsensoryperception.pas) (`TTestToolSensoryPerception` — 2 tests)**: Verifies foveal vs. peripheral vision cone weighting, solid-wall `WorldRay` line-of-sight occlusion (`svzOccludedByWall`), wall-muffled acoustic decibel thresholds (`62 dB` footstep suppressed vs. `95 dB` gunshot audible through wall), Bloodhound scent decay, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolivyclimber.pas`](../tests/code/testcases/testtoolivyclimber.pas) (`TTestToolIvyClimber` — 2 tests)**: Verifies `WorldRay` thigmotropic masonry wall climbing (`> 2.5m` height, `>= 18` clung nodes) vs. unsupported open-air droop termination, bit-identical seeded determinism, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolfootstepdirector.pas`](../tests/code/testcases/testtoolfootstepdirector.pas) (`TTestToolFootstepDirector` — 2 tests)**: Verifies zero idle footsteps, alternating Left (`0.25`) / Right (`0.75`) stride crossings, `WorldRay` Snow / Puddle / MetalGrating surface matching, resonant metal vs. muffled snow acoustic scaling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolgravityfield.pas`](../tests/code/testcases/testtoolgravityfield.pas) (`TTestToolGravityField` — 2 tests)**: Verifies 360-degree spherical planetoid walking (North Pole, East Equator, upside-down South Pole), exact $r = 2R$ inverse-square falloff (`2.45 m/s^2`), hollow O'Neill cylinder interior ceiling `Up` vectors, `Priority = 50` zone overrides, antipodal-safe `StepSmoothUpVectorSlerp`, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
