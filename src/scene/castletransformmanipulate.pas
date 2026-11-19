@@ -18151,6 +18151,7 @@ function TCastleTransformManipulate.ScatterPaintStamp(
 var
   RngState: Cardinal;
 
+  {$PUSH}{$Q-}{$R-}
   function NextFloat01: Single;
   begin
     RngState := RngState xor (RngState shl 13);
@@ -18160,6 +18161,7 @@ var
       RngState := 2463534242;
     Result := (RngState and $00FFFFFF) / 16777216.0;
   end;
+  {$POP}
 
 var
   EffectiveOwner: TComponent;

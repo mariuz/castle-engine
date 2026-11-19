@@ -15,7 +15,7 @@
   TCastleBatch2DRenderer, Push Constants, and streaming vertex buffers. }
 program vulkan_sprite_batch;
 
-{$I castleconf.inc}
+{$ifdef FPC}{$mode objfpc}{$H+}{$endif}
 
 uses
   SysUtils, Classes,

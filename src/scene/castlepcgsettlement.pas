@@ -182,6 +182,7 @@ begin
   Result := PointsDistance(P, Closest);
 end;
 
+{$PUSH}{$Q-}{$R-}
 function NextSeedFloat01(var State: Cardinal): Single;
 begin
   if State = 0 then
@@ -191,6 +192,7 @@ begin
   State := State xor (State shl 5);
   Result := (State and $FFFF) / 65535.0;
 end;
+{$POP}
 
 function Aabb2DOverlapWithMargin(const MinA, MaxA, MinB, MaxB: TVector2;
   const Margin: Single): Boolean;
@@ -412,7 +414,9 @@ begin
   else
     BaseOrigin := Translation;
 
-  Rng := Cardinal(Abs(FRandomSeed) * 1664525 + 1013904223);
+  {$PUSH}{$Q-}{$R-}
+  Rng := Cardinal((UInt64(Cardinal(Abs(FRandomSeed))) * UInt64(1664525) + UInt64(1013904223)) and $FFFFFFFF);
+  {$POP}
   GenerateRoadGraphForPreset;
   SetLength(FLots, 0);
   SetLength(FProps, 0);

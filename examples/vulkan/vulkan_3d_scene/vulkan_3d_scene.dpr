@@ -18,7 +18,7 @@
   - GPU Skinning joint matrix UBO (Set 2, Binding 0) }
 program vulkan_3d_scene;
 
-{$I castleconf.inc}
+{$ifdef FPC}{$mode objfpc}{$H+}{$endif}
 
 uses
   SysUtils, Classes,

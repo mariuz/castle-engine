@@ -1231,7 +1231,7 @@ begin
 
             if HasValidDescType then
             begin
-              FillChar(NewBinding, SizeOf(NewBinding), 0);
+              NewBinding := Default(TSPIRVReflectedBinding);
               if Ids[I].HasDescriptorSet then
                 NewBinding.SetIndex := Ids[I].DescriptorSet
               else
@@ -1258,7 +1258,7 @@ begin
           if Ids[I].HasLocation and (not Ids[I].IsBuiltIn) and
              (not Ids[BaseTypeId].IsBuiltIn) then
           begin
-            FillChar(NewIO, SizeOf(NewIO), 0);
+            NewIO := Default(TSPIRVReflectedStageIO);
             NewIO.Location := Ids[I].Location;
             NewIO.IsOutput := VarStorageClass = SpvStorageClassOutput;
             if Ids[BaseTypeId].TypeKind in [stkVector, stkMatrix] then

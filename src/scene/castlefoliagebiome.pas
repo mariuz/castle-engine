@@ -286,6 +286,7 @@ begin
   Result := R;
 end;
 
+{$PUSH}{$Q-}{$R-}
 function NextFoliageXorShift(var AState: Cardinal): Cardinal;
 begin
   if AState = 0 then
@@ -295,6 +296,7 @@ begin
   AState := AState xor (AState shl 5);
   Result := AState;
 end;
+{$POP}
 
 function NextFoliageUnitFloat(var AState: Cardinal): Single;
 begin

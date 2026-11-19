@@ -425,9 +425,11 @@ begin
     Phase := Phase - Floor(Phase);
 
     { Xorshift32 white noise }
+    {$PUSH}{$Q-}{$R-}
     Rng := Rng xor (Rng shl 13);
     Rng := Rng xor (Rng shr 17);
     Rng := Rng xor (Rng shl 5);
+    {$POP}
     NoiseVal := ((Rng and $00FFFFFF) / 8388608.0) - 1.0;
 
     case FWaveShape of
@@ -588,6 +590,7 @@ begin
   FRngState := 918273;
 end;
 
+{$PUSH}{$Q-}{$R-}
 function TCastleFootstepSurfaceBehavior.NextRandomSigned: Single;
 var
   X: Cardinal;
@@ -600,6 +603,7 @@ begin
   FRngState := X;
   Result := ((X and $00FFFFFF) / 8388608.0) - 1.0;
 end;
+{$POP}
 
 class function TCastleFootstepSurfaceBehavior.SurfaceDisplayName(
   const ASurf: TSurfaceMaterialKind): String;

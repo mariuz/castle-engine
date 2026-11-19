@@ -373,6 +373,7 @@ begin
     SimulateStep(Min(SecondsPassed, 0.1));
 end;
 
+{$PUSH}{$Q-}{$R-}
 function TCastleParticleEmitter.NextRandom01: Single;
 begin
   { Deterministic Xorshift32 PRNG }
@@ -383,6 +384,7 @@ begin
     FRngState := 1;
   Result := (FRngState and $00FFFFFF) / 16777216.0;
 end;
+{$POP}
 
 function TCastleParticleEmitter.NextRandomRange(const AMin, AMax: Single): Single;
 begin

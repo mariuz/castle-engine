@@ -138,6 +138,7 @@ begin
   end;
 end;
 
+{$PUSH}{$Q-}{$R-}
 function NextXorFloat01(var State: Cardinal): Single;
 begin
   if State = 0 then
@@ -147,6 +148,7 @@ begin
   State := State xor (State shl 5);
   Result := (State and $FFFF) / 65535.0;
 end;
+{$POP}
 
 { TCastleTerrainErosionBaker ------------------------------------------------- }
 
@@ -428,7 +430,9 @@ begin
   if (N < 6) or (ADropletCount <= 0) then
     Exit;
 
-  Rng := Cardinal(Abs(FRandomSeed + FDropletsSimulated) * 747796405 + 2891336453);
+  {$PUSH}{$Q-}{$R-}
+  Rng := Cardinal((UInt64(Cardinal(Abs(Int64(FRandomSeed) + Int64(FDropletsSimulated)))) * UInt64(747796405) + UInt64(2891336453)) and $FFFFFFFF);
+  {$POP}
 
   for D := 1 to ADropletCount do
   begin

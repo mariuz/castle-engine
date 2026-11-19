@@ -224,6 +224,7 @@ uses
   Math, FpJson, JsonParser,
   CastleUtils, CastleTimeUtils, CastleColors, CastleComponentSerialize;
 
+{$PUSH}{$Q-}{$R-}
 function NextXorShift32(var State: Cardinal): Single; inline;
 begin
   if State = 0 then
@@ -233,6 +234,7 @@ begin
   State := State xor (State shl 5);
   Result := (State and $00FFFFFF) / 16777216.0;
 end;
+{$POP}
 
 { TCastleMassEntityManager --------------------------------------------------- }
 
@@ -624,11 +626,13 @@ begin
     Result := DirectGoal.Normalize;
 end;
 
+{$PUSH}{$Q-}{$R-}
 function TCastleMassEntityManager.HashCell(const CX, CZ: Integer): Integer;
 begin
-  Result := Integer((Cardinal(CX * 73856093) xor Cardinal(CZ * 19349663)) and
+  Result := Integer(((Cardinal(CX) * Cardinal(73856093)) xor (Cardinal(CZ) * Cardinal(19349663))) and
     Cardinal(SpatialHashBuckets - 1));
 end;
+{$POP}
 
 procedure TCastleMassEntityManager.RebuildSpatialHash(const CellSize: Single);
 var

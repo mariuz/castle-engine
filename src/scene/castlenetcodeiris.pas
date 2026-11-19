@@ -502,6 +502,7 @@ begin
     FRngState := FSeed;
 end;
 
+{$PUSH}{$Q-}{$R-}
 function TCastleNetReplicationManager.NextRandom01: Single;
 var
   X: Cardinal;
@@ -515,6 +516,7 @@ begin
   FRngState := X;
   Result := (X and $00FFFFFF) / 16777216.0;
 end;
+{$POP}
 
 function TCastleNetReplicationManager.ClientRenderServerTimeSec: Single;
 var

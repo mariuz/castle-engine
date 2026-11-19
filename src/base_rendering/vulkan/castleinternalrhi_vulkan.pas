@@ -4649,7 +4649,8 @@ begin
     Result.Handle := VkDescriptorPool(PtrUInt($50000000) + PtrUInt(FTotalPoolCount) + 1);
 
   Inc(FTotalPoolCount);
-  FCurrentMaxSets := Min(FMaxSetsCap, Max(FCurrentMaxSets + (FCurrentMaxSets div 2), FCurrentMaxSets + 1));
+  FCurrentMaxSets := Min(FMaxSetsCap,
+    Max(Cardinal(FCurrentMaxSets + (FCurrentMaxSets div 2)), Cardinal(FCurrentMaxSets + 1)));
 end;
 
 procedure TVulkanDescriptorPoolAllocator.AcquireNextReadyOrNewPage;

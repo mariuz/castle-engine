@@ -945,6 +945,7 @@ begin
   FTotalRolls := 0;
 end;
 
+{$PUSH}{$Q-}{$R-}
 function TCastleLootTable.NextRandom01: Single;
 var
   X: Cardinal;
@@ -958,6 +959,7 @@ begin
   FRngState := X;
   Result := (X and $00FFFFFF) / 16777216.0;
 end;
+{$POP}
 
 function TCastleLootTable.NextRandomRange(const AMin, AMax: Integer): Integer;
 begin

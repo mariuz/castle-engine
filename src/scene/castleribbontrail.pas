@@ -248,6 +248,7 @@ begin
   end;
 end;
 
+{$PUSH}{$Q-}{$R-}
 function NextXorShiftUnitSigned(var State: Cardinal): Single;
 begin
   if State = 0 then
@@ -257,6 +258,7 @@ begin
   State := State xor (State shl 5);
   Result := ( (State and $FFFF) / 32767.5 ) - 1.0;
 end;
+{$POP}
 
 { TCastleRibbonTrail --------------------------------------------------------- }
 
@@ -869,7 +871,9 @@ begin
   FBoltStartWorld := AStartWorld;
   FBoltEndWorld := AEndWorld;
   FRandomSeed := ASeed;
-  Rng := Cardinal(Abs(ASeed) * 747796405 + 2891336453);
+  {$PUSH}{$Q-}{$R-}
+  Rng := Cardinal((UInt64(Cardinal(Abs(ASeed))) * UInt64(747796405) + UInt64(2891336453)) and $FFFFFFFF);
+  {$POP}
 
   Chord := AEndWorld - AStartWorld;
   if Chord.LengthSqr < 1e-6 then

@@ -1259,13 +1259,15 @@ begin
   Result := TOpenGLRHIDescriptorSet.Create(Self, Layout as TOpenGLRHIDescriptorSetLayout);
 end;
 
+{$PUSH}{$Q-}{$R-}
 function TOpenGLRHIDevice.ComputePipelineHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
 begin
-  Result := PtrUInt(ADesc.VertexShader) xor (PtrUInt(ADesc.FragmentShader) shl 13) xor
+  Result := UInt64(PtrUInt(ADesc.VertexShader)) xor (UInt64(PtrUInt(ADesc.FragmentShader)) shl 13) xor
     (UInt64(Ord(ADesc.BlendState.BlendEnable)) shl 32) xor
     (UInt64(Ord(ADesc.DepthStencil.DepthTestEnable)) shl 33) xor
     (UInt64(Ord(ADesc.Rasterizer.CullMode)) shl 35);
 end;
+{$POP}
 
 function TOpenGLRHIDevice.GetOrCreatePipeline(const ADesc: TRHIGraphicsPipelineDesc): TRHIPipeline;
 var

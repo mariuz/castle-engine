@@ -2302,10 +2302,12 @@ implementation
 var
   VulkanLibrary: TDynLib = nil;
 
+{$PUSH}{$Q-}{$R-}
 function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal;
 begin
   Result := (Major shl 22) or (Minor shl 12) or (Patch and $FFF);
 end;
+{$POP}
 
 function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal;
 begin

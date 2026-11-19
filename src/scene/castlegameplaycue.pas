@@ -146,6 +146,7 @@ begin
   Result := gckPhysicalDamage;
 end;
 
+{$PUSH}{$Q-}{$R-}
 function NextSignedSpread(var State: Cardinal): Single;
 begin
   if State = 0 then
@@ -155,6 +156,7 @@ begin
   State := State xor (State shl 5);
   Result := ((State and $FFFF) / 32767.5) - 1.0;
 end;
+{$POP}
 
 { TCastleGameplayCueDirector ------------------------------------------------- }
 

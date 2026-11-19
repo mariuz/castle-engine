@@ -120,6 +120,7 @@ begin
   end;
 end;
 
+{$PUSH}{$Q-}{$R-}
 function NextXorShift32(var AState: Cardinal): Cardinal;
 begin
   if AState = 0 then
@@ -129,6 +130,7 @@ begin
   AState := AState xor (AState shl 5);
   Result := AState;
 end;
+{$POP}
 
 function OwnerPieceOfSocket(const ASocket: TCastleSnapSocket): TCastleTransform;
 var

@@ -165,6 +165,7 @@ begin
     Result := StartsText(Req + '.', Act);
 end;
 
+{$PUSH}{$Q-}{$R-}
 function NextChooserUnitFloat(var State: Cardinal): Single;
 begin
   if State = 0 then
@@ -174,6 +175,7 @@ begin
   State := State xor (State shl 5);
   Result := (State and $FFFFFF) / 16777216.0;
 end;
+{$POP}
 
 { TChooserContextQuery ------------------------------------------------------- }
 
