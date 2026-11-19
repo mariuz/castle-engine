@@ -203,6 +203,7 @@ uses
   TestToolOctahedralImpostor,
   TestToolPoseSnapshot,
   TestToolMacroRecorder,
+  TestToolPortalStudio,
   TestCastleVulkanRHI;
 
 implementation

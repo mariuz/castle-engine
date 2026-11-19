@@ -4145,3 +4145,46 @@ With Horizons 1–8 (`Phases 1–346`, `66` Studios, `16` MCP Tools) complete an
   - **Example (Phase 376):** Click **`Macro`** in the top viewport bar, click **`+ Spawn 4 Crate Pillars Demo`**, click **`Record 3-Step Crate Batch Macro`**, then click **`Replay Macro (1.0x)`** or **`Replay Macro (2.0x Boost)`** to elevate, stretch, and emerald-tint all 4 crates while leaving `PropStreetLamp` untouched.
 
 > 🏆 **Horizon 11 Milestone Complete (`10 / 10` Phases — `376 / 376` Total Phases, `96` Studios & `19` MCP Tools):** All 10 Horizon 11 phases (`Phases 367–376`: Substrate Multi-Slab Layered Materials, Multi-Slot SmartObject FIFO Queues, Aerodynamic Wing/Sail Foil Polars & Stall, Wall-Crevice Seam Micro-Clutter, Cinematic Camera Shake & FOV Recoil, Niagara-Style Grid2D Fire Spread, Gameplay Message Bus & Squad Bark Preemption, Octahedral Billboard Impostors, Skeletal Pose Snapshot Ghost Trails & Petrified Statues, and the Editor Action Macro Recorder + **96-Studio Hub / 19-Tool MCP** `cge_run_editor_macro`) are implemented, documented, and verified with **`0 unfreed memory blocks`** under `heaptrc`.
+
+---
+
+## 13. Horizon 12 (`Phases 377–386` — UE 6.0+ / Godot 4.4 / Blender 4.3 Parity: Planar Portals, AI Sensory Perception, Procedural Ivy Climber, Footstep Director, Dynamic Planetary/Zone Gravity, Cloud Shadows, Snow/Mud Trail Stamper, Tactical Cover Scanner, Catenary Powerlines & 3-Way Scene Diff/Merge — `106` Studios & `20` MCP Tools)
+
+### Phase 377: Planar Portal & Seamless Mirror Oblique Frustum Teleport Studio (UE 6.0+ USceneCaptureComponent2D Portal Parity)
+- [x] **377.1. `TCastlePortalGateway`, SE(3) 180-Degree Doorway Turnaround, Lengyel Oblique Clip Plane & Seamless Crossing Cooldown Studio (`castleportalpair.pas`, `toolportalstudio.pas`, `formportalstudio.pas`, `framedesign.pas`, `formproject.pas`, `testtoolportalstudio.pas`)**
+  - Implemented `TCastlePortalGateway`, `TPortalWarpSample`, and `TPortalPreset` (`src/scene/castleportalpair.pas`, registered in `castle_engine_base.lpk` and `editorregisterallcomponents.pas`), evaluating linked portal 180-degree front-to-back SE(3) doorway turnarounds (`EvaluateVirtualCameraView` & `TryCrossPortal` rotating position/velocity across arbitrary yaw offsets), planar mirror reflection (`MirrorMode`), Lengyel world-space oblique near-plane clip vectors (`ObliqueClipPlane` with `ClipPlaneBiasMeters`), aperture-bounded segment crossing detection, anti-ping-pong cooldown lockouts (`TeleportCooldownSec`), and `csTransient` glowing blue/orange portal arch frames across 3 presets (`ppLinkedBlueOrangePair`, `ppGrandHallPlanarMirror`, `ppInfiniteCorridorLoop`).
+  - Implemented `TPortalStudioHelper` (`tools/common-code/toolportalstudio.pas`) and `TPortalStudioForm` (`tools/castle-editor/code/formportalstudio.pas`), wired into `framedesign.pas` (`ButtonPortalStudio` `"Portal"`, Hierarchy badge `[Portal:->PortalOrangeExit 2.4x3.2m Warps=0]`, and `LaunchStudioById('portal_studio')`) and `formproject.pas` (`Design -> Planar Portal & Seamless Mirror Studio...`), featuring a Linked Blue/Orange 90-degree Portal Pair spawner, 1-click Walk-Through Teleport tester, Planar Mirror toggle, a Top-Down Portal Link Diagram, and Markdown export.
+  - Added 2 comprehensive unit tests in `tests/code/testcases/testtoolportalstudio.pas` (`Test90DegreePortalTurnaroundVelocityRotationAndAntiPingPongCooldown`, `TestPlanarMirrorReflectionObliqueClipPlaneApertureMissAndJsonRoundtrip`) verified with `0 unfreed memory blocks`.
+  - **Official Docs & Visual References (Phase 377):** [CGE Cameras, Mirrors & Shaders](https://castle-engine.io/x3d_implementation_cubemaptexturing.php#section_mirrors) · [Lengyel Oblique View Frustum Depth Projection & Clipping](https://terathon.com/lengyel/Lengyel-Oblique.pdf)
+  - **Official Videos & Movies (Phase 377):**
+    - 🎬 [CGE Official Video — Mirrors, Cameras & Multi-Viewport Rendering (YouTube)](https://www.youtube.com/watch?v=xbd39337X8c)
+    - 🎞️ [Unreal Engine Planar Reflections & Seamless Portal Camera Warp](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/699fa013-9657-4b4e-8353-11aa5cf9b08e/hlod-overview.png)
+  - **Screenshots:** [CGE 3D Mirror & Dungeon Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Component Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+  - **Example (Phase 377):** Click **`Portal`** in the top viewport bar, click **`+ Spawn Linked Blue/Orange Portals`**, and click **`Walk Actor Through Blue Portal!`** to verify 90-degree doorway turnaround emergence and velocity rotation out of `PortalOrangeExit`.
+
+### Phase 378: AI Sensory Perception (`UAIPerceptionComponent`) Sight, Hearing & Decaying Scent Studio (UE 6.0+ AI Perception Parity)
+- [ ] **378.1. `TCastleSensoryPerception`, Foveal/Peripheral `WorldRay` Vision Cones, Wall-Muffled Hearing & Scent Trail Studio (`castlesensoryperception.pas`, `toolsensoryperception.pas`, `formsensoryperception.pas`, `framedesign.pas`, `formproject.pas`, `testtoolsensoryperception.pas`)**
+
+### Phase 379: Procedural Ivy, Vine & Root Surface Climber (`WorldRay` Thigmotropism) Studio (Blender 4.3 / UE 6.0+ PCG Biome Ivy Parity)
+- [ ] **379.1. `TCastleIvyClimber`, Phototropic + Wall-Hugging `WorldRay` Tendril Growth, Branching & Leaf Cluster Studio (`castleivyclimber.pas`, `toolivyclimber.pas`, `formivyclimber.pas`, `framedesign.pas`, `formproject.pas`, `testtoolivyclimber.pas`)**
+
+### Phase 380: Skeletal Footstep Decal, Terrain-Matched Dust/Splash & Acoustic Surface Studio (UE 6.0+ AnimNotify Footstep Parity)
+- [ ] **380.1. `TCastleFootstepDirector`, Stride Phase Zero-Crossing Detector, `WorldRay` Surface Material Lookup & Footprint Ring Studio (`castlefootstepdirector.pas`, `toolfootstepdirector.pas`, `formfootstepdirector.pas`, `framedesign.pas`, `formproject.pas`, `testtoolfootstepdirector.pas`)**
+
+### Phase 381: Dynamic Gravity Well, Planetary Spherical Walk & Tube Up-Vector Blending Studio (UE 6.0+ Custom Gravity Mover Parity)
+- [ ] **381.1. `TCastleGravityField`, Spherical Planet Attractors, Cylindrical Ringworld Interiors & Priority Up-Vector Slerp Studio (`castlegravityfield.pas`, `toolgravityfield.pas`, `formgravityfield.pas`, `framedesign.pas`, `formproject.pas`, `testtoolgravityfield.pas`)**
+
+### Phase 382: 2.5D Atmospheric Cloud Shadow Scroller & Crepuscular Light-Shaft Studio (UE 6.0+ Volumetric Cloud Shadow Parity)
+- [ ] **382.1. `TCastleCloudShadowProjector`, Dual-Octave Wind-Advected Cloud Transmittance, Sun-Angle Ground Offset & God-Ray Studio (`castlecloudshadows.pas`, `toolcloudshadows.pas`, `formcloudshadows.pas`, `framedesign.pas`, `formproject.pas`, `testtoolcloudshadows.pas`)**
+
+### Phase 383: Interactive Snow, Mud & Sand Persistent Deformation Trail Stamper Studio (UE 6.0+ RVT Snow Trail Parity)
+- [ ] **383.1. `TCastleTrailStamper`, Persistent 2D World Depression Grid, Displaced Rim Berms & Gradual Snowfall Refill Studio (`castletrailstamper.pas`, `tooltrailstamper.pas`, `formtrailstamper.pas`, `framedesign.pas`, `formproject.pas`, `testtooltrailstamper.pas`)**
+
+### Phase 384: Tactical Cover Point Scanner, Crouch-Peek / Corner-Lean & Threat Exposure Studio (UE 6.0+ EQS Tactical Cover Parity)
+- [ ] **384.1. `TCastleCoverPointScanner`, Automated `WorldRay` Waist/Full Cover Edge Detection & Multi-Threat Flanking Score Studio (`castlecoverpointscanner.pas`, `toolcoverpointscanner.pas`, `formcoverpointscanner.pas`, `framedesign.pas`, `formproject.pas`, `testtoolcoverpointscanner.pas`)**
+
+### Phase 385: Procedural Catenary Cable, Powerline Sag & Hanging Lantern Garland Studio (UE 6.0+ `UCableComponent` Catenary Parity)
+- [ ] **385.1. `TCastleCatenaryCable`, Exact Hyperbolic Cosine Sag Solver, Wind Pendulum Sway & Arc-Length Attachment Studio (`castlecatenarycable.pas`, `toolcatenarycable.pas`, `formcatenarycable.pas`, `framedesign.pas`, `formproject.pas`, `testtoolcatenarycable.pas`)**
+
+### Phase 386: Three-Way Scene & Prefab Diff/Merge Inspector + 106-Studio Hub / 20-Tool MCP Upgrade (UE 6.0+ Asset Diff/Merge Parity)
+- [ ] **386.1. `TPrefabDiffMergeEngine`, `TPrefabDiffMergeForm`, Ancestor/Ours/Theirs Property Merge & 106-Studio Hub / 20th MCP Tool (`toolprefabdiffmerge.pas`, `formprefabdiffmerge.pas`, `toolstudiohub.pas`, `toolmcpserver.pas`, `framedesign.pas`, `formproject.pas`, `testtoolprefabdiffmerge.pas`)**

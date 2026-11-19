@@ -690,6 +690,7 @@ type
       MenuItemOctahedralImpostor: TMenuItem;
       MenuItemPoseSnapshot: TMenuItem;
       MenuItemMacroRecorder: TMenuItem;
+      MenuItemPortalStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -800,6 +801,7 @@ type
     procedure MenuItemOctahedralImpostorClick(Sender: TObject);
     procedure MenuItemPoseSnapshotClick(Sender: TObject);
     procedure MenuItemMacroRecorderClick(Sender: TObject);
+    procedure MenuItemPortalStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2874,6 +2876,11 @@ begin
   MenuItemMacroRecorder.Caption := 'Editor Action Macro Recorder & 96-Studio Hub...';
   MenuItemMacroRecorder.OnClick := @MenuItemMacroRecorderClick;
   MenuItemDesign.Add(MenuItemMacroRecorder);
+
+  MenuItemPortalStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemPortalStudio.Caption := 'Planar Portal & Seamless Mirror Studio...';
+  MenuItemPortalStudio.OnClick := @MenuItemPortalStudioClick;
+  MenuItemDesign.Add(MenuItemPortalStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6390,6 +6397,12 @@ procedure TProjectForm.MenuItemMacroRecorderClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMacroRecorderDialog;
+end;
+
+procedure TProjectForm.MenuItemPortalStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPortalStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

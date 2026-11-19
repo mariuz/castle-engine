@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="225">
+    <Units Count="227">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1207,6 +1207,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMacroRecorder"/>
       </Unit224>
+      <Unit225>
+        <Filename Value="../common-code/toolportalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPortalStudio"/>
+      </Unit225>
+      <Unit226>
+        <Filename Value="code/formportalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPortalStudio"/>
+      </Unit226>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
