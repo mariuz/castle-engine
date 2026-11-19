@@ -4827,6 +4827,13 @@ Phase 394 adds **Player Interaction Focus & Hold-to-Interact State Machines** vi
 - **Gaze + Proximity Scoring & `WorldRay` Wall Gate (`ScanBestInteractable`)**: Ranks nearby `Interact_*` / `Tag > 0` candidates by weighted gaze alignment + distance while rejecting targets occluded behind solid doors or walls across 3 presets (`ispFirstPersonPrecisionGaze`, `ispThirdPersonActionCone`, `ispSurvivalTimedSabotage`).
 - **Tap vs. Timed Hold Decay (`StepHoldInteraction`)**: Drives `HoldProgress01` with smooth `ReleaseDecayRatePerSec` decay on early button release and `RepeatCooldownSec` anti-repeat protection.
 
+## 66DP. Phase 395: Procedural Decal Splatter, `WorldRay` Directional Cone Burst & Grazing-Angle Streak Studio
+
+Phase 395 adds **Directional Multi-Ray Decal Splatters & Grazing Streak Elongation** via `TCastleSplatterBurst` (`src/scene/castlesplatterburst.pas`), `TSplatterBurstHelper` (`tools/common-code/toolsplatterburst.pas`), and `TSplatterBurstForm` (`tools/castle-editor/code/formsplatterburst.pas`), accessible from **`Splatter`** in the top viewport toolbar, **`Design -> Procedural Decal Splatter Burst & Grazing Streak Studio...`**, or `LaunchStudioById('splatter_burst')`.
+
+- **Grazing-Incidence Streak Stretch (`EmitDirectionalBurst`)**: Computes $\text{Aspect} = \text{Clamp}(1 / \max(0.18, |\mathbf{d} \cdot \mathbf{n}|), 1.0, \text{MaxStreakAspectRatio})$ along tangent $\mathbf{d} - (\mathbf{d}\cdot\mathbf{n})\mathbf{n}$ across 3 presets (`sbpPaintballNeonSplash`, `sbpGrenadeSootScorch`, `sbpSlimeAcidBurst`).
+- **Bounded LRU Ring & Evaporation (`StepEvaporationFade`)**: Caps active decals at `MaxActiveSplats` via FIFO/LRU eviction and fades alpha smoothly over `DecalLifetimeSec`.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5009,4 +5016,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolspiderweb.pas`](../tests/code/testcases/testtoolspiderweb.pas) (`TTestToolSpiderweb` — 2 tests)**: Verifies `12 / 12` radial `WorldRay` stone-archway anchor locks (`204` segments), deterministic `swpTornDungeonCornerCobweb` sector removal, `> 20` morning dewdrop beads (`swpDewdropForestCanopySilk`), and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolfoliagetrample.pas`](../tests/code/testcases/testtoolfoliagetrample.pas) (`TTestToolFoliageTrample` — 2 tests)**: Verifies radial 4-quadrant shockwave outward parting, exact stalk length conservation (`1.25m`), Hookean spring-damper recovery back to `0` trampled cells, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolinteractscanner.pas`](../tests/code/testcases/testtoolinteractscanner.pas) (`TTestToolInteractScanner` — 2 tests)**: Verifies gaze-axis focus selection over peripheral items, `WorldRay` rejection of `Interact_VaultChestBehindWall` behind `LockedVaultDoorSlab`, `1.20s` timed hold completion, early-release progress decay, `RepeatCooldownSec` lockout, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsplatterburst.pas`](../tests/code/testcases/testtoolsplatterburst.pas) (`TTestToolSplatterBurst` — 2 tests)**: Verifies `90°` perpendicular `1.0x` round droplet vs. `~12°` grazing wall `> 3.0x` tangent-aligned streak elongation, `MaxActiveSplats` LRU ring capping (`36 -> 16`), linear evaporation fade to `0`, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

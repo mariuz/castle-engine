@@ -221,6 +221,7 @@ uses
   TestToolSpiderweb,
   TestToolFoliageTrample,
   TestToolInteractScanner,
+  TestToolSplatterBurst,
   TestCastleVulkanRHI;
 
 implementation

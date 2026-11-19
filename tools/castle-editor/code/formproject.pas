@@ -708,6 +708,7 @@ type
       MenuItemSpiderweb: TMenuItem;
       MenuItemFoliageTrample: TMenuItem;
       MenuItemInteractScanner: TMenuItem;
+      MenuItemSplatterBurst: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -836,6 +837,7 @@ type
     procedure MenuItemSpiderwebClick(Sender: TObject);
     procedure MenuItemFoliageTrampleClick(Sender: TObject);
     procedure MenuItemInteractScannerClick(Sender: TObject);
+    procedure MenuItemSplatterBurstClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3000,6 +3002,11 @@ begin
   MenuItemInteractScanner.Caption := 'Gameplay Interaction Focus Scanner & Hold-Ring Studio...';
   MenuItemInteractScanner.OnClick := @MenuItemInteractScannerClick;
   MenuItemDesign.Add(MenuItemInteractScanner);
+
+  MenuItemSplatterBurst := TMenuItem.Create(MenuItemDesign);
+  MenuItemSplatterBurst.Caption := 'Procedural Decal Splatter Burst & Grazing Streak Studio...';
+  MenuItemSplatterBurst.OnClick := @MenuItemSplatterBurstClick;
+  MenuItemDesign.Add(MenuItemSplatterBurst);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6624,6 +6631,12 @@ procedure TProjectForm.MenuItemInteractScannerClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowInteractScannerDialog;
+end;
+
+procedure TProjectForm.MenuItemSplatterBurstClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSplatterBurstDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
