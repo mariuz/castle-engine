@@ -709,6 +709,7 @@ type
       MenuItemFoliageTrample: TMenuItem;
       MenuItemInteractScanner: TMenuItem;
       MenuItemSplatterBurst: TMenuItem;
+      MenuItemBudgetTreemap: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -838,6 +839,7 @@ type
     procedure MenuItemFoliageTrampleClick(Sender: TObject);
     procedure MenuItemInteractScannerClick(Sender: TObject);
     procedure MenuItemSplatterBurstClick(Sender: TObject);
+    procedure MenuItemBudgetTreemapClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3007,6 +3009,11 @@ begin
   MenuItemSplatterBurst.Caption := 'Procedural Decal Splatter Burst & Grazing Streak Studio...';
   MenuItemSplatterBurst.OnClick := @MenuItemSplatterBurstClick;
   MenuItemDesign.Add(MenuItemSplatterBurst);
+
+  MenuItemBudgetTreemap := TMenuItem.Create(MenuItemDesign);
+  MenuItemBudgetTreemap.Caption := 'Squarified Scene Budget Treemap & 116-Studio Hub...';
+  MenuItemBudgetTreemap.OnClick := @MenuItemBudgetTreemapClick;
+  MenuItemDesign.Add(MenuItemBudgetTreemap);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6637,6 +6644,12 @@ procedure TProjectForm.MenuItemSplatterBurstClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSplatterBurstDialog;
+end;
+
+procedure TProjectForm.MenuItemBudgetTreemapClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowBudgetTreemapDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

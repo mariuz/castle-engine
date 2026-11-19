@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1043,6 +1043,16 @@ begin
   AddToolDef('cge_diff_merge_scene',
     'Perform structural 3-way Ancestor/Ours/Theirs CGE scene & prefab diff/merge with automatic non-conflicting property/node merging.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Budget treemap operation: audit_viewport or status.'));
+  P.Add('budgetLimitKB', MakePropSchema('number', 'Total scene memory budget in KB (default 8192).'));
+  P.Add('perNodeCapKB', MakePropSchema('number', 'Per-component memory outlier threshold in KB (default 2048).'));
+  P.Add('canvasWidth', MakePropSchema('number', 'Squarified treemap width in pixels (default 640).'));
+  P.Add('canvasHeight', MakePropSchema('number', 'Squarified treemap height in pixels (default 360).'));
+  AddToolDef('cge_audit_scene_budget',
+    'Partition open scene memory & triangle footprint via a Bruls-Huizing-van Wijk squarified treemap and report over-budget outliers.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1168,6 +1178,8 @@ var
   DiffMergeRep: TThreeWayMergeReport;
   DiffPolicy: TMergeConflictPolicy;
   DiffBaseStr, DiffOursStr, DiffTheirsStr: String;
+  BudgetRep: TSceneBudgetTreemapReport;
+  BudgetLimitVal, NodeCapVal, TreemapW, TreemapH: Single;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2097,6 +2109,64 @@ begin
       OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
       OutPayload.Add('mergedJson', DiffMergeRep.MergedSceneJson);
       OutPayload.Add('changes', TargetsArr);
+      TargetsArr := nil;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(TargetsArr);
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_audit_scene_budget' then
+  begin
+    if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    ActionName := 'audit_viewport';
+    BudgetLimitVal := 8192.0;
+    NodeCapVal := 2048.0;
+    TreemapW := 640.0;
+    TreemapH := 360.0;
+    if ArgsObj <> nil then
+    begin
+      ActionName := ArgsObj.Get('action', 'audit_viewport');
+      BudgetLimitVal := ArgsObj.Get('budgetLimitKB', 8192.0);
+      NodeCapVal := ArgsObj.Get('perNodeCapKB', 2048.0);
+      TreemapW := ArgsObj.Get('canvasWidth', 640.0);
+      TreemapH := ArgsObj.Get('canvasHeight', 360.0);
+    end;
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if SameText(ActionName, 'status') then
+      BudgetRep := TSceneBudgetTreemapAnalyzer.SharedAnalyzer.LastReport
+    else
+      BudgetRep := TSceneBudgetTreemapAnalyzer.SharedAnalyzer.AnalyzeSceneTreemap(
+        DesignRoot, BudgetLimitVal, NodeCapVal, TreemapW, TreemapH);
+
+    OutPayload := TJSONObject.Create;
+    TargetsArr := TJSONArray.Create;
+    try
+      for I := 0 to High(BudgetRep.Cells) do
+      begin
+        StudioItemObj := TJSONObject.Create;
+        StudioItemObj.Add('name', BudgetRep.Cells[I].ComponentName);
+        StudioItemObj.Add('className', BudgetRep.Cells[I].ComponentClassName);
+        StudioItemObj.Add('memoryKB', BudgetRep.Cells[I].EstimatedMemoryKB);
+        StudioItemObj.Add('triangles', BudgetRep.Cells[I].EstimatedTriangles);
+        StudioItemObj.Add('rectX', BudgetRep.Cells[I].RectX);
+        StudioItemObj.Add('rectY', BudgetRep.Cells[I].RectY);
+        StudioItemObj.Add('rectW', BudgetRep.Cells[I].RectW);
+        StudioItemObj.Add('rectH', BudgetRep.Cells[I].RectH);
+        StudioItemObj.Add('overCap', BudgetRep.Cells[I].IsOverNodeCap);
+        TargetsArr.Add(StudioItemObj);
+      end;
+      OutPayload.Add('ok', True);
+      OutPayload.Add('action', ActionName);
+      OutPayload.Add('totalComponents', BudgetRep.TotalComponents);
+      OutPayload.Add('totalEstimatedMemoryKB', BudgetRep.TotalEstimatedMemoryKB);
+      OutPayload.Add('totalEstimatedTriangles', BudgetRep.TotalEstimatedTriangles);
+      OutPayload.Add('overBudgetNodeCount', BudgetRep.OverBudgetNodeCount);
+      OutPayload.Add('worstCellAspectRatio', BudgetRep.WorstCellAspectRatio);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('cells', TargetsArr);
       TargetsArr := nil;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

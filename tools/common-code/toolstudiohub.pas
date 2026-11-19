@@ -136,7 +136,10 @@ uses
   CastleGameplayMessenger, CastleOctahedralImpostor, CastlePoseSnapshot,
   CastlePortalPair, CastleSensoryPerception, CastleIvyClimber,
   CastleFootstepDirector, CastleGravityField, CastleCloudShadows,
-  CastleTrailStamper, CastleCoverPointScanner, CastleCatenaryCable;
+  CastleTrailStamper, CastleCoverPointScanner, CastleCatenaryCable,
+  CastleBallisticSolver, CastleAcousticSpace, CastleSuspensionBridge,
+  CastleWorldWaypoint, CastleBuoyancyHull, CastleSpiderweb,
+  CastleFoliageTrample, CastleInteractScanner, CastleSplatterBurst;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -560,6 +563,38 @@ begin
   Reg('prefab_diff_merge', 'Three-Way Scene & Prefab Diff/Merge & 106-Studio Hub', 'Merge3',
     shcPerformanceQaDeploy, 386, 'three way scene prefab diff merge ancestor ours theirs conflict resolution 106 studio hub',
     'Structural 3-way Ancestor/Ours/Theirs JSON merge, conflict policies & 106-Studio Hub / 20 MCP.');
+
+  { Horizon 13 (Phases 387-396): 10 Studios -> 116 Total }
+  Reg('ballistic_studio', 'Ballistic Trajectory, Drag, Magnus Drift & Ricochet Studio', 'Ballistic',
+    shcCharactersAiGas, 387, 'ballistic projectile trajectory quadratic drag crosswind magnus spin grazing ricochet penetration lead',
+    'Sub-stepped drag + wind + Magnus flight, WorldRay grazing ricochets, cover penetration & lead.');
+  Reg('acoustic_space', 'Acoustic Raytraced Reverb (Sabine/Eyring RT60) & Diffraction Studio', 'Acoustic',
+    shcCinematicsAudioInput, 388, 'acoustic raytraced reverb sabine eyring rt60 predelay sky leak doorway portal diffraction lpf',
+    'Fibonacci-sphere WorldRay room volume/absorption RT60 & Kurze-Anderson doorway diffraction LPF.');
+  Reg('suspension_bridge', 'Procedural Rope Suspension Bridge & Live-Load Deflection Studio', 'Bridge',
+    shcArchitecturePcg, 389, 'procedural rope chain suspension bridge green function live load depression roll broken plank',
+    'Taut-cable Green''s-function point-load depression, lateral roll tilt & broken-slat chasm gaps.');
+  Reg('world_waypoint', 'Diegetic 3D World Waypoint, Offscreen Edge & X-Ray Studio', 'Waypoint',
+    shcCinematicsAudioInput, 390, 'diegetic 3d world waypoint hud projection hemisphere safe offscreen edge clamp xray wall ads',
+    'Perspective HUD projection, behind-camera hemisphere-safe edge clamping & WorldRay wall occlusion.');
+  Reg('buoyancy_hull', 'Multi-Pontoon Buoyancy Hydrostatics & Wave Righting-Torque Studio', 'Buoyancy',
+    shcWorldEnvironment, 391, 'multi pontoon archimedes buoyancy spherical cap wave heave metacentric pitch roll righting torque',
+    'Exact spherical-cap pontoon buoyancy, traveling wave sampling & damped heave/roll equilibrium.');
+  Reg('spiderweb', 'Procedural Spiderweb, Wall-Anchor Raycast & Dewdrop Silk Studio', 'Cobweb',
+    shcArchitecturePcg, 392, 'procedural orb weaver spiderweb cobweb radial worldray wall anchor spiral sag torn dewdrop',
+    'Radial WorldRay wall mooring, sagged power-law capture spirals, torn crypt sectors & dewdrops.');
+  Reg('foliage_trample', 'Dynamic Foliage Trample, Shockwave Flatten & Spring-Back Studio', 'Trample',
+    shcWorldEnvironment, 393, 'dynamic foliage grass wheat trample 2d bend field shockwave blast flatten hookean spring back',
+    '2D stalk bend-vector parting, radial shockwave flatten & Hookean damped elastic recovery.');
+  Reg('interact_scanner', 'Gameplay Interaction Focus Scanner & Hold-Progress Ring Studio', 'Interact',
+    shcCharactersAiGas, 394, 'gameplay interaction focus scanner gaze proximity cone worldray wall gate timed hold decay',
+    'Weighted gaze/proximity scoring, WorldRay closed-door/wall rejection & hold-to-interact decay.');
+  Reg('splatter_burst', 'Procedural Decal Splatter Burst & Grazing Streak Studio', 'Splatter',
+    shcMaterialsVfxLighting, 395, 'procedural decal splatter cone burst worldray grazing streak elongation lru ring evaporation',
+    'Seeded WorldRay droplet cones, grazing-angle streak stretch, LRU ring cap & evaporation fade.');
+  Reg('budget_treemap', 'Squarified Scene Budget Treemap & 116-Studio Hub / 21st MCP', 'Treemap',
+    shcPerformanceQaDeploy, 396, 'squarified scene memory triangle budget treemap bruls huizing van wijk outlier 116 studio hub',
+    'Bruls-Huizing-van Wijk squarified scene memory/triangle treemap, outlier hints & 21st MCP tool.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -870,6 +905,17 @@ var
     if (C is TCastleSensoryPerception) or (C is TCastleCoverPointScanner) then
       BumpSub(shcCharactersAiGas);
     if C is TCastleFootstepDirector then BumpSub(shcCinematicsAudioInput);
+
+    { Horizon 13 Subsystems }
+    if (C is TCastleBallisticLauncher) or (C is TCastleInteractScanner) then
+      BumpSub(shcCharactersAiGas);
+    if C is TCastleAcousticProbe then BumpSub(shcCinematicsAudioInput);
+    if (C is TCastleSuspensionBridge) or (C is TCastleSpiderwebGenerator) then
+      BumpSub(shcArchitecturePcg);
+    if C is TCastleWorldWaypoint then BumpSub(shcCinematicsAudioInput);
+    if (C is TCastleBuoyancyHull) or (C is TCastleFoliageTrampleField) then
+      BumpSub(shcWorldEnvironment);
+    if C is TCastleSplatterBurst then BumpSub(shcMaterialsVfxLighting);
   end;
 
   procedure Traverse(const C: TComponent);

@@ -222,6 +222,7 @@ uses
   TestToolFoliageTrample,
   TestToolInteractScanner,
   TestToolSplatterBurst,
+  TestToolBudgetTreemap,
   TestCastleVulkanRHI;
 
 implementation

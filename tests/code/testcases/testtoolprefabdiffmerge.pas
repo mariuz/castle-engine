@@ -111,7 +111,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify all 106 studios (Horizons 2-12, Phases 1-386) are registered }
-  AssertEquals(106, TStudioHubManager.StudioCount);
+  AssertEquals(116, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon12Ids) do
   begin
     AssertTrue(TStudioHubManager.FindStudioById(Horizon12Ids[I], Entry));
@@ -132,7 +132,7 @@ begin
     RespData := GetJSON(ListResp);
     try
       ToolsArr := (RespData as TJSONObject).Objects['result'].Arrays['tools'];
-      AssertEquals(20, ToolsArr.Count);
+      AssertEquals(21, ToolsArr.Count);
       AssertTrue(Pos('cge_diff_merge_scene', ListResp) > 0);
     finally
       FreeAndNil(RespData);
@@ -166,7 +166,7 @@ begin
       try
         PayloadObj := PayloadData as TJSONObject;
         AssertTrue(PayloadObj.Booleans['ok']);
-        AssertEquals(106, PayloadObj.Integers['studioCatalogCount']);
+        AssertEquals(116, PayloadObj.Integers['studioCatalogCount']);
         AssertEquals(1, PayloadObj.Integers['conflictCount']);
         AssertTrue(PayloadObj.Integers['autoMergedCount'] >= 3);
         AssertTrue(Pos('WatchtowerTheirs', PayloadObj.Strings['mergedJson']) > 0);
