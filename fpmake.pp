@@ -601,6 +601,7 @@ begin
     P.Targets.AddUnit('castleacousticspace.pas');
     P.Targets.AddUnit('castlesuspensionbridge.pas');
     P.Targets.AddUnit('castleworldwaypoint.pas');
+    P.Targets.AddUnit('castlebuoyancyhull.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

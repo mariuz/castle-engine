@@ -704,6 +704,7 @@ type
       MenuItemAcousticSpace: TMenuItem;
       MenuItemSuspensionBridge: TMenuItem;
       MenuItemWorldWaypoint: TMenuItem;
+      MenuItemBuoyancyHull: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -828,6 +829,7 @@ type
     procedure MenuItemAcousticSpaceClick(Sender: TObject);
     procedure MenuItemSuspensionBridgeClick(Sender: TObject);
     procedure MenuItemWorldWaypointClick(Sender: TObject);
+    procedure MenuItemBuoyancyHullClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2972,6 +2974,11 @@ begin
   MenuItemWorldWaypoint.Caption := 'Diegetic 3D World Waypoint & Offscreen HUD Studio...';
   MenuItemWorldWaypoint.OnClick := @MenuItemWorldWaypointClick;
   MenuItemDesign.Add(MenuItemWorldWaypoint);
+
+  MenuItemBuoyancyHull := TMenuItem.Create(MenuItemDesign);
+  MenuItemBuoyancyHull.Caption := 'Multi-Pontoon Buoyancy Hydrostatics & Wave Torque Studio...';
+  MenuItemBuoyancyHull.OnClick := @MenuItemBuoyancyHullClick;
+  MenuItemDesign.Add(MenuItemBuoyancyHull);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6572,6 +6579,12 @@ procedure TProjectForm.MenuItemWorldWaypointClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowWorldWaypointDialog;
+end;
+
+procedure TProjectForm.MenuItemBuoyancyHullClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowBuoyancyHullDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

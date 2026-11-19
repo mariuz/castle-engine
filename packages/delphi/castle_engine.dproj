@@ -541,6 +541,7 @@
         <DCCReference Include="..\..\src\scene\castleacousticspace.pas"/>
         <DCCReference Include="..\..\src\scene\castlesuspensionbridge.pas"/>
         <DCCReference Include="..\..\src\scene\castleworldwaypoint.pas"/>
+        <DCCReference Include="..\..\src\scene\castlebuoyancyhull.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>

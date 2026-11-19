@@ -217,6 +217,7 @@ uses
   TestToolAcousticSpace,
   TestToolSuspensionBridge,
   TestToolWorldWaypoint,
+  TestToolBuoyancyHull,
   TestCastleVulkanRHI;
 
 implementation

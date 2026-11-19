@@ -4799,6 +4799,13 @@ Phase 390 adds **Diegetic 3D World-to-HUD Waypoints & Offscreen Indicators** via
 - **Hemisphere-Safe Offscreen Clamping (`EvaluateForCamera`)**: Projects 3D anchors into `[0..1]^2` HUD coordinates and clamps behind-camera ($z_v \le 0$) and off-frustum targets onto `SafeEdgeMargin01` without sign-flipping across 3 presets (`wwpQuestObjectiveDiamond`, `wwpSquadPingTactical`, `wwpLootRarityBeacon`).
 - **`WorldRay` X-Ray Wall Occlusion & ADS Center Declutter**: Detects solid-wall occlusion (`wssOnScreenOccludedWall`) and attenuates crosshair-overlapping icons while aiming down sights (`AdsCenterFadeConeDeg`).
 
+## 66DL. Phase 391: Multi-Pontoon Buoyancy Hydrostatics, Spherical-Cap Submergence & Wave Righting-Torque Studio
+
+Phase 391 adds **Multi-Pontoon Archimedes Buoyancy & Hull Hydrostatics** via `TCastleBuoyancyHull` (`src/scene/castlebuoyancyhull.pas`), `TBuoyancyHullHelper` (`tools/common-code/toolbuoyancyhull.pas`), and `TBuoyancyHullForm` (`tools/castle-editor/code/formbuoyancyhull.pas`), accessible from **`Buoyancy`** in the top viewport toolbar, **`Design -> Multi-Pontoon Buoyancy Hydrostatics & Wave Torque Studio...`**, or `LaunchStudioById('buoyancy_hull')`.
+
+- **Exact Spherical-Cap Archimedes Submergence (`SphericalCapSubmergedFraction`)**: Evaluates $f_{\text{sub}} = h^2 (3R - h) / (4R^3) \in [0, 1]$ across `1..8` pontoons for 3 presets (`bhpWoodenCargoRaft4Pt`, `bhpPatrolGunboat6Pt`, `bhpFloatingOilDrumSingle`).
+- **Metacentric Righting Torque & Heave/Roll Settling (`StepHydrostaticMotion`)**: Computes $\boldsymbol{\tau} = \sum (\mathbf{r}_i - \mathbf{r}_{\text{CoM}}) \times \mathbf{F}_{B,i}$ over traveling waves and integrates damped rigid-hull equilibrium.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4977,4 +4984,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolacousticspace.pas`](../tests/code/testcases/testtoolacousticspace.pas) (`TTestToolAcousticSpace` — 2 tests)**: Verifies stone cathedral (`RT60 > 2.0s`) vs. padded foam booth (`< 0.8s`) vs. open-sky (`0.0s`, `100%` leak) Sabine/Eyring scaling, direct (`20 kHz`) vs. doorway-diffracted (`750..8500 Hz`) vs. sealed-wall (`380 Hz`) LPF obstruction, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsuspensionbridge.pas`](../tests/code/testcases/testtoolsuspensionbridge.pas) (`TTestToolSuspensionBridge` — 2 tests)**: Verifies pinned `t = 0` / `t = 1` abutment invariance, Green's-function `280 kg` point-load depression & lateral roll tilt, Dwarven iron vs. jungle vine stiffness scaling, deterministic interior broken-plank gaps, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolworldwaypoint.pas`](../tests/code/testcases/testtoolworldwaypoint.pas) (`TTestToolWorldWaypoint` — 2 tests)**: Verifies clear LoS vs. `WorldRay` X-Ray wall occlusion (`wssOnScreenOccludedWall`), ADS crosshair declutter fade, behind-camera hemisphere-safe right-border clamping (`0.94`), `MaxVisibleDistMeters` culling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolbuoyancyhull.pas`](../tests/code/testcases/testtoolbuoyancyhull.pas) (`TTestToolBuoyancyHull` — 2 tests)**: Verifies exact spherical-cap identities (`0.0`, `0.5`, `1.0`), `+20°` starboard heel righting torque (`> +200 Nm`), calm-water Archimedes draft & roll equilibrium settling, wave heave oscillation, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
