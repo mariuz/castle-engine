@@ -6660,19 +6660,24 @@ procedure TCastleSceneCore.FinishTransformationChanges;
 var
   E: TExposedTransform;
   DepthList: TShapeTreeTransformList;
-  TransformShapeTree: TShapeTreeTransform;
   VisibleChange, AnyChange: Boolean;
+  D, I: Integer;
 begin
   VisibleChange := false;
   AnyChange := false;
 
-  for DepthList in TransformationDirty do
+  { Indexed loops: this runs for every scene in every Update and before
+    every render, and "for in" creates an enumerator object each time,
+    also when nothing is dirty (with a thousand scenes, a few percent
+    of the frame). }
+  for D := 0 to TransformationDirty.Count - 1 do
   begin
-    if DepthList <> nil then
+    DepthList := TransformationDirty[D];
+    if (DepthList <> nil) and (DepthList.Count <> 0) then
     begin
-      AnyChange := AnyChange or (DepthList.Count <> 0);
-      for TransformShapeTree in DepthList do
-        TransformShapeTree.FastTransformUpdate(VisibleChange);
+      AnyChange := true;
+      for I := 0 to DepthList.Count - 1 do
+        DepthList[I].FastTransformUpdate(VisibleChange);
       DepthList.Clear;
     end;
   end;
