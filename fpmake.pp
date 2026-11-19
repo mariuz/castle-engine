@@ -591,6 +591,7 @@ begin
     P.Targets.AddUnit('castleerosionbaker.pas');
     P.Targets.AddUnit('castlefiregrid2d.pas');
     P.Targets.AddUnit('castlefoliagebiome.pas');
+    P.Targets.AddUnit('castlefootstepdirector.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

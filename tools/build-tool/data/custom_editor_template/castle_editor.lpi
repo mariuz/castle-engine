@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="231">
+    <Units Count="233">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1237,6 +1237,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormIvyClimber"/>
       </Unit230>
+      <Unit231>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolfootstepdirector.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFootstepDirector"/>
+      </Unit231>
+      <Unit232>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formfootstepdirector.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFootstepDirector"/>
+      </Unit232>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

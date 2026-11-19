@@ -693,6 +693,7 @@ type
       MenuItemPortalStudio: TMenuItem;
       MenuItemSensoryPerception: TMenuItem;
       MenuItemIvyClimber: TMenuItem;
+      MenuItemFootstepDirector: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -806,6 +807,7 @@ type
     procedure MenuItemPortalStudioClick(Sender: TObject);
     procedure MenuItemSensoryPerceptionClick(Sender: TObject);
     procedure MenuItemIvyClimberClick(Sender: TObject);
+    procedure MenuItemFootstepDirectorClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2895,6 +2897,11 @@ begin
   MenuItemIvyClimber.Caption := 'Procedural Ivy & Vine Climber Studio...';
   MenuItemIvyClimber.OnClick := @MenuItemIvyClimberClick;
   MenuItemDesign.Add(MenuItemIvyClimber);
+
+  MenuItemFootstepDirector := TMenuItem.Create(MenuItemDesign);
+  MenuItemFootstepDirector.Caption := 'Skeletal Footstep & Surface Decal Studio...';
+  MenuItemFootstepDirector.OnClick := @MenuItemFootstepDirectorClick;
+  MenuItemDesign.Add(MenuItemFootstepDirector);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6429,6 +6436,12 @@ procedure TProjectForm.MenuItemIvyClimberClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowIvyClimberDialog;
+end;
+
+procedure TProjectForm.MenuItemFootstepDirectorClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowFootstepDirectorDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

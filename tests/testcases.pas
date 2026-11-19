@@ -206,6 +206,7 @@ uses
   TestToolPortalStudio,
   TestToolSensoryPerception,
   TestToolIvyClimber,
+  TestToolFootstepDirector,
   TestCastleVulkanRHI;
 
 implementation

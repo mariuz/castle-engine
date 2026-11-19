@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–379** across Horizons 1–12), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–380** across Horizons 1–12), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4722,6 +4722,13 @@ Phase 379 adds Blender / UE 6.0+ PCG-style **Seeded Surface-Climbing Ivy, Vines 
 - **12-Ray Thigmotropic Surface Cling & Phototropism (`GrowIvyOnWorld`)**: Probes nearby solid masonry/terrain geometry, projects upward phototropism onto the local surface tangent plane, spawns secondary lateral branches, and terminates unsupported aerial shoots.
 - **Seeded Determinism & Foliage Themes**: Guarantees bit-identical canopy coordinates for identical `RandomSeed` across `ivpAncientCastleHedera`, `ivpAutumnCrimsonCreeper`, and `ivpBioluminescentCaveRoot`.
 
+## 66DA. Phase 380: Skeletal Footstep Decal, Terrain-Matched Dust/Splash & Acoustic Surface Studio
+
+Phase 380 adds Unreal Engine 6.0+ AnimNotify-style **Stride-Phase Footstep Detection & `WorldRay` Surface Material Matching** via `TCastleFootstepDirector` (`src/scene/castlefootstepdirector.pas`), `TFootstepDirectorHelper` (`tools/common-code/toolfootstepdirector.pas`), and `TFootstepDirectorForm` (`tools/castle-editor/code/formfootstepdirector.pas`), accessible from **`Footstep`** in the top viewport toolbar, **`Design -> Skeletal Footstep & Surface Decal Studio...`**, or `LaunchStudioById('footstep_director')`.
+
+- **Alternating Gait Crossings & `WorldRay` Surface Lookup (`AdvanceLocomotionCycle`)**: Fires Left (`0.25`) and Right (`0.75`) boot strikes proportional to horizontal speed, probing ground elevation and surface material (`Snow`, `ShallowPuddle`, `MetalGrating`, `ForestLoam`, `StoneCobble`).
+- **Speed & Armor Acoustic Scaling**: Scales footstep impact gain and splash/dust particle counts by locomotion speed and armor weight while maintaining a 24-slot footprint decal ring.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4889,4 +4896,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolportalstudio.pas`](../tests/code/testcases/testtoolportalstudio.pas) (`TTestToolPortalStudio` — 2 tests)**: Verifies 90-degree linked portal turnaround position/velocity rotation, anti-ping-pong bidirectional cooldown lockout, aperture-miss rejection, planar mirror camera reflection, Lengyel oblique clip planes, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsensoryperception.pas`](../tests/code/testcases/testtoolsensoryperception.pas) (`TTestToolSensoryPerception` — 2 tests)**: Verifies foveal vs. peripheral vision cone weighting, solid-wall `WorldRay` line-of-sight occlusion (`svzOccludedByWall`), wall-muffled acoustic decibel thresholds (`62 dB` footstep suppressed vs. `95 dB` gunshot audible through wall), Bloodhound scent decay, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolivyclimber.pas`](../tests/code/testcases/testtoolivyclimber.pas) (`TTestToolIvyClimber` — 2 tests)**: Verifies `WorldRay` thigmotropic masonry wall climbing (`> 2.5m` height, `>= 18` clung nodes) vs. unsupported open-air droop termination, bit-identical seeded determinism, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolfootstepdirector.pas`](../tests/code/testcases/testtoolfootstepdirector.pas) (`TTestToolFootstepDirector` — 2 tests)**: Verifies zero idle footsteps, alternating Left (`0.25`) / Right (`0.75`) stride crossings, `WorldRay` Snow / Puddle / MetalGrating surface matching, resonant metal vs. muffled snow acoustic scaling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
