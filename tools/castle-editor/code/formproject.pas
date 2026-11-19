@@ -695,6 +695,7 @@ type
       MenuItemIvyClimber: TMenuItem;
       MenuItemFootstepDirector: TMenuItem;
       MenuItemGravityField: TMenuItem;
+      MenuItemCloudShadows: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -810,6 +811,7 @@ type
     procedure MenuItemIvyClimberClick(Sender: TObject);
     procedure MenuItemFootstepDirectorClick(Sender: TObject);
     procedure MenuItemGravityFieldClick(Sender: TObject);
+    procedure MenuItemCloudShadowsClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2909,6 +2911,11 @@ begin
   MenuItemGravityField.Caption := 'Dynamic Gravity Well & Planetary Walk Studio...';
   MenuItemGravityField.OnClick := @MenuItemGravityFieldClick;
   MenuItemDesign.Add(MenuItemGravityField);
+
+  MenuItemCloudShadows := TMenuItem.Create(MenuItemDesign);
+  MenuItemCloudShadows.Caption := '2.5D Atmospheric Cloud Shadow & God-Ray Studio...';
+  MenuItemCloudShadows.OnClick := @MenuItemCloudShadowsClick;
+  MenuItemDesign.Add(MenuItemCloudShadows);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6455,6 +6462,12 @@ procedure TProjectForm.MenuItemGravityFieldClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowGravityFieldDialog;
+end;
+
+procedure TProjectForm.MenuItemCloudShadowsClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCloudShadowsDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

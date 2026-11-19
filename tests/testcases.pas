@@ -208,6 +208,7 @@ uses
   TestToolIvyClimber,
   TestToolFootstepDirector,
   TestToolGravityField,
+  TestToolCloudShadows,
   TestCastleVulkanRHI;
 
 implementation

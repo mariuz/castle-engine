@@ -4736,6 +4736,13 @@ Phase 381 adds Unreal Engine 6.0+ Custom Gravity Mover-style **Planetary, Hollow
 - **Spherical Planetoids, Ringworld Tubes & Ceiling Zones (`SampleFieldAtWorld`)**: Evaluates radial spherical point-attractors with $(R / r)^2$ inverse-square falloff, hollow spinning O'Neill cylinder interiors with inward-pointing `Up`, and priority-layered directional box zones.
 - **Antipodal-Safe Up-Vector Slerp (`StepSmoothUpVectorSlerp`)**: Smoothly rotates character `Up` vectors across arbitrary $180^\circ$ gravity inversions without singularities.
 
+## 66DC. Phase 382: 2.5D Atmospheric Cloud Shadow Scroller & Crepuscular Light-Shaft Studio
+
+Phase 382 adds Unreal Engine 6.0+ Volumetric Cloud Shadow-style **Wind-Advected Ground Cloud Shadows & Mie Crepuscular God-Rays** via `TCastleCloudShadowProjector` (`src/scene/castlecloudshadows.pas`), `TCloudShadowsHelper` (`tools/common-code/toolcloudshadows.pas`), and `TCloudShadowsForm` (`tools/castle-editor/code/formcloudshadows.pas`), accessible from **`Clouds`** in the top viewport toolbar, **`Design -> 2.5D Atmospheric Cloud Shadow & God-Ray Studio...`**, or `LaunchStudioById('cloud_shadows')`.
+
+- **Solar-Offset Dual-Octave Canopy Projection (`SampleGroundShadowAt`)**: Offsets world ground coordinates along the solar elevation/azimuth ray ($(H_{\text{cloud}} - Y_{\text{ground}}) \cot\theta_{\text{elev}}$) and evaluates differential-drift primary + detail cloud noise.
+- **Henyey-Greenstein Crepuscular Shafts**: Evaluates forward Mie solar phase scattering along broken cloud penumbrae.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4905,4 +4912,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolivyclimber.pas`](../tests/code/testcases/testtoolivyclimber.pas) (`TTestToolIvyClimber` — 2 tests)**: Verifies `WorldRay` thigmotropic masonry wall climbing (`> 2.5m` height, `>= 18` clung nodes) vs. unsupported open-air droop termination, bit-identical seeded determinism, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolfootstepdirector.pas`](../tests/code/testcases/testtoolfootstepdirector.pas) (`TTestToolFootstepDirector` — 2 tests)**: Verifies zero idle footsteps, alternating Left (`0.25`) / Right (`0.75`) stride crossings, `WorldRay` Snow / Puddle / MetalGrating surface matching, resonant metal vs. muffled snow acoustic scaling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgravityfield.pas`](../tests/code/testcases/testtoolgravityfield.pas) (`TTestToolGravityField` — 2 tests)**: Verifies 360-degree spherical planetoid walking (North Pole, East Equator, upside-down South Pole), exact $r = 2R$ inverse-square falloff (`2.45 m/s^2`), hollow O'Neill cylinder interior ceiling `Up` vectors, `Priority = 50` zone overrides, antipodal-safe `StepSmoothUpVectorSlerp`, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcloudshadows.pas`](../tests/code/testcases/testtoolcloudshadows.pas) (`TTestToolCloudShadows` — 2 tests)**: Verifies `90°` zenith (`0m` offset) vs. `45°` (`+300m` horizontal offset) solar cloud-shadow projection, `0% -> 52% -> 100%` coverage monotonicity, wind advection scrolling, `> 10x` forward Henyey-Greenstein crepuscular shaft gain vs. backscatter, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

@@ -372,6 +372,7 @@ contains
   castlefoliagebiome in '..\..\src\scene\castlefoliagebiome.pas',
   castlefootstepdirector in '..\..\src\scene\castlefootstepdirector.pas',
   castlegravityfield in '..\..\src\scene\castlegravityfield.pas',
+  castlecloudshadows in '..\..\src\scene\castlecloudshadows.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

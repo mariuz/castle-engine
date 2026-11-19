@@ -533,6 +533,7 @@
         <DCCReference Include="..\..\src\scene\castlefoliagebiome.pas"/>
         <DCCReference Include="..\..\src\scene\castlefootstepdirector.pas"/>
         <DCCReference Include="..\..\src\scene\castlegravityfield.pas"/>
+        <DCCReference Include="..\..\src\scene\castlecloudshadows.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="235">
+    <Units Count="237">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1257,6 +1257,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormGravityField"/>
       </Unit234>
+      <Unit235>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolcloudshadows.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCloudShadows"/>
+      </Unit235>
+      <Unit236>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formcloudshadows.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCloudShadows"/>
+      </Unit236>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
