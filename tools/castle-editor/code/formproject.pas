@@ -703,6 +703,7 @@ type
       MenuItemBallisticStudio: TMenuItem;
       MenuItemAcousticSpace: TMenuItem;
       MenuItemSuspensionBridge: TMenuItem;
+      MenuItemWorldWaypoint: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -826,6 +827,7 @@ type
     procedure MenuItemBallisticStudioClick(Sender: TObject);
     procedure MenuItemAcousticSpaceClick(Sender: TObject);
     procedure MenuItemSuspensionBridgeClick(Sender: TObject);
+    procedure MenuItemWorldWaypointClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2965,6 +2967,11 @@ begin
   MenuItemSuspensionBridge.Caption := 'Procedural Rope Suspension Bridge & Live-Load Studio...';
   MenuItemSuspensionBridge.OnClick := @MenuItemSuspensionBridgeClick;
   MenuItemDesign.Add(MenuItemSuspensionBridge);
+
+  MenuItemWorldWaypoint := TMenuItem.Create(MenuItemDesign);
+  MenuItemWorldWaypoint.Caption := 'Diegetic 3D World Waypoint & Offscreen HUD Studio...';
+  MenuItemWorldWaypoint.OnClick := @MenuItemWorldWaypointClick;
+  MenuItemDesign.Add(MenuItemWorldWaypoint);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6559,6 +6566,12 @@ procedure TProjectForm.MenuItemSuspensionBridgeClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSuspensionBridgeDialog;
+end;
+
+procedure TProjectForm.MenuItemWorldWaypointClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowWorldWaypointDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

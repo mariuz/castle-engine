@@ -216,6 +216,7 @@ uses
   TestToolBallisticStudio,
   TestToolAcousticSpace,
   TestToolSuspensionBridge,
+  TestToolWorldWaypoint,
   TestCastleVulkanRHI;
 
 implementation

@@ -4792,6 +4792,13 @@ Phase 389 adds **Interactive Rope & Chain Suspension Bridges** via `TCastleSuspe
 - **Green's-Function Live-Load Depression & Torsional Roll (`EvaluateDeckAtNormalizedT`)**: Evaluates continuous taut-cable Green's kernel $G(t, t_0)$ with pinned `0`-drop abutments and off-center torsional roll tilt across 3 presets (`sbpJungleVineFootbridge`, `sbpDwarvenIronChainSpan`, `sbpRottedChasmTrapBridge`).
 - **Deterministic Broken-Plank Chasm Gaps (`IsPlankBroken`)**: Seeds missing interior slats while preserving walkable start/end abutment planks.
 
+## 66DK. Phase 390: Diegetic 3D World-Space Hologram, Offscreen Edge Clamping & X-Ray Occluded Waypoint Studio
+
+Phase 390 adds **Diegetic 3D World-to-HUD Waypoints & Offscreen Indicators** via `TCastleWorldWaypoint` (`src/scene/castleworldwaypoint.pas`), `TWorldWaypointHelper` (`tools/common-code/toolworldwaypoint.pas`), and `TWorldWaypointForm` (`tools/castle-editor/code/formworldwaypoint.pas`), accessible from **`Waypoint`** in the top viewport toolbar, **`Design -> Diegetic 3D World Waypoint & Offscreen HUD Studio...`**, or `LaunchStudioById('world_waypoint')`.
+
+- **Hemisphere-Safe Offscreen Clamping (`EvaluateForCamera`)**: Projects 3D anchors into `[0..1]^2` HUD coordinates and clamps behind-camera ($z_v \le 0$) and off-frustum targets onto `SafeEdgeMargin01` without sign-flipping across 3 presets (`wwpQuestObjectiveDiamond`, `wwpSquadPingTactical`, `wwpLootRarityBeacon`).
+- **`WorldRay` X-Ray Wall Occlusion & ADS Center Declutter**: Detects solid-wall occlusion (`wssOnScreenOccludedWall`) and attenuates crosshair-overlapping icons while aiming down sights (`AdsCenterFadeConeDeg`).
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4969,4 +4976,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolballisticstudio.pas`](../tests/code/testcases/testtoolballisticstudio.pas) (`TTestToolBallisticStudio` — 2 tests)**: Verifies `WorldRay` `0.18m` thin-cover penetration + `2.2m` concrete backstop embed, `-10°` steel-plate grazing ricochet, crosswind + Magnus lateral drift, moving-target low/high-arc mortar intercept lead solving, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolacousticspace.pas`](../tests/code/testcases/testtoolacousticspace.pas) (`TTestToolAcousticSpace` — 2 tests)**: Verifies stone cathedral (`RT60 > 2.0s`) vs. padded foam booth (`< 0.8s`) vs. open-sky (`0.0s`, `100%` leak) Sabine/Eyring scaling, direct (`20 kHz`) vs. doorway-diffracted (`750..8500 Hz`) vs. sealed-wall (`380 Hz`) LPF obstruction, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsuspensionbridge.pas`](../tests/code/testcases/testtoolsuspensionbridge.pas) (`TTestToolSuspensionBridge` — 2 tests)**: Verifies pinned `t = 0` / `t = 1` abutment invariance, Green's-function `280 kg` point-load depression & lateral roll tilt, Dwarven iron vs. jungle vine stiffness scaling, deterministic interior broken-plank gaps, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolworldwaypoint.pas`](../tests/code/testcases/testtoolworldwaypoint.pas) (`TTestToolWorldWaypoint` — 2 tests)**: Verifies clear LoS vs. `WorldRay` X-Ray wall occlusion (`wssOnScreenOccludedWall`), ADS crosshair declutter fade, behind-camera hemisphere-safe right-border clamping (`0.94`), `MaxVisibleDistMeters` culling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

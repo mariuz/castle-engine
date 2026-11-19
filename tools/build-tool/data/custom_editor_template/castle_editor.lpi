@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="251">
+    <Units Count="253">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1337,6 +1337,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSuspensionBridge"/>
       </Unit250>
+      <Unit251>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolworldwaypoint.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolWorldWaypoint"/>
+      </Unit251>
+      <Unit252>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formworldwaypoint.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormWorldWaypoint"/>
+      </Unit252>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
