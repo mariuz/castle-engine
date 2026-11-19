@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="257">
+    <Units Count="259">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1367,6 +1367,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSpiderweb"/>
       </Unit256>
+      <Unit257>
+        <Filename Value="../common-code/toolfoliagetrample.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFoliageTrample"/>
+      </Unit257>
+      <Unit258>
+        <Filename Value="code/formfoliagetrample.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFoliageTrample"/>
+      </Unit258>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

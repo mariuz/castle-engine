@@ -4813,6 +4813,13 @@ Phase 392 adds **Procedural Orb-Weaver Spiderwebs & Dungeon Cobwebs** via `TCast
 - **Radial `WorldRay` Wall Mooring (`WeaveSpiderwebOnWorld`)**: Locks outer anchor threads onto surrounding walls/ceilings/floors (`AnchoredSpokeCount`) and weaves sagged power-law capture spirals across 3 presets (`swpSymmetricGardenOrbWeb`, `swpTornDungeonCornerCobweb`, `swpDewdropForestCanopySilk`).
 - **Torn Crypt Decay & Dewdrop Beads**: Deterministically omits damaged spiral sectors (`TornSectorRatio01`) and populates morning dewdrop water beads (`DewdropDensity01`).
 
+## 66DN. Phase 393: Dynamic Foliage/Grass Trample, Radial Shockwave Blast Flatten & Elastic Spring-Back Studio
+
+Phase 393 adds **Interactive 2D Foliage Bend Fields & Elastic Recovery** via `TCastleFoliageTrampleField` (`src/scene/castlefoliagetrample.pas`), `TFoliageTrampleHelper` (`tools/common-code/toolfoliagetrample.pas`), and `TFoliageTrampleForm` (`tools/castle-editor/code/formfoliagetrample.pas`), accessible from **`Trample`** in the top viewport toolbar, **`Design -> Dynamic Foliage Trample, Blast Flatten & Spring-Back Studio...`**, or `LaunchStudioById('foliage_trample')`.
+
+- **2D `(BendX, BendZ)` Parting & Blast Flatten (`StampCharacterWalkCrush` / `TriggerShockwaveBlast`)**: Bends stalks radially outward with exact length-preserving trigonometric tip offsets ($\|\mathbf{p}_{\text{tip}}\| = L$) across 3 presets (`ftpGoldenWheatField`, `ftpSwampCattailReeds`, `ftpAlienBioluminescentFerns`).
+- **Damped Hookean Spring-Back (`StepElasticSpringBack`)**: Integrates $\ddot{\mathbf{b}} = -k \mathbf{b} - c \dot{\mathbf{b}}$ to restore trampled undergrowth smoothly to vertical rest.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4993,4 +5000,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolworldwaypoint.pas`](../tests/code/testcases/testtoolworldwaypoint.pas) (`TTestToolWorldWaypoint` — 2 tests)**: Verifies clear LoS vs. `WorldRay` X-Ray wall occlusion (`wssOnScreenOccludedWall`), ADS crosshair declutter fade, behind-camera hemisphere-safe right-border clamping (`0.94`), `MaxVisibleDistMeters` culling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolbuoyancyhull.pas`](../tests/code/testcases/testtoolbuoyancyhull.pas) (`TTestToolBuoyancyHull` — 2 tests)**: Verifies exact spherical-cap identities (`0.0`, `0.5`, `1.0`), `+20°` starboard heel righting torque (`> +200 Nm`), calm-water Archimedes draft & roll equilibrium settling, wave heave oscillation, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolspiderweb.pas`](../tests/code/testcases/testtoolspiderweb.pas) (`TTestToolSpiderweb` — 2 tests)**: Verifies `12 / 12` radial `WorldRay` stone-archway anchor locks (`204` segments), deterministic `swpTornDungeonCornerCobweb` sector removal, `> 20` morning dewdrop beads (`swpDewdropForestCanopySilk`), and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolfoliagetrample.pas`](../tests/code/testcases/testtoolfoliagetrample.pas) (`TTestToolFoliageTrample` — 2 tests)**: Verifies radial 4-quadrant shockwave outward parting, exact stalk length conservation (`1.25m`), Hookean spring-damper recovery back to `0` trampled cells, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

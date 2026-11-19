@@ -706,6 +706,7 @@ type
       MenuItemWorldWaypoint: TMenuItem;
       MenuItemBuoyancyHull: TMenuItem;
       MenuItemSpiderweb: TMenuItem;
+      MenuItemFoliageTrample: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -832,6 +833,7 @@ type
     procedure MenuItemWorldWaypointClick(Sender: TObject);
     procedure MenuItemBuoyancyHullClick(Sender: TObject);
     procedure MenuItemSpiderwebClick(Sender: TObject);
+    procedure MenuItemFoliageTrampleClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2986,6 +2988,11 @@ begin
   MenuItemSpiderweb.Caption := 'Procedural Spiderweb, Wall Mooring & Dewdrop Silk Studio...';
   MenuItemSpiderweb.OnClick := @MenuItemSpiderwebClick;
   MenuItemDesign.Add(MenuItemSpiderweb);
+
+  MenuItemFoliageTrample := TMenuItem.Create(MenuItemDesign);
+  MenuItemFoliageTrample.Caption := 'Dynamic Foliage Trample, Blast Flatten & Spring-Back Studio...';
+  MenuItemFoliageTrample.OnClick := @MenuItemFoliageTrampleClick;
+  MenuItemDesign.Add(MenuItemFoliageTrample);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6598,6 +6605,12 @@ procedure TProjectForm.MenuItemSpiderwebClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSpiderwebDialog;
+end;
+
+procedure TProjectForm.MenuItemFoliageTrampleClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowFoliageTrampleDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

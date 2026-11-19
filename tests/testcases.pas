@@ -219,6 +219,7 @@ uses
   TestToolWorldWaypoint,
   TestToolBuoyancyHull,
   TestToolSpiderweb,
+  TestToolFoliageTrample,
   TestCastleVulkanRHI;
 
 implementation

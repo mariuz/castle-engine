@@ -382,6 +382,7 @@ contains
   castleworldwaypoint in '..\..\src\scene\castleworldwaypoint.pas',
   castlebuoyancyhull in '..\..\src\scene\castlebuoyancyhull.pas',
   castlespiderweb in '..\..\src\scene\castlespiderweb.pas',
+  castlefoliagetrample in '..\..\src\scene\castlefoliagetrample.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',
