@@ -705,6 +705,7 @@ type
       MenuItemSuspensionBridge: TMenuItem;
       MenuItemWorldWaypoint: TMenuItem;
       MenuItemBuoyancyHull: TMenuItem;
+      MenuItemSpiderweb: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -830,6 +831,7 @@ type
     procedure MenuItemSuspensionBridgeClick(Sender: TObject);
     procedure MenuItemWorldWaypointClick(Sender: TObject);
     procedure MenuItemBuoyancyHullClick(Sender: TObject);
+    procedure MenuItemSpiderwebClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2979,6 +2981,11 @@ begin
   MenuItemBuoyancyHull.Caption := 'Multi-Pontoon Buoyancy Hydrostatics & Wave Torque Studio...';
   MenuItemBuoyancyHull.OnClick := @MenuItemBuoyancyHullClick;
   MenuItemDesign.Add(MenuItemBuoyancyHull);
+
+  MenuItemSpiderweb := TMenuItem.Create(MenuItemDesign);
+  MenuItemSpiderweb.Caption := 'Procedural Spiderweb, Wall Mooring & Dewdrop Silk Studio...';
+  MenuItemSpiderweb.OnClick := @MenuItemSpiderwebClick;
+  MenuItemDesign.Add(MenuItemSpiderweb);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6585,6 +6592,12 @@ procedure TProjectForm.MenuItemBuoyancyHullClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowBuoyancyHullDialog;
+end;
+
+procedure TProjectForm.MenuItemSpiderwebClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSpiderwebDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

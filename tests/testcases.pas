@@ -218,6 +218,7 @@ uses
   TestToolSuspensionBridge,
   TestToolWorldWaypoint,
   TestToolBuoyancyHull,
+  TestToolSpiderweb,
   TestCastleVulkanRHI;
 
 implementation

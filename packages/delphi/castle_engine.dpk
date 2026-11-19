@@ -381,6 +381,7 @@ contains
   castlesuspensionbridge in '..\..\src\scene\castlesuspensionbridge.pas',
   castleworldwaypoint in '..\..\src\scene\castleworldwaypoint.pas',
   castlebuoyancyhull in '..\..\src\scene\castlebuoyancyhull.pas',
+  castlespiderweb in '..\..\src\scene\castlespiderweb.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

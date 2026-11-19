@@ -4806,6 +4806,13 @@ Phase 391 adds **Multi-Pontoon Archimedes Buoyancy & Hull Hydrostatics** via `TC
 - **Exact Spherical-Cap Archimedes Submergence (`SphericalCapSubmergedFraction`)**: Evaluates $f_{\text{sub}} = h^2 (3R - h) / (4R^3) \in [0, 1]$ across `1..8` pontoons for 3 presets (`bhpWoodenCargoRaft4Pt`, `bhpPatrolGunboat6Pt`, `bhpFloatingOilDrumSingle`).
 - **Metacentric Righting Torque & Heave/Roll Settling (`StepHydrostaticMotion`)**: Computes $\boldsymbol{\tau} = \sum (\mathbf{r}_i - \mathbf{r}_{\text{CoM}}) \times \mathbf{F}_{B,i}$ over traveling waves and integrates damped rigid-hull equilibrium.
 
+## 66DM. Phase 392: Procedural Spiderweb, Radial `WorldRay` Wall Mooring, Capture Spiral & Dewdrop Silk Studio
+
+Phase 392 adds **Procedural Orb-Weaver Spiderwebs & Dungeon Cobwebs** via `TCastleSpiderwebGenerator` (`src/scene/castlespiderweb.pas`), `TSpiderwebHelper` (`tools/common-code/toolspiderweb.pas`), and `TSpiderwebForm` (`tools/castle-editor/code/formspiderweb.pas`), accessible from **`Cobweb`** in the top viewport toolbar, **`Design -> Procedural Spiderweb, Wall Mooring & Dewdrop Silk Studio...`**, or `LaunchStudioById('spiderweb')`.
+
+- **Radial `WorldRay` Wall Mooring (`WeaveSpiderwebOnWorld`)**: Locks outer anchor threads onto surrounding walls/ceilings/floors (`AnchoredSpokeCount`) and weaves sagged power-law capture spirals across 3 presets (`swpSymmetricGardenOrbWeb`, `swpTornDungeonCornerCobweb`, `swpDewdropForestCanopySilk`).
+- **Torn Crypt Decay & Dewdrop Beads**: Deterministically omits damaged spiral sectors (`TornSectorRatio01`) and populates morning dewdrop water beads (`DewdropDensity01`).
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4985,4 +4992,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolsuspensionbridge.pas`](../tests/code/testcases/testtoolsuspensionbridge.pas) (`TTestToolSuspensionBridge` — 2 tests)**: Verifies pinned `t = 0` / `t = 1` abutment invariance, Green's-function `280 kg` point-load depression & lateral roll tilt, Dwarven iron vs. jungle vine stiffness scaling, deterministic interior broken-plank gaps, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolworldwaypoint.pas`](../tests/code/testcases/testtoolworldwaypoint.pas) (`TTestToolWorldWaypoint` — 2 tests)**: Verifies clear LoS vs. `WorldRay` X-Ray wall occlusion (`wssOnScreenOccludedWall`), ADS crosshair declutter fade, behind-camera hemisphere-safe right-border clamping (`0.94`), `MaxVisibleDistMeters` culling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolbuoyancyhull.pas`](../tests/code/testcases/testtoolbuoyancyhull.pas) (`TTestToolBuoyancyHull` — 2 tests)**: Verifies exact spherical-cap identities (`0.0`, `0.5`, `1.0`), `+20°` starboard heel righting torque (`> +200 Nm`), calm-water Archimedes draft & roll equilibrium settling, wave heave oscillation, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolspiderweb.pas`](../tests/code/testcases/testtoolspiderweb.pas) (`TTestToolSpiderweb` — 2 tests)**: Verifies `12 / 12` radial `WorldRay` stone-archway anchor locks (`204` segments), deterministic `swpTornDungeonCornerCobweb` sector removal, `> 20` morning dewdrop beads (`swpDewdropForestCanopySilk`), and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
