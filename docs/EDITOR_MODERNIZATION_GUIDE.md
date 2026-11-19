@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–377** across Horizons 1–12), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–378** across Horizons 1–12), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -4708,6 +4708,13 @@ Phase 377 adds **Planar Portal & Seamless Mirror Oblique Frustum Teleportation**
 - **180-Degree Doorway SE(3) Turnaround & Planar Reflection (`EvaluateVirtualCameraView` & `TryCrossPortal`)**: Warps observer camera eyes, view directions, and actor positions/velocities across arbitrary doorway yaw offsets (or planar mirror normals) while computing Lengyel oblique near-plane clip vectors (`ObliqueClipPlane`).
 - **Aperture-Bounded Crossing & Anti-Ping-Pong Hysteresis**: Verifies segment intersection within `[ -Width/2..+Width/2 ] x [ 0..Height ]` and applies bidirectional `TeleportCooldownSec` lockouts.
 
+## 66CY. Phase 378: AI Sensory Perception Sight, Wall-Muffled Hearing & Decaying Scent Studio
+
+Phase 378 adds Unreal Engine 6.0+ `UAIPerceptionComponent`-style **Multi-Modal Sight, Hearing & Scent Perception** via `TCastleSensoryPerception` (`src/scene/castlesensoryperception.pas`), `TSensoryPerceptionHelper` (`tools/common-code/toolsensoryperception.pas`), and `TSensoryPerceptionForm` (`tools/castle-editor/code/formsensoryperception.pas`), accessible from **`Sense`** in the top viewport toolbar, **`Design -> AI Sensory Perception Studio...`**, or `LaunchStudioById('sensory_perception')`.
+
+- **Foveal/Peripheral Vision & `WorldRay` Occlusion (`EvaluateSightTarget`)**: Distinguishes full-gain foveal locks from wide-angle peripheral glimpses and rejects targets occluded behind solid scene geometry (`svzOccludedByWall`).
+- **Wall-Muffled Decibel Hearing & Scent Trails (`EvaluateAcousticEvent` & `SampleStrongestScent`)**: Applies `-20 * log10(r)` spherical loss plus `-WallMufflePenaltyDb` solid-wall transmission loss alongside a 24-node decaying scent breadcrumb ring.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4873,4 +4880,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolposesnapshot.pas`](../tests/code/testcases/testtoolposesnapshot.pas) (`TTestToolPoseSnapshot` — 2 tests)**: Verifies fixed-capacity ring-buffer eviction (`6` dash captures in `MaxGhostCount = 4` overwriting oldest slots without heap growth), linear alpha/lifetime decay & expiration, petrified statue pose lock rejecting new dash captures, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmacrorecorder.pas`](../tests/code/testcases/testtoolmacrorecorder.pas) (`TTestToolMacroRecorder` — 2 tests)**: Verifies multi-step name-filtered transform macro recording (`add_translate`, `multiply_scale`, `set_tag`), JSON export/import roundtrips, `DeltaMultiplier` batch replay isolation, the unified **96-Studio Hub** catalog (`Phases 1–376`), and the **19th MCP tool** `cge_run_editor_macro` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolportalstudio.pas`](../tests/code/testcases/testtoolportalstudio.pas) (`TTestToolPortalStudio` — 2 tests)**: Verifies 90-degree linked portal turnaround position/velocity rotation, anti-ping-pong bidirectional cooldown lockout, aperture-miss rejection, planar mirror camera reflection, Lengyel oblique clip planes, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsensoryperception.pas`](../tests/code/testcases/testtoolsensoryperception.pas) (`TTestToolSensoryPerception` — 2 tests)**: Verifies foveal vs. peripheral vision cone weighting, solid-wall `WorldRay` line-of-sight occlusion (`svzOccludedByWall`), wall-muffled acoustic decibel thresholds (`62 dB` footstep suppressed vs. `95 dB` gunshot audible through wall), Bloodhound scent decay, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

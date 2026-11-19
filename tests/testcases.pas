@@ -204,6 +204,7 @@ uses
   TestToolPoseSnapshot,
   TestToolMacroRecorder,
   TestToolPortalStudio,
+  TestToolSensoryPerception,
   TestCastleVulkanRHI;
 
 implementation

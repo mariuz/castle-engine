@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="227">
+    <Units Count="229">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1217,6 +1217,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormPortalStudio"/>
       </Unit226>
+      <Unit227>
+        <Filename Value="../common-code/toolsensoryperception.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSensoryPerception"/>
+      </Unit227>
+      <Unit228>
+        <Filename Value="code/formsensoryperception.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSensoryPerception"/>
+      </Unit228>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

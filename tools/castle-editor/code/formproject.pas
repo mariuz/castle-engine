@@ -691,6 +691,7 @@ type
       MenuItemPoseSnapshot: TMenuItem;
       MenuItemMacroRecorder: TMenuItem;
       MenuItemPortalStudio: TMenuItem;
+      MenuItemSensoryPerception: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -802,6 +803,7 @@ type
     procedure MenuItemPoseSnapshotClick(Sender: TObject);
     procedure MenuItemMacroRecorderClick(Sender: TObject);
     procedure MenuItemPortalStudioClick(Sender: TObject);
+    procedure MenuItemSensoryPerceptionClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2881,6 +2883,11 @@ begin
   MenuItemPortalStudio.Caption := 'Planar Portal & Seamless Mirror Studio...';
   MenuItemPortalStudio.OnClick := @MenuItemPortalStudioClick;
   MenuItemDesign.Add(MenuItemPortalStudio);
+
+  MenuItemSensoryPerception := TMenuItem.Create(MenuItemDesign);
+  MenuItemSensoryPerception.Caption := 'AI Sensory Perception Studio...';
+  MenuItemSensoryPerception.OnClick := @MenuItemSensoryPerceptionClick;
+  MenuItemDesign.Add(MenuItemSensoryPerception);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6403,6 +6410,12 @@ procedure TProjectForm.MenuItemPortalStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowPortalStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemSensoryPerceptionClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSensoryPerceptionDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
