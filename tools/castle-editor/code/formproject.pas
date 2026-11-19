@@ -696,6 +696,7 @@ type
       MenuItemFootstepDirector: TMenuItem;
       MenuItemGravityField: TMenuItem;
       MenuItemCloudShadows: TMenuItem;
+      MenuItemTrailStamper: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -812,6 +813,7 @@ type
     procedure MenuItemFootstepDirectorClick(Sender: TObject);
     procedure MenuItemGravityFieldClick(Sender: TObject);
     procedure MenuItemCloudShadowsClick(Sender: TObject);
+    procedure MenuItemTrailStamperClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2916,6 +2918,11 @@ begin
   MenuItemCloudShadows.Caption := '2.5D Atmospheric Cloud Shadow & God-Ray Studio...';
   MenuItemCloudShadows.OnClick := @MenuItemCloudShadowsClick;
   MenuItemDesign.Add(MenuItemCloudShadows);
+
+  MenuItemTrailStamper := TMenuItem.Create(MenuItemDesign);
+  MenuItemTrailStamper.Caption := 'Interactive Snow, Mud & Sand Trail Stamper Studio...';
+  MenuItemTrailStamper.OnClick := @MenuItemTrailStamperClick;
+  MenuItemDesign.Add(MenuItemTrailStamper);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6468,6 +6475,12 @@ procedure TProjectForm.MenuItemCloudShadowsClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCloudShadowsDialog;
+end;
+
+procedure TProjectForm.MenuItemTrailStamperClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowTrailStamperDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

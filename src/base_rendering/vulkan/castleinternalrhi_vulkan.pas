@@ -5964,12 +5964,19 @@ var
 
 var
   SrcX, SrcY: Integer;
+  TempDim: Cardinal;
   D00, D10, D01, D11, D20, D21, D02, D12, MaxD: Single;
 begin
   EnsureHiZPipelineCreated;
   EffectiveW := Max(Cardinal(1), AWidth);
   EffectiveH := Max(Cardinal(1), AHeight);
-  MipCount := Max(Cardinal(1), Cardinal(Floor(Log2(Max(EffectiveW, EffectiveH)))) + 1);
+  MipCount := 1;
+  TempDim := Max(EffectiveW, EffectiveH);
+  while TempDim > 1 do
+  begin
+    TempDim := TempDim shr 1;
+    Inc(MipCount);
+  end;
 
   if (FHiZPyramidTexture = nil) or
      (FHiZWidth <> EffectiveW) or

@@ -440,7 +440,7 @@ begin
   if ComputeDispatchCount > 0 then
     Result := Result + Format(', Compute dispatches: %d', [ComputeDispatchCount]);
   if GpuFrameTimeMs > 0.0 then
-    Result := Result + Format(', GPU: %.2f ms', [GpuFrameTimeMs]);
+    Result := Result + FormatDot(', GPU: %.2f ms', [GpuFrameTimeMs]);
   if DeviceMemoryBudgetMB > 0 then
     Result := Result + Format(', VRAM: %d / %d MB', [DeviceMemoryUsedMB, DeviceMemoryBudgetMB]);
 end;

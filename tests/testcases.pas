@@ -209,6 +209,7 @@ uses
   TestToolFootstepDirector,
   TestToolGravityField,
   TestToolCloudShadows,
+  TestToolTrailStamper,
   TestCastleVulkanRHI;
 
 implementation

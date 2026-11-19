@@ -1348,7 +1348,7 @@ begin
     end;
 
     if NeedsMipmaps then
-      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(Width, Height)))) + 1)
+      MipLevels := Cardinal(Biggest2Exponent(Max(Cardinal(1), Max(Width, Height))) + 1)
     else
       MipLevels := 1;
 
@@ -2059,7 +2059,7 @@ begin
     if (RHIDevice.Capabilities.MaxTextureSize > 0) and (Size > RHIDevice.Capabilities.MaxTextureSize) then
       Size := RHIDevice.Capabilities.MaxTextureSize;
     if NeedsMipmaps then
-      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Size))) + 1)
+      MipLevels := Cardinal(Biggest2Exponent(Max(Cardinal(1), Cardinal(Size))) + 1)
     else
       MipLevels := 1;
 
@@ -2322,7 +2322,7 @@ begin
 
     NeedsMipmaps := VarianceShadowMaps;
     if NeedsMipmaps then
-      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Size))) + 1)
+      MipLevels := Cardinal(Biggest2Exponent(Max(Cardinal(1), Cardinal(Size))) + 1)
     else
       MipLevels := 1;
 

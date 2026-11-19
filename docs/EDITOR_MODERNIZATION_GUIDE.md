@@ -4743,6 +4743,13 @@ Phase 382 adds Unreal Engine 6.0+ Volumetric Cloud Shadow-style **Wind-Advected 
 - **Solar-Offset Dual-Octave Canopy Projection (`SampleGroundShadowAt`)**: Offsets world ground coordinates along the solar elevation/azimuth ray ($(H_{\text{cloud}} - Y_{\text{ground}}) \cot\theta_{\text{elev}}$) and evaluates differential-drift primary + detail cloud noise.
 - **Henyey-Greenstein Crepuscular Shafts**: Evaluates forward Mie solar phase scattering along broken cloud penumbrae.
 
+## 66DD. Phase 383: Interactive Snow, Mud & Sand Persistent Deformation Trail Stamper Studio
+
+Phase 383 adds Unreal Engine 6.0+ RVT Snow Trail-style **Persistent 2D Ground Furrows, Raised Rim Berms & Weather Refill** via `TCastleTrailStamper` (`src/scene/castletrailstamper.pas`), `TTrailStamperHelper` (`tools/common-code/tooltrailstamper.pas`), and `TTrailStamperForm` (`tools/castle-editor/code/formtrailstamper.pas`), accessible from **`SnowTrk`** in the top viewport toolbar, **`Design -> Interactive Snow, Mud & Sand Trail Stamper Studio...`**, or `LaunchStudioById('trail_stamper')`.
+
+- **Volume-Conserving Furrows & Collar Berms (`StampFurrowSegmentWorld`)**: Carves smooth depressions (`< 0.0m`) with raised outer collar berms (`> 0.0m`) while preserving deeper existing ruts and bilinearly evaluating central-difference normals.
+- **Gradual Weather Refill (`StepWeatherRefill`)**: Smoothly relaxes depressions, raised berms, and compaction back toward undisturbed `0.0m` under active snowfall or wind-blown sand.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4913,4 +4920,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolfootstepdirector.pas`](../tests/code/testcases/testtoolfootstepdirector.pas) (`TTestToolFootstepDirector` — 2 tests)**: Verifies zero idle footsteps, alternating Left (`0.25`) / Right (`0.75`) stride crossings, `WorldRay` Snow / Puddle / MetalGrating surface matching, resonant metal vs. muffled snow acoustic scaling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgravityfield.pas`](../tests/code/testcases/testtoolgravityfield.pas) (`TTestToolGravityField` — 2 tests)**: Verifies 360-degree spherical planetoid walking (North Pole, East Equator, upside-down South Pole), exact $r = 2R$ inverse-square falloff (`2.45 m/s^2`), hollow O'Neill cylinder interior ceiling `Up` vectors, `Priority = 50` zone overrides, antipodal-safe `StepSmoothUpVectorSlerp`, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcloudshadows.pas`](../tests/code/testcases/testtoolcloudshadows.pas) (`TTestToolCloudShadows` — 2 tests)**: Verifies `90°` zenith (`0m` offset) vs. `45°` (`+300m` horizontal offset) solar cloud-shadow projection, `0% -> 52% -> 100%` coverage monotonicity, wind advection scrolling, `> 10x` forward Henyey-Greenstein crepuscular shaft gain vs. backscatter, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooltrailstamper.pas`](../tests/code/testcases/testtooltrailstamper.pas) (`TTestToolTrailStamper` — 2 tests)**: Verifies continuous sled/wheel furrow depressions (`< -0.30m`, compaction `> 0.85`), raised side rim berms (`> +0.04m`), central-difference slope normals, gradual snowfall refill back to `0` active cells, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
