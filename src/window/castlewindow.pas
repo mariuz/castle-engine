@@ -3328,7 +3328,7 @@ begin
   {$elseif defined(CASTLE_WINDOW_COCOA)}
   Result.Platform := vwsiMetal;
   if (Ref <> nil) and (Ref.contentView <> nil) then
-    Result.MetalLayer := PCAMetalLayer(Ref.contentView.layer);
+    Result.MetalLayer := PCAMetalLayer(Pointer(NSView(Ref.contentView).layer));
   {$else}
   Result.Platform := GetDefaultVulkanWSIPlatform;
   {$endif}

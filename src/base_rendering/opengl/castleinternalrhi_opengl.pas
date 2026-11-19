@@ -3538,7 +3538,9 @@ constructor TOpenGLRHIDevice.Create(const InitialWidth, InitialHeight: Cardinal)
 begin
   inherited Create;
   FHasLiveGLContext := (ApplicationProperties <> nil) and
-    ApplicationProperties.IsGLContextOpen and (GLFeatures <> nil);
+    ApplicationProperties.IsGLContextOpen and (GLFeatures <> nil) and
+    {$ifdef OpenGLES} GLFeatures.Version_3_0 {$else} GLFeatures.Version_3_0 {$endif} and
+    Assigned(glGenFramebuffers) and Assigned(glDeleteFramebuffers);
   FPipelineMap := TOpenGLPipelineMap.Create([doOwnsValues]);
   FComputePipelineMap := TOpenGLComputePipelineMap.Create([doOwnsValues]);
   FMaxImageUnits := 8;
@@ -3628,9 +3630,9 @@ begin
   ReleaseRemainingDeviceResources;
   if FHasLiveGLContext then
   begin
-    if FReadbackFBO <> 0 then
+    if (FReadbackFBO <> 0) and Assigned(glDeleteFramebuffers) then
       glDeleteFramebuffers(1, @FReadbackFBO);
-    if FReadbackResolveFBO <> 0 then
+    if (FReadbackResolveFBO <> 0) and Assigned(glDeleteFramebuffers) then
       glDeleteFramebuffers(1, @FReadbackResolveFBO);
   end;
   inherited;
@@ -3676,11 +3678,13 @@ begin
   FCapabilities.SupportsETC2Compression := tcETC1 in GLFeatures.TextureCompression;
 
   IntVal := 16384;
-  glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, @IntVal);
+  if {$ifdef OpenGLES} GLFeatures.Version_3_0 {$else} GLFeatures.Version_3_1 {$endif} then
+    glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, @IntVal);
   FCapabilities.MaxUniformBufferRange := Max(16384, IntVal);
 
   IntVal := 256;
-  glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, @IntVal);
+  if {$ifdef OpenGLES} GLFeatures.Version_3_0 {$else} GLFeatures.Version_3_1 {$endif} then
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, @IntVal);
   FCapabilities.MinUniformBufferOffsetAlignment := Max(1, IntVal);
 
   {$ifndef OpenGLES}

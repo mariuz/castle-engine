@@ -209,12 +209,28 @@ type
     Range: PtrUInt;
   end;
 
+  TVulkanCommittedDescriptorEntry = record
+    Binding: Cardinal;
+    ArrayElement: Cardinal;
+    DescriptorType: VkDescriptorType;
+    BufferObj: TVulkanRHIBuffer;
+    BufferHandle: VkBuffer;
+    BufferOffset: VkDeviceSize;
+    BufferRange: VkDeviceSize;
+    TextureObj: TVulkanRHITexture;
+    ImageView: VkImageView;
+    Sampler: VkSampler;
+    ImageLayout: VkImageLayout;
+    AccelStructHandle: VkAccelerationStructureKHR;
+  end;
+
   TVulkanRHIDescriptorSet = class(TRHIDescriptorSet)
   private
     FHandle: VkDescriptorSet;
     FOwnerPool: VkDescriptorPool;
     FIsTransient: Boolean;
     FUsesCustomPool: Boolean;
+    FBoundIdleEpoch: UInt64;
     FLayout: TVulkanRHIDescriptorSetLayout;
     FPendingWrites: array of VkWriteDescriptorSet;
     FPendingWriteInfoIndices: array of Integer;
@@ -223,14 +239,26 @@ type
     FAccelStructHandles: array of VkAccelerationStructureKHR;
     FAccelStructWrites: array of VkWriteDescriptorSetAccelerationStructureKHR;
     FBoundBuffers: array of TVulkanBoundBufferEntry;
+    FCommittedEntries: array of TVulkanCommittedDescriptorEntry;
     FUpdateCount: Cardinal;
     FLastBoundTexture: TRHITexture;
     FLastBoundSampler: TRHISampler;
     function VulkanDevice: TVulkanRHIDevice;
     procedure RecordBoundBuffer(const ABinding: Cardinal; const AIsStorage: Boolean;
       const ABuffer: TVulkanRHIBuffer; const AOffset, ARange: PtrUInt);
+    procedure RecordCommittedBuffer(const ABinding: Cardinal;
+      const ADescType: VkDescriptorType; const ABuffer: TVulkanRHIBuffer;
+      const AOffset, ARange: VkDeviceSize);
+    procedure RecordCommittedImage(const ABinding, AArrayElement: Cardinal;
+      const ADescType: VkDescriptorType; const ATexture: TVulkanRHITexture;
+      const AImageView: VkImageView; const ASampler: VkSampler;
+      const AImageLayout: VkImageLayout);
+    procedure RecordCommittedAccelStruct(const ABinding: Cardinal;
+      const AAccelStruct: VkAccelerationStructureKHR);
     procedure ClearBoundBuffer(const ABuffer: TVulkanRHIBuffer);
+    procedure ClearBoundTexture(const ATexture: TVulkanRHITexture);
     procedure RefreshRelocatedBuffer(const ABuffer: TVulkanRHIBuffer);
+    procedure MarkBoundToLiveCommandBuffer;
   protected
     procedure ReleaseDeviceResources; override;
   public
@@ -4506,6 +4534,8 @@ type
     { Diagnostics, VK_EXT_memory_budget, VK_EXT_graphics_pipeline_library, Bindless, Extended Dynamic State, Sync2 & Fallback tracking }
     FInstanceApiVersion: Cardinal;
     FDeviceApiVersion: Cardinal;
+    FInstanceHasSurfaceExtension: Boolean;
+    FCompletedIdleEpoch: UInt64;
     FSupportsMemoryBudgetExt: Boolean;
     FSupportsDynamicRendering: Boolean;
     FSupportsGraphicsPipelineLibrary: Boolean;
@@ -4556,6 +4586,9 @@ type
     procedure RegisterLiveDescriptorSet(const ASet: TVulkanRHIDescriptorSet);
     procedure UnregisterLiveDescriptorSet(const ASet: TVulkanRHIDescriptorSet);
     procedure UnbindDestroyedBufferFromDescriptorSets(const ABuffer: TVulkanRHIBuffer);
+    procedure UnbindDestroyedTextureFromDescriptorSets(const ATexture: TVulkanRHITexture);
+    procedure EnqueueInFlightDescriptorSetDeletion(const AOwnerPool: VkDescriptorPool;
+      const ASet: VkDescriptorSet);
     function HandleDefragmentRelocate(const AUserData: Pointer;
       const AOldAlloc, ANewAlloc: TVulkanMemoryAllocation): Boolean;
     procedure HandleDefragmentFinalizeMoves;
@@ -7376,6 +7409,7 @@ var
 begin
   if VulkanDevice <> nil then
   begin
+    VulkanDevice.UnbindDestroyedTextureFromDescriptorSets(Self);
     if VulkanDevice.FActiveColorTarget = Self then
       VulkanDevice.FActiveColorTarget := nil;
     if VulkanDevice.FActiveDepthTarget = Self then
@@ -8232,10 +8266,12 @@ begin
   if VulkanDevice <> nil then
     VulkanDevice.UnregisterLiveDescriptorSet(Self);
   SetLength(FBoundBuffers, 0);
+  SetLength(FCommittedEntries, 0);
   if FUsesCustomPool then
   begin
     if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
        (not VulkanDevice.DeferResourceDestruction) and
+       ((FBoundIdleEpoch = 0) or (FBoundIdleEpoch <> VulkanDevice.FCompletedIdleEpoch)) and
        (FOwnerPool <> VK_NULL_HANDLE) and (FHandle <> VK_NULL_HANDLE) and
        Assigned(vkFreeDescriptorSets) then
     begin
@@ -8244,9 +8280,15 @@ begin
     end;
   end else
   if (not FIsTransient) and (VulkanDevice <> nil) and (FHandle <> VK_NULL_HANDLE) then
-    VulkanDevice.DeferOrDestroyDescriptorSet(FOwnerPool, FHandle);
+  begin
+    if (FBoundIdleEpoch <> 0) and (FBoundIdleEpoch = VulkanDevice.FCompletedIdleEpoch) then
+      VulkanDevice.EnqueueInFlightDescriptorSetDeletion(FOwnerPool, FHandle)
+    else
+      VulkanDevice.DeferOrDestroyDescriptorSet(FOwnerPool, FHandle);
+  end;
   FHandle := VK_NULL_HANDLE;
   FOwnerPool := VK_NULL_HANDLE;
+  FBoundIdleEpoch := 0;
 end;
 
 destructor TVulkanRHIDescriptorSet.Destroy;
@@ -8258,6 +8300,7 @@ begin
   SetLength(FAccelStructHandles, 0);
   SetLength(FAccelStructWrites, 0);
   SetLength(FBoundBuffers, 0);
+  SetLength(FCommittedEntries, 0);
   inherited;
 end;
 
@@ -8287,13 +8330,137 @@ begin
   FBoundBuffers[NewIdx].Range := ARange;
 end;
 
+procedure TVulkanRHIDescriptorSet.RecordCommittedBuffer(const ABinding: Cardinal;
+  const ADescType: VkDescriptorType; const ABuffer: TVulkanRHIBuffer;
+  const AOffset, ARange: VkDeviceSize);
+var
+  I, NewIdx: Integer;
+begin
+  for I := 0 to High(FCommittedEntries) do
+    if (FCommittedEntries[I].Binding = ABinding) and
+       (FCommittedEntries[I].ArrayElement = 0) then
+    begin
+      FillChar(FCommittedEntries[I], SizeOf(TVulkanCommittedDescriptorEntry), 0);
+      FCommittedEntries[I].Binding := ABinding;
+      FCommittedEntries[I].DescriptorType := ADescType;
+      FCommittedEntries[I].BufferObj := ABuffer;
+      FCommittedEntries[I].BufferHandle := ABuffer.Handle;
+      FCommittedEntries[I].BufferOffset := AOffset;
+      FCommittedEntries[I].BufferRange := ARange;
+      Exit;
+    end;
+  NewIdx := Length(FCommittedEntries);
+  SetLength(FCommittedEntries, NewIdx + 1);
+  FillChar(FCommittedEntries[NewIdx], SizeOf(TVulkanCommittedDescriptorEntry), 0);
+  FCommittedEntries[NewIdx].Binding := ABinding;
+  FCommittedEntries[NewIdx].DescriptorType := ADescType;
+  FCommittedEntries[NewIdx].BufferObj := ABuffer;
+  FCommittedEntries[NewIdx].BufferHandle := ABuffer.Handle;
+  FCommittedEntries[NewIdx].BufferOffset := AOffset;
+  FCommittedEntries[NewIdx].BufferRange := ARange;
+end;
+
+procedure TVulkanRHIDescriptorSet.RecordCommittedImage(
+  const ABinding, AArrayElement: Cardinal; const ADescType: VkDescriptorType;
+  const ATexture: TVulkanRHITexture; const AImageView: VkImageView;
+  const ASampler: VkSampler; const AImageLayout: VkImageLayout);
+var
+  I, NewIdx: Integer;
+begin
+  for I := 0 to High(FCommittedEntries) do
+    if (FCommittedEntries[I].Binding = ABinding) and
+       (FCommittedEntries[I].ArrayElement = AArrayElement) then
+    begin
+      FillChar(FCommittedEntries[I], SizeOf(TVulkanCommittedDescriptorEntry), 0);
+      FCommittedEntries[I].Binding := ABinding;
+      FCommittedEntries[I].ArrayElement := AArrayElement;
+      FCommittedEntries[I].DescriptorType := ADescType;
+      FCommittedEntries[I].TextureObj := ATexture;
+      FCommittedEntries[I].ImageView := AImageView;
+      FCommittedEntries[I].Sampler := ASampler;
+      FCommittedEntries[I].ImageLayout := AImageLayout;
+      Exit;
+    end;
+  NewIdx := Length(FCommittedEntries);
+  SetLength(FCommittedEntries, NewIdx + 1);
+  FillChar(FCommittedEntries[NewIdx], SizeOf(TVulkanCommittedDescriptorEntry), 0);
+  FCommittedEntries[NewIdx].Binding := ABinding;
+  FCommittedEntries[NewIdx].ArrayElement := AArrayElement;
+  FCommittedEntries[NewIdx].DescriptorType := ADescType;
+  FCommittedEntries[NewIdx].TextureObj := ATexture;
+  FCommittedEntries[NewIdx].ImageView := AImageView;
+  FCommittedEntries[NewIdx].Sampler := ASampler;
+  FCommittedEntries[NewIdx].ImageLayout := AImageLayout;
+end;
+
+procedure TVulkanRHIDescriptorSet.RecordCommittedAccelStruct(const ABinding: Cardinal;
+  const AAccelStruct: VkAccelerationStructureKHR);
+var
+  I, NewIdx: Integer;
+begin
+  for I := 0 to High(FCommittedEntries) do
+    if (FCommittedEntries[I].Binding = ABinding) and
+       (FCommittedEntries[I].ArrayElement = 0) then
+    begin
+      FillChar(FCommittedEntries[I], SizeOf(TVulkanCommittedDescriptorEntry), 0);
+      FCommittedEntries[I].Binding := ABinding;
+      FCommittedEntries[I].DescriptorType := VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+      FCommittedEntries[I].AccelStructHandle := AAccelStruct;
+      Exit;
+    end;
+  NewIdx := Length(FCommittedEntries);
+  SetLength(FCommittedEntries, NewIdx + 1);
+  FillChar(FCommittedEntries[NewIdx], SizeOf(TVulkanCommittedDescriptorEntry), 0);
+  FCommittedEntries[NewIdx].Binding := ABinding;
+  FCommittedEntries[NewIdx].DescriptorType := VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+  FCommittedEntries[NewIdx].AccelStructHandle := AAccelStruct;
+end;
+
 procedure TVulkanRHIDescriptorSet.ClearBoundBuffer(const ABuffer: TVulkanRHIBuffer);
 var
-  I: Integer;
+  I, WriteIdx: Integer;
 begin
   for I := 0 to High(FBoundBuffers) do
     if FBoundBuffers[I].Buffer = ABuffer then
       FBoundBuffers[I].Buffer := nil;
+  WriteIdx := 0;
+  for I := 0 to High(FCommittedEntries) do
+    if FCommittedEntries[I].BufferObj <> ABuffer then
+    begin
+      if WriteIdx <> I then
+        FCommittedEntries[WriteIdx] := FCommittedEntries[I];
+      Inc(WriteIdx);
+    end;
+  if WriteIdx <> Length(FCommittedEntries) then
+    SetLength(FCommittedEntries, WriteIdx);
+end;
+
+procedure TVulkanRHIDescriptorSet.ClearBoundTexture(const ATexture: TVulkanRHITexture);
+var
+  I, WriteIdx: Integer;
+begin
+  if FLastBoundTexture = ATexture then
+    FLastBoundTexture := nil;
+  WriteIdx := 0;
+  for I := 0 to High(FCommittedEntries) do
+    if FCommittedEntries[I].TextureObj <> ATexture then
+    begin
+      if WriteIdx <> I then
+        FCommittedEntries[WriteIdx] := FCommittedEntries[I];
+      Inc(WriteIdx);
+    end;
+  if WriteIdx <> Length(FCommittedEntries) then
+    SetLength(FCommittedEntries, WriteIdx);
+end;
+
+procedure TVulkanRHIDescriptorSet.MarkBoundToLiveCommandBuffer;
+begin
+  if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) then
+  begin
+    if VulkanDevice.FCompletedIdleEpoch = 0 then
+      VulkanDevice.FCompletedIdleEpoch := 1;
+    FBoundIdleEpoch := VulkanDevice.FCompletedIdleEpoch;
+  end;
 end;
 
 procedure TVulkanRHIDescriptorSet.RefreshRelocatedBuffer(const ABuffer: TVulkanRHIBuffer);
@@ -8321,18 +8488,28 @@ procedure TVulkanRHIDescriptorSet.BindUniformBuffer(const Binding: Cardinal;
   const Buffer: TRHIBuffer; const Offset, Range: PtrUInt);
 var
   Idx, WriteIdx: Integer;
+  DeclType: TRHIDescriptorType;
+  VkDescType: VkDescriptorType;
+  EffRange: VkDeviceSize;
 begin
   if Buffer = nil then Exit;
   RecordBoundBuffer(Binding, False, Buffer as TVulkanRHIBuffer, Offset, Range);
+  VkDescType := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  if (FLayout <> nil) and FLayout.TryGetBindingType(Binding, DeclType) and
+     (DeclType = dtUniformBufferDynamic) then
+    VkDescType := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+  if Range > 0 then
+    EffRange := Range
+  else
+    EffRange := Buffer.Desc.Size - Offset;
+  RecordCommittedBuffer(Binding, VkDescType, Buffer as TVulkanRHIBuffer, Offset, EffRange);
+
   Idx := Length(FBufferInfos);
   SetLength(FBufferInfos, Idx + 1);
   FillChar(FBufferInfos[Idx], SizeOf(VkDescriptorBufferInfo), 0);
   FBufferInfos[Idx].buffer := (Buffer as TVulkanRHIBuffer).Handle;
   FBufferInfos[Idx].offset := Offset;
-  if Range > 0 then
-    FBufferInfos[Idx].range := Range
-  else
-    FBufferInfos[Idx].range := Buffer.Desc.Size - Offset;
+  FBufferInfos[Idx].range := EffRange;
 
   WriteIdx := Length(FPendingWrites);
   SetLength(FPendingWrites, WriteIdx + 1);
@@ -8344,25 +8521,30 @@ begin
   FPendingWrites[WriteIdx].dstBinding := Binding;
   FPendingWrites[WriteIdx].dstArrayElement := 0;
   FPendingWrites[WriteIdx].descriptorCount := 1;
-  FPendingWrites[WriteIdx].descriptorType := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  FPendingWrites[WriteIdx].descriptorType := VkDescType;
 end;
 
 procedure TVulkanRHIDescriptorSet.BindStorageBuffer(const Binding: Cardinal;
   const Buffer: TRHIBuffer; const Offset, Range: PtrUInt);
 var
   Idx, WriteIdx: Integer;
+  EffRange: VkDeviceSize;
 begin
   if Buffer = nil then Exit;
   RecordBoundBuffer(Binding, True, Buffer as TVulkanRHIBuffer, Offset, Range);
+  if Range > 0 then
+    EffRange := Range
+  else
+    EffRange := Buffer.Desc.Size - Offset;
+  RecordCommittedBuffer(Binding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+    Buffer as TVulkanRHIBuffer, Offset, EffRange);
+
   Idx := Length(FBufferInfos);
   SetLength(FBufferInfos, Idx + 1);
   FillChar(FBufferInfos[Idx], SizeOf(VkDescriptorBufferInfo), 0);
   FBufferInfos[Idx].buffer := (Buffer as TVulkanRHIBuffer).Handle;
   FBufferInfos[Idx].offset := Offset;
-  if Range > 0 then
-    FBufferInfos[Idx].range := Range
-  else
-    FBufferInfos[Idx].range := Buffer.Desc.Size - Offset;
+  FBufferInfos[Idx].range := EffRange;
 
   WriteIdx := Length(FPendingWrites);
   SetLength(FPendingWrites, WriteIdx + 1);
@@ -8429,6 +8611,9 @@ begin
         VkDescType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
       end;
   end;
+  RecordCommittedImage(Binding, ArrayElement, VkDescType,
+    Texture as TVulkanRHITexture, FImageInfos[Idx].imageView,
+    FImageInfos[Idx].sampler, FImageInfos[Idx].imageLayout);
 
   WriteIdx := Length(FPendingWrites);
   SetLength(FPendingWrites, WriteIdx + 1);
@@ -8491,6 +8676,9 @@ begin
         VkDescType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
       end;
   end;
+  RecordCommittedImage(Binding, 0, VkDescType, VkTex,
+    FImageInfos[Idx].imageView, FImageInfos[Idx].sampler,
+    FImageInfos[Idx].imageLayout);
 
   WriteIdx := Length(FPendingWrites);
   SetLength(FPendingWrites, WriteIdx + 1);
@@ -8511,6 +8699,7 @@ var
   Idx, WriteIdx: Integer;
 begin
   if AAccelerationStructure = VK_NULL_HANDLE then Exit;
+  RecordCommittedAccelStruct(Binding, AAccelerationStructure);
   Idx := Length(FAccelStructHandles);
   SetLength(FAccelStructHandles, Idx + 1);
   SetLength(FAccelStructWrites, Idx + 1);
@@ -8534,12 +8723,105 @@ end;
 
 procedure TVulkanRHIDescriptorSet.Update;
 var
-  I, InfoIdx: Integer;
+  I, InfoIdx, EntryCount: Integer;
+  PoolAlloc: TVulkanDescriptorPoolAllocator;
+  SetLayoutHandle: VkDescriptorSetLayout;
+  CowWrites: array of VkWriteDescriptorSet;
+  CowBufferInfos: array of VkDescriptorBufferInfo;
+  CowImageInfos: array of VkDescriptorImageInfo;
+  CowAccelHandles: array of VkAccelerationStructureKHR;
+  CowAccelWrites: array of VkWriteDescriptorSetAccelerationStructureKHR;
 begin
   if Length(FPendingWrites) > 0 then
   begin
+    { Copy-On-Write rotation (VUID-vkUpdateDescriptorSets-None-03047):
+      If FHandle has already been bound to a recording or in-flight VkCommandBuffer
+      since the last GPU idle point, allocate a fresh VkDescriptorSet and retire the
+      previous handle into FDeferredDeletions so pending command buffers remain untouched. }
+    if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
+       (not FUsesCustomPool) and
+       ((FLayout = nil) or (not FLayout.UsesUpdateAfterBind)) and
+       (FBoundIdleEpoch <> 0) and
+       (FBoundIdleEpoch = VulkanDevice.FCompletedIdleEpoch) then
+    begin
+      if FLayout <> nil then
+        SetLayoutHandle := FLayout.Handle
+      else
+        SetLayoutHandle := VK_NULL_HANDLE;
+      if FIsTransient then
+        PoolAlloc := VulkanDevice.GetTransientDescriptorAllocator(VulkanDevice.FrameIndex)
+      else
+        PoolAlloc := VulkanDevice.PersistentDescriptorAllocator;
+
+      if PoolAlloc <> nil then
+      begin
+        if (not FIsTransient) and (FHandle <> VK_NULL_HANDLE) then
+          VulkanDevice.EnqueueInFlightDescriptorSetDeletion(FOwnerPool, FHandle);
+        FHandle := PoolAlloc.AllocateDescriptorSet(SetLayoutHandle, FOwnerPool);
+        FBoundIdleEpoch := 0;
+
+        EntryCount := Length(FCommittedEntries);
+        if (EntryCount > 0) and Assigned(vkUpdateDescriptorSets) then
+        begin
+          SetLength(CowWrites, EntryCount);
+          SetLength(CowBufferInfos, EntryCount);
+          SetLength(CowImageInfos, EntryCount);
+          SetLength(CowAccelHandles, EntryCount);
+          SetLength(CowAccelWrites, EntryCount);
+          for I := 0 to EntryCount - 1 do
+          begin
+            FillChar(CowWrites[I], SizeOf(VkWriteDescriptorSet), 0);
+            CowWrites[I].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            CowWrites[I].dstSet := FHandle;
+            CowWrites[I].dstBinding := FCommittedEntries[I].Binding;
+            CowWrites[I].dstArrayElement := FCommittedEntries[I].ArrayElement;
+            CowWrites[I].descriptorCount := 1;
+            CowWrites[I].descriptorType := FCommittedEntries[I].DescriptorType;
+            if FCommittedEntries[I].DescriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR then
+            begin
+              CowAccelHandles[I] := FCommittedEntries[I].AccelStructHandle;
+              FillChar(CowAccelWrites[I], SizeOf(VkWriteDescriptorSetAccelerationStructureKHR), 0);
+              CowAccelWrites[I].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+              CowAccelWrites[I].accelerationStructureCount := 1;
+              CowAccelWrites[I].pAccelerationStructures := @CowAccelHandles[I];
+              CowWrites[I].pNext := @CowAccelWrites[I];
+            end else
+            if (FCommittedEntries[I].DescriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) or
+               (FCommittedEntries[I].DescriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) or
+               (FCommittedEntries[I].DescriptorType = VK_DESCRIPTOR_TYPE_SAMPLER) or
+               (FCommittedEntries[I].DescriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) then
+            begin
+              FillChar(CowImageInfos[I], SizeOf(VkDescriptorImageInfo), 0);
+              CowImageInfos[I].imageView := FCommittedEntries[I].ImageView;
+              CowImageInfos[I].sampler := FCommittedEntries[I].Sampler;
+              CowImageInfos[I].imageLayout := FCommittedEntries[I].ImageLayout;
+              CowWrites[I].pImageInfo := @CowImageInfos[I];
+            end else
+            begin
+              FillChar(CowBufferInfos[I], SizeOf(VkDescriptorBufferInfo), 0);
+              CowBufferInfos[I].buffer := FCommittedEntries[I].BufferHandle;
+              CowBufferInfos[I].offset := FCommittedEntries[I].BufferOffset;
+              CowBufferInfos[I].range := FCommittedEntries[I].BufferRange;
+              CowWrites[I].pBufferInfo := @CowBufferInfos[I];
+            end;
+          end;
+          vkUpdateDescriptorSets(VulkanDevice.Handle, EntryCount, @CowWrites[0], 0, nil);
+        end;
+
+        Inc(FUpdateCount);
+        SetLength(FPendingWrites, 0);
+        SetLength(FPendingWriteInfoIndices, 0);
+        SetLength(FBufferInfos, 0);
+        SetLength(FImageInfos, 0);
+        SetLength(FAccelStructHandles, 0);
+        SetLength(FAccelStructWrites, 0);
+        Exit;
+      end;
+    end;
+
     for I := 0 to High(FPendingWrites) do
     begin
+      FPendingWrites[I].dstSet := FHandle;
       InfoIdx := FPendingWriteInfoIndices[I];
       if FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR then
       begin
@@ -8813,7 +9095,7 @@ begin
   DepthStencil.front := RHIToVkStencilOpState(ADesc.DepthStencil.FrontStencil);
   DepthStencil.back := RHIToVkStencilOpState(ADesc.DepthStencil.BackStencil);
 
-  SetLength(BlendAttachments, Max(1, Length(ADesc.ColorAttachmentFormats)));
+  SetLength(BlendAttachments, Length(ADesc.ColorAttachmentFormats));
   for I := 0 to High(BlendAttachments) do
   begin
     FillChar(BlendAttachments[I], SizeOf(VkPipelineColorBlendAttachmentState), 0);
@@ -10216,8 +10498,8 @@ begin
     FViewportPendingReapply := True;
   end;
   FLastVkViewportY := VkVP.y;
-  VkVP.width := ViewportRect.Width;
-  VkVP.height := -ViewportRect.Height;
+  VkVP.width := Max(1.0, ViewportRect.Width);
+  VkVP.height := -Max(1.0, ViewportRect.Height);
   VkVP.minDepth := MinDepth;
   VkVP.maxDepth := MaxDepth;
   if (FHandle <> nil) and Assigned(vkCmdSetViewport) then
@@ -10351,9 +10633,12 @@ begin
     OffsetPtr := nil;
 
   if (FHandle <> nil) and (FCurrentPipeline <> nil) and Assigned(vkCmdBindDescriptorSets) then
+  begin
+    (DescriptorSet as TVulkanRHIDescriptorSet).MarkBoundToLiveCommandBuffer;
     vkCmdBindDescriptorSets(FHandle, VK_PIPELINE_BIND_POINT_GRAPHICS,
       FCurrentPipeline.PipelineLayout, SetIndex, 1, @SetHandle,
       Length(DynamicOffsets), OffsetPtr);
+  end;
 end;
 
 procedure TVulkanRHICommandList.PushConstants(const StageFlags: TRHIShaderStageFlags;
@@ -10399,9 +10684,12 @@ begin
     OffsetPtr := nil;
 
   if (FHandle <> nil) and (FCurrentComputePipeline <> nil) and Assigned(vkCmdBindDescriptorSets) then
+  begin
+    (DescriptorSet as TVulkanRHIDescriptorSet).MarkBoundToLiveCommandBuffer;
     vkCmdBindDescriptorSets(FHandle, VK_PIPELINE_BIND_POINT_COMPUTE,
       FCurrentComputePipeline.PipelineLayout, SetIndex, 1, @SetHandle,
       Length(DynamicOffsets), OffsetPtr);
+  end;
 end;
 
 procedure TVulkanRHICommandList.Dispatch(const GroupCountX, GroupCountY, GroupCountZ: Cardinal);
@@ -13177,7 +13465,7 @@ begin
 
   FVisibilityOutputBuffer := FDevice.CreateBuffer(
     TRHIBufferDesc.Create(PtrUInt(FMaxInstances + 1) * SizeOf(Cardinal),
-      [buStorage, buTransferSrc, buTransferDst], muCpuToGpu, 'GpuCullingVisibilityOutSSBO'),
+      [buStorage, buIndirect, buTransferSrc, buTransferDst], muCpuToGpu, 'GpuCullingVisibilityOutSSBO'),
     nil);
 
   FillChar(Bindings, SizeOf(Bindings), 0);
@@ -13333,7 +13621,13 @@ begin
   EnsureHiZPipelineCreated;
   EffectiveW := Max(Cardinal(1), AWidth);
   EffectiveH := Max(Cardinal(1), AHeight);
-  MipCount := Max(Cardinal(1), Cardinal(Floor(Log2(Max(EffectiveW, EffectiveH)))) + 1);
+  MipCount := 1;
+  SrcW := Max(EffectiveW, EffectiveH);
+  while SrcW > 1 do
+  begin
+    SrcW := SrcW shr 1;
+    Inc(MipCount);
+  end;
 
   if (FHiZPyramidTexture = nil) or
      (FHiZWidth <> EffectiveW) or
@@ -21522,6 +21816,7 @@ begin
       FillChar(CallRegion, SizeOf(CallRegion), 0);
 
       SetHandle := FRTDescriptorSet.Handle;
+      FRTDescriptorSet.MarkBoundToLiveCommandBuffer;
       vkCmdBindPipeline(ACommandList.Handle, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, FRTPipeline);
       vkCmdBindDescriptorSets(ACommandList.Handle, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
         FRTPipelineLayout, 0, 1, @SetHandle, 0, nil);
@@ -25925,6 +26220,32 @@ begin
     TVulkanRHIDescriptorSet(FLiveDescriptorSets[I]).ClearBoundBuffer(ABuffer);
 end;
 
+procedure TVulkanRHIDevice.UnbindDestroyedTextureFromDescriptorSets(const ATexture: TVulkanRHITexture);
+var
+  I: Integer;
+begin
+  if (FLiveDescriptorSets = nil) or (ATexture = nil) then
+    Exit;
+  for I := 0 to FLiveDescriptorSets.Count - 1 do
+    TVulkanRHIDescriptorSet(FLiveDescriptorSets[I]).ClearBoundTexture(ATexture);
+end;
+
+procedure TVulkanRHIDevice.EnqueueInFlightDescriptorSetDeletion(
+  const AOwnerPool: VkDescriptorPool; const ASet: VkDescriptorSet);
+var
+  Slot, Idx: Integer;
+begin
+  if (AOwnerPool = VK_NULL_HANDLE) or (ASet = VK_NULL_HANDLE) then
+    Exit;
+  Slot := FFrameIndex mod MaxFramesInFlight;
+  Idx := Length(FDeferredDeletions[Slot]);
+  SetLength(FDeferredDeletions[Slot], Idx + 1);
+  FillChar(FDeferredDeletions[Slot][Idx], SizeOf(TVulkanDeferredDeletionItem), 0);
+  FDeferredDeletions[Slot][Idx].IsDescriptorSet := True;
+  FDeferredDeletions[Slot][Idx].DescriptorPool := AOwnerPool;
+  FDeferredDeletions[Slot][Idx].DescriptorSet := ASet;
+end;
+
 function TVulkanRHIDevice.HandleDefragmentRelocate(const AUserData: Pointer;
   const AOldAlloc, ANewAlloc: TVulkanMemoryAllocation): Boolean;
 var
@@ -26869,6 +27190,7 @@ var
 begin
   FValidationLayerActive := False;
   FDebugUtilsActive := False;
+  FInstanceHasSurfaceExtension := False;
   FDebugMessenger := VK_NULL_HANDLE;
   WantValidation := ShouldEnableVulkanValidationByEnv(EnableValidation);
 
@@ -26985,6 +27307,12 @@ begin
   end;
 
   CheckVk(Res, 'vkCreateInstance');
+  for I := 0 to Integer(CreateInfo.enabledExtensionCount) - 1 do
+    if AnsiString(ExtPtrs[I]) = VK_KHR_SURFACE_EXTENSION_NAME then
+    begin
+      FInstanceHasSurfaceExtension := True;
+      Break;
+    end;
   LoadVulkanInstance(FInstance);
 
   if FDebugUtilsActive and Assigned(vkCreateDebugUtilsMessengerEXT) then
@@ -27560,7 +27888,8 @@ begin
   HostQueryResetFeatures.hostQueryReset := VK_TRUE;
 
   ExtCount := 0;
-  if (FSurface <> VK_NULL_HANDLE) or IsDeviceExtensionSupported(VK_KHR_swapchain) then
+  if (FSurface <> VK_NULL_HANDLE) or
+     (FInstanceHasSurfaceExtension and IsDeviceExtensionSupported(VK_KHR_swapchain)) then
   begin
     DeviceExts[ExtCount] := VK_KHR_swapchain;
     Inc(ExtCount);
@@ -27853,8 +28182,13 @@ begin
   CreateInfo.queueCreateInfoCount := QueueInfoCount;
   CreateInfo.pQueueCreateInfos := @QueueInfos[0];
   CreateInfo.enabledExtensionCount := ExtCount;
-  CreateInfo.ppEnabledExtensionNames := @DeviceExts[0];
+  if ExtCount > 0 then
+    CreateInfo.ppEnabledExtensionNames := @DeviceExts[0]
+  else
+    CreateInfo.ppEnabledExtensionNames := nil;
 
+  if FCompletedIdleEpoch = 0 then
+    FCompletedIdleEpoch := 1;
   CheckVk(vkCreateDevice(FPhysicalDevice, @CreateInfo, nil, @FDevice), 'vkCreateDevice');
   LoadVulkanDevice(FDevice);
 
@@ -27887,6 +28221,8 @@ var
   VertexAttrs: array of VkVertexInputAttributeDescription;
   VertexInputInfo: VkPipelineVertexInputStateCreateInfo;
   InputAssembly: VkPipelineInputAssemblyStateCreateInfo;
+  DynamicStates: array[0..0] of VkDynamicState;
+  DynamicStateInfo: VkPipelineDynamicStateCreateInfo;
   GplInfo: VkGraphicsPipelineLibraryCreateInfoEXT;
   PipelineInfo: VkGraphicsPipelineCreateInfo;
   I: Integer;
@@ -27944,6 +28280,15 @@ begin
     VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
   PipelineInfo.pVertexInputState := @VertexInputInfo;
   PipelineInfo.pInputAssemblyState := @InputAssembly;
+  if FSupportsExtendedDynamicState then
+  begin
+    DynamicStates[0] := VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY;
+    FillChar(DynamicStateInfo, SizeOf(DynamicStateInfo), 0);
+    DynamicStateInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    DynamicStateInfo.dynamicStateCount := 1;
+    DynamicStateInfo.pDynamicStates := @DynamicStates[0];
+    PipelineInfo.pDynamicState := @DynamicStateInfo;
+  end;
 
   Result := VK_NULL_HANDLE;
   if (FDevice <> nil) and Assigned(vkCreateGraphicsPipelines) then
@@ -28028,8 +28373,7 @@ begin
   begin
     DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_CULL_MODE;
     DynamicStates[DynamicStateCount + 1] := VK_DYNAMIC_STATE_FRONT_FACE;
-    DynamicStates[DynamicStateCount + 2] := VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY;
-    Inc(DynamicStateCount, 3);
+    Inc(DynamicStateCount, 2);
   end;
   FillChar(DynamicStateInfo, SizeOf(DynamicStateInfo), 0);
   DynamicStateInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -28197,7 +28541,7 @@ begin
   end;
   Inc(FGPLLibraryCacheMisses);
 
-  SetLength(BlendAttachments, Max(1, Length(ADesc.ColorAttachmentFormats)));
+  SetLength(BlendAttachments, Length(ADesc.ColorAttachmentFormats));
   for I := 0 to High(BlendAttachments) do
   begin
     FillChar(BlendAttachments[I], SizeOf(VkPipelineColorBlendAttachmentState), 0);
@@ -29753,6 +30097,7 @@ begin
   FlushStagingUploads;
   if (FDevice <> nil) and Assigned(vkDeviceWaitIdle) then
     vkDeviceWaitIdle(FDevice);
+  Inc(FCompletedIdleEpoch);
   FlushAllDeferredDeletions;
   FDeferResourceDestruction := False;
 end;
@@ -30190,7 +30535,10 @@ begin
     Exit;
 
   if Assigned(vkDeviceWaitIdle) then
+  begin
     vkDeviceWaitIdle(FDevice);
+    Inc(FCompletedIdleEpoch);
+  end;
   FlushStagingUploads;
 
   IsDepth := (VkTex.AspectMask and VK_IMAGE_ASPECT_DEPTH_BIT) <> 0;
@@ -30409,7 +30757,10 @@ begin
   end;
 
   if Assigned(vkDeviceWaitIdle) then
+  begin
     vkDeviceWaitIdle(FDevice);
+    Inc(FCompletedIdleEpoch);
+  end;
   FlushStagingUploads;
   IsDepth := (VkTex.AspectMask and VK_IMAGE_ASPECT_DEPTH_BIT) <> 0;
   FlipVertical := VkTex.RenderedLayerMask <> 0;
@@ -30757,7 +31108,10 @@ begin
   end;
 
   if Assigned(vkDeviceWaitIdle) then
+  begin
     vkDeviceWaitIdle(FDevice);
+    Inc(FCompletedIdleEpoch);
+  end;
   FlushStagingUploads;
 
   TotalPixels := PtrUInt(MipW) * PtrUInt(MipH);

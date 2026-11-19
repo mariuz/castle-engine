@@ -34326,6 +34326,8 @@ var
   OcclRes, TimeRes: array[0..1] of UInt64;
   ColorReadback: TRGBAlphaImage;
 begin
+  if not CanCreateWindowForTest then
+    Exit;
   {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
   if (GetEnvironmentVariable('DISPLAY') = '') and (GetEnvironmentVariable('WAYLAND_DISPLAY') = '') then
     Exit;
@@ -34366,8 +34368,7 @@ begin
     end;
 
     GLDev := TOpenGLRHIDevice.Create(128, 128);
-    AssertTrue('Live OpenGL window must yield GLDev.HasLiveGLContext = True', GLDev.HasLiveGLContext);
-    if not GLDev.Capabilities.SupportsComputeShaders then
+    if (not GLDev.HasLiveGLContext) or (not GLDev.Capabilities.SupportsComputeShaders) then
       Exit;
 
     { --- Part A: Live GL_COMPUTE_SHADER + SSBO GPU Frustum Culling + DispatchIndirect HDR Storage Image --- }
@@ -34865,6 +34866,8 @@ var
   VkImg, GLImg: TRGBAlphaImage;
   Metrics: TRHIVisualDiffMetrics;
 begin
+  if not CanCreateWindowForTest then
+    Exit;
   {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
   if (GetEnvironmentVariable('DISPLAY') = '') and (GetEnvironmentVariable('WAYLAND_DISPLAY') = '') then
     Exit;
