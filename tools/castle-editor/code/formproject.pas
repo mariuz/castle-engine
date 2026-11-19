@@ -698,6 +698,7 @@ type
       MenuItemCloudShadows: TMenuItem;
       MenuItemTrailStamper: TMenuItem;
       MenuItemCoverPointScanner: TMenuItem;
+      MenuItemCatenaryCable: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -816,6 +817,7 @@ type
     procedure MenuItemCloudShadowsClick(Sender: TObject);
     procedure MenuItemTrailStamperClick(Sender: TObject);
     procedure MenuItemCoverPointScannerClick(Sender: TObject);
+    procedure MenuItemCatenaryCableClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2930,6 +2932,11 @@ begin
   MenuItemCoverPointScanner.Caption := 'Tactical Cover Point Scanner & Flanking Studio...';
   MenuItemCoverPointScanner.OnClick := @MenuItemCoverPointScannerClick;
   MenuItemDesign.Add(MenuItemCoverPointScanner);
+
+  MenuItemCatenaryCable := TMenuItem.Create(MenuItemDesign);
+  MenuItemCatenaryCable.Caption := 'Procedural Catenary Cable & Lantern Garland Studio...';
+  MenuItemCatenaryCable.OnClick := @MenuItemCatenaryCableClick;
+  MenuItemDesign.Add(MenuItemCatenaryCable);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6494,6 +6501,12 @@ procedure TProjectForm.MenuItemCoverPointScannerClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCoverPointScannerDialog;
+end;
+
+procedure TProjectForm.MenuItemCatenaryCableClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCatenaryCableDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

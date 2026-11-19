@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="241">
+    <Units Count="243">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1287,6 +1287,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormCoverPointScanner"/>
       </Unit240>
+      <Unit241>
+        <Filename Value="../common-code/toolcatenarycable.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCatenaryCable"/>
+      </Unit241>
+      <Unit242>
+        <Filename Value="code/formcatenarycable.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCatenaryCable"/>
+      </Unit242>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

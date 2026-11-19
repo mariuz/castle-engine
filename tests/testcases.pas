@@ -211,6 +211,7 @@ uses
   TestToolCloudShadows,
   TestToolTrailStamper,
   TestToolCoverPointScanner,
+  TestToolCatenaryCable,
   TestCastleVulkanRHI;
 
 implementation

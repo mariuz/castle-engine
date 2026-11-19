@@ -4757,6 +4757,13 @@ Phase 384 adds Unreal Engine 6.0+ EQS Tactical Cover-style **Automated `WorldRay
 - **Waist Over-Peek vs. Full Standing Corner-Lean (`BakeCoverNodes`)**: Probes waist and standing eye heights plus lateral offsets to classify `cpkWaistCrouchOverPeek` barriers (`CanPeekOverTop`) vs. `cpkFullStandingCornerLean` pillars (`CanLeanLeft` / `CanLeanRight`).
 - **Multi-Threat Crossfire Filtering (`EvaluateBestCoverAgainstThreats`)**: Rejects nodes flanked by any hostile threat and verifies crouch-height `WorldRay` line-of-sight occlusion.
 
+## 66DF. Phase 385: Procedural Catenary Cable, Powerline Sag & Hanging Lantern Garland Studio
+
+Phase 385 adds Unreal Engine 6.0+ `UCableComponent`-style **Exact Hyperbolic Catenary Cables & Arc-Length Lantern Garlands** via `TCastleCatenaryCable` (`src/scene/castlecatenarycable.pas`), `TCatenaryCableHelper` (`tools/common-code/toolcatenarycable.pas`), and `TCatenaryCableForm` (`tools/castle-editor/code/formcatenarycable.pas`), accessible from **`Cable`** in the top viewport toolbar, **`Design -> Procedural Catenary Cable & Lantern Garland Studio...`**, or `LaunchStudioById('catenary_cable')`.
+
+- **Exact Hyperbolic Cosine Sag Solver (`RebuildCatenary`)**: Solves $\sinh(u) / u = \sqrt{L^2 - V^2} / H$ across symmetric or asymmetric anchors with exact endpoint pinning and arc-length conservation.
+- **Wind Pendulum Sway & Lantern Attachments**: Applies $\sin(\pi s)$ lateral wind sway and distributes `HangingAttachmentCount` lanterns evenly by cumulative arc length.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4929,4 +4936,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolcloudshadows.pas`](../tests/code/testcases/testtoolcloudshadows.pas) (`TTestToolCloudShadows` — 2 tests)**: Verifies `90°` zenith (`0m` offset) vs. `45°` (`+300m` horizontal offset) solar cloud-shadow projection, `0% -> 52% -> 100%` coverage monotonicity, wind advection scrolling, `> 10x` forward Henyey-Greenstein crepuscular shaft gain vs. backscatter, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltrailstamper.pas`](../tests/code/testcases/testtooltrailstamper.pas) (`TTestToolTrailStamper` — 2 tests)**: Verifies continuous sled/wheel furrow depressions (`< -0.30m`, compaction `> 0.85`), raised side rim berms (`> +0.04m`), central-difference slope normals, gradual snowfall refill back to `0` active cells, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcoverpointscanner.pas`](../tests/code/testcases/testtoolcoverpointscanner.pas) (`TTestToolCoverPointScanner` — 2 tests)**: Verifies `1.15m` waist barrier `cpkWaistCrouchOverPeek` (`CanPeekOverTop`) vs. `2.60m` concrete pillar `cpkFullStandingCornerLean` (`CanLeanLeft` / `CanLeanRight`), North sniper +Z sheltering vs. rear +Z pincer flank invalidation, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcatenarycable.pas`](../tests/code/testcases/testtoolcatenarycable.pas) (`TTestToolCatenaryCable` — 2 tests)**: Verifies exact hyperbolic catenary endpoint pinning (`0.0001m`) on symmetric and asymmetric anchors, `Chord * SlackRatio` arc-length conservation, monotonic sag growth, endpoint-invariant lateral wind sway, even 5-lantern arc-length spacing, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
