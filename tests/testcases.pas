@@ -212,6 +212,7 @@ uses
   TestToolTrailStamper,
   TestToolCoverPointScanner,
   TestToolCatenaryCable,
+  TestToolPrefabDiffMerge,
   TestCastleVulkanRHI;
 
 implementation

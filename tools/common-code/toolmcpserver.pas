@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1033,6 +1033,16 @@ begin
   AddToolDef('cge_run_editor_macro',
     'Record, import, inspect, or replay parameterized multi-step scene transform macros across the open design.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Merge operation: diff_three_way, capture_base, or status.'));
+  P.Add('baseJson', MakePropSchema('string', 'Common ancestor CGE component JSON string.'));
+  P.Add('oursJson', MakePropSchema('string', 'Local (Ours) CGE component JSON string.'));
+  P.Add('theirsJson', MakePropSchema('string', 'Incoming branch (Theirs) CGE component JSON string.'));
+  P.Add('conflictPolicy', MakePropSchema('string', 'True-conflict resolution policy: prefer_ours or prefer_theirs.'));
+  AddToolDef('cge_diff_merge_scene',
+    'Perform structural 3-way Ancestor/Ours/Theirs CGE scene & prefab diff/merge with automatic non-conflicting property/node merging.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1155,6 +1165,9 @@ var
   MacroAffected: Integer;
   MacroMult: Single;
   MacroStepItem: TEditorMacroStep;
+  DiffMergeRep: TThreeWayMergeReport;
+  DiffPolicy: TMergeConflictPolicy;
+  DiffBaseStr, DiffOursStr, DiffTheirsStr: String;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2017,6 +2030,73 @@ begin
       OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
       OutPayload.Add('macroJson', TEditorMacroRecorder.SharedRecorder.ExportMacroJson);
       OutPayload.Add('steps', TargetsArr);
+      TargetsArr := nil;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(TargetsArr);
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_diff_merge_scene' then
+  begin
+    ActionName := 'status';
+    DiffBaseStr := '';
+    DiffOursStr := '';
+    DiffTheirsStr := '';
+    DiffPolicy := mcpPreferOurs;
+    if ArgsObj <> nil then
+    begin
+      ActionName := LowerCase(Trim(ArgsObj.Get('action', 'diff_three_way')));
+      DiffBaseStr := ArgsObj.Get('baseJson', '');
+      DiffOursStr := ArgsObj.Get('oursJson', '');
+      DiffTheirsStr := ArgsObj.Get('theirsJson', '');
+      DiffPolicy := TPrefabDiffMergeEngine.StringToPolicy(
+        ArgsObj.Get('conflictPolicy', 'prefer_ours'));
+    end;
+
+    if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+
+    if SameText(ActionName, 'capture_base') then
+    begin
+      TPrefabDiffMergeEngine.SharedEngine.CaptureBaseSnapshotFromComponent(DesignRoot);
+      DiffMergeRep := TPrefabDiffMergeEngine.SharedEngine.LastReport;
+    end else
+    if SameText(ActionName, 'diff_three_way') then
+    begin
+      if (DiffBaseStr = '') and (TPrefabDiffMergeEngine.SharedEngine.CapturedBaseJson <> '') then
+        DiffBaseStr := TPrefabDiffMergeEngine.SharedEngine.CapturedBaseJson;
+      if (DiffOursStr = '') and (DesignRoot <> nil) then
+        DiffOursStr := ComponentToString(DesignRoot);
+      DiffMergeRep := TPrefabDiffMergeEngine.SharedEngine.RunMergeAndStore(
+        DiffBaseStr, DiffOursStr, DiffTheirsStr, DiffPolicy);
+    end else
+      DiffMergeRep := TPrefabDiffMergeEngine.SharedEngine.LastReport;
+
+    OutPayload := TJSONObject.Create;
+    TargetsArr := TJSONArray.Create;
+    try
+      for I := 0 to High(DiffMergeRep.Changes) do
+      begin
+        StudioItemObj := TJSONObject.Create;
+        StudioItemObj.Add('component', DiffMergeRep.Changes[I].ComponentName);
+        StudioItemObj.Add('property', DiffMergeRep.Changes[I].PropertyPath);
+        StudioItemObj.Add('kind', TPrefabDiffMergeEngine.ChangeKindToString(DiffMergeRep.Changes[I].Kind));
+        StudioItemObj.Add('resolved', DiffMergeRep.Changes[I].ResolvedValueJson);
+        TargetsArr.Add(StudioItemObj);
+      end;
+      OutPayload.Add('ok', True);
+      OutPayload.Add('action', ActionName);
+      OutPayload.Add('policy', TPrefabDiffMergeEngine.PolicyToString(DiffMergeRep.PolicyUsed));
+      OutPayload.Add('autoMergedCount', DiffMergeRep.AutoMergedCount);
+      OutPayload.Add('conflictCount', DiffMergeRep.ConflictCount);
+      OutPayload.Add('addedNodesCount', DiffMergeRep.AddedNodesCount);
+      OutPayload.Add('deletedNodesCount', DiffMergeRep.DeletedNodesCount);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('mergedJson', DiffMergeRep.MergedSceneJson);
+      OutPayload.Add('changes', TargetsArr);
       TargetsArr := nil;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

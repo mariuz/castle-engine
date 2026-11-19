@@ -4764,6 +4764,13 @@ Phase 385 adds Unreal Engine 6.0+ `UCableComponent`-style **Exact Hyperbolic Cat
 - **Exact Hyperbolic Cosine Sag Solver (`RebuildCatenary`)**: Solves $\sinh(u) / u = \sqrt{L^2 - V^2} / H$ across symmetric or asymmetric anchors with exact endpoint pinning and arc-length conservation.
 - **Wind Pendulum Sway & Lantern Attachments**: Applies $\sin(\pi s)$ lateral wind sway and distributes `HangingAttachmentCount` lanterns evenly by cumulative arc length.
 
+## 66DG. Phase 386: Three-Way Scene & Prefab Diff/Merge Inspector + 106-Studio Hub / 20-Tool MCP Upgrade
+
+Phase 386 completes **Horizon 12 (`Phases 377–386`, `386 / 386` Total Phases)** with **Structural Three-Way Scene & Prefab Diff/Merge**, upgrading the **Unified Studio Hub** to **`106` studios** and the **Embedded MCP Server** to **`20` tools** (`cge_diff_merge_scene`) via `TPrefabDiffMergeEngine` (`tools/common-code/toolprefabdiffmerge.pas`) and `TPrefabDiffMergeForm` (`tools/castle-editor/code/formprefabdiffmerge.pas`), accessible from **`Merge3`** in the top viewport toolbar, **`Design -> Three-Way Scene & Prefab Diff/Merge & 106-Studio Hub...`**, or `LaunchStudioById('prefab_diff_merge')`.
+
+- **Three-Way Component Tree Merge (`ComputeThreeWayMerge`)**: Compares Common Ancestor (`Base`), Local (`Ours`), and Incoming (`Theirs`) `ComponentToString` JSON trees, auto-merging non-conflicting properties and added/deleted child components while resolving true conflicts under `mcpPreferOurs` or `mcpPreferTheirs`.
+- **106-Studio Hub & 20th MCP Tool (`cge_diff_merge_scene`)**: Exposes all 106 Horizon 2–12 studios in `TStudioHubManager` and adds JSON-RPC 3-way scene diff/merge to `TCastleMcpServer`.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -4937,4 +4944,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtooltrailstamper.pas`](../tests/code/testcases/testtooltrailstamper.pas) (`TTestToolTrailStamper` — 2 tests)**: Verifies continuous sled/wheel furrow depressions (`< -0.30m`, compaction `> 0.85`), raised side rim berms (`> +0.04m`), central-difference slope normals, gradual snowfall refill back to `0` active cells, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcoverpointscanner.pas`](../tests/code/testcases/testtoolcoverpointscanner.pas) (`TTestToolCoverPointScanner` — 2 tests)**: Verifies `1.15m` waist barrier `cpkWaistCrouchOverPeek` (`CanPeekOverTop`) vs. `2.60m` concrete pillar `cpkFullStandingCornerLean` (`CanLeanLeft` / `CanLeanRight`), North sniper +Z sheltering vs. rear +Z pincer flank invalidation, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcatenarycable.pas`](../tests/code/testcases/testtoolcatenarycable.pas) (`TTestToolCatenaryCable` — 2 tests)**: Verifies exact hyperbolic catenary endpoint pinning (`0.0001m`) on symmetric and asymmetric anchors, `Chord * SlackRatio` arc-length conservation, monotonic sag growth, endpoint-invariant lateral wind sway, even 5-lantern arc-length spacing, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolprefabdiffmerge.pas`](../tests/code/testcases/testtoolprefabdiffmerge.pas) (`TTestToolPrefabDiffMerge` — 2 tests)**: Verifies structural 3-way `Base` / `Ours` / `Theirs` non-conflicting `Translation` + `Scale` + added-child (`WatchtowerTheirs`) auto-merging, `mcpPreferOurs` (`42`) vs. `mcpPreferTheirs` (`99`) conflict resolution, `StringToComponent` live rehydration, the unified **106-Studio Hub** catalog (`Phases 1–386`), and the **20th MCP tool** `cge_diff_merge_scene` (`0 unfreed memory blocks`).
 

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="243">
+    <Units Count="245">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1297,6 +1297,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormCatenaryCable"/>
       </Unit242>
+      <Unit243>
+        <Filename Value="../common-code/toolprefabdiffmerge.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPrefabDiffMerge"/>
+      </Unit243>
+      <Unit244>
+        <Filename Value="code/formprefabdiffmerge.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPrefabDiffMerge"/>
+      </Unit244>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

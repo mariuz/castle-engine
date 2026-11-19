@@ -106,7 +106,7 @@ var
   I: Integer;
 begin
   { 1. Verify all 96 studios across Horizons 2-11 are indexed in TStudioHubManager }
-  AssertEquals(96, TStudioHubManager.StudioCount);
+  AssertEquals(106, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon11Ids) do
     AssertTrue('Missing Horizon 11 studio in Hub: ' + Horizon11Ids[I],
       TStudioHubManager.FindStudioById(Horizon11Ids[I], Entry));
@@ -135,7 +135,7 @@ begin
       try
         AssertTrue(TJSONObject(InnerJson).Booleans['ok']);
         AssertEquals(1, TJSONObject(InnerJson).Integers['stepCount']);
-        AssertEquals(96, TJSONObject(InnerJson).Integers['studioCatalogCount']);
+        AssertEquals(106, TJSONObject(InnerJson).Integers['studioCatalogCount']);
       finally
         FreeAndNil(InnerJson);
       end;

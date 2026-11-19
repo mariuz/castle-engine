@@ -699,6 +699,7 @@ type
       MenuItemTrailStamper: TMenuItem;
       MenuItemCoverPointScanner: TMenuItem;
       MenuItemCatenaryCable: TMenuItem;
+      MenuItemPrefabDiffMerge: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -818,6 +819,7 @@ type
     procedure MenuItemTrailStamperClick(Sender: TObject);
     procedure MenuItemCoverPointScannerClick(Sender: TObject);
     procedure MenuItemCatenaryCableClick(Sender: TObject);
+    procedure MenuItemPrefabDiffMergeClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2937,6 +2939,11 @@ begin
   MenuItemCatenaryCable.Caption := 'Procedural Catenary Cable & Lantern Garland Studio...';
   MenuItemCatenaryCable.OnClick := @MenuItemCatenaryCableClick;
   MenuItemDesign.Add(MenuItemCatenaryCable);
+
+  MenuItemPrefabDiffMerge := TMenuItem.Create(MenuItemDesign);
+  MenuItemPrefabDiffMerge.Caption := 'Three-Way Scene & Prefab Diff/Merge & 106-Studio Hub...';
+  MenuItemPrefabDiffMerge.OnClick := @MenuItemPrefabDiffMergeClick;
+  MenuItemDesign.Add(MenuItemPrefabDiffMerge);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6507,6 +6514,12 @@ procedure TProjectForm.MenuItemCatenaryCableClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCatenaryCableDialog;
+end;
+
+procedure TProjectForm.MenuItemPrefabDiffMergeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPrefabDiffMergeDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -133,7 +133,10 @@ uses
   CastleGameplayDebugger, CastleWindField, CastleAssetPreloader,
   CastleSubstrateMaterial, CastleSmartObjectSlots, CastleAeroFoil,
   CastleCreviceClutter, CastleCameraShake, CastleFireGrid2D,
-  CastleGameplayMessenger, CastleOctahedralImpostor, CastlePoseSnapshot;
+  CastleGameplayMessenger, CastleOctahedralImpostor, CastlePoseSnapshot,
+  CastlePortalPair, CastleSensoryPerception, CastleIvyClimber,
+  CastleFootstepDirector, CastleGravityField, CastleCloudShadows,
+  CastleTrailStamper, CastleCoverPointScanner, CastleCatenaryCable;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -525,6 +528,38 @@ begin
   Reg('macro_recorder', 'Editor Action Macro Recorder & 96-Studio Hub Studio', 'Macro',
     shcPerformanceQaDeploy, 376, 'editor action macro recorder batch transform replay parameterized json 96 studio hub mcp',
     'Multi-step filtered transform macro recording, JSON export/import, replay & 96-Studio Hub.');
+
+  { Horizon 12 (Phases 377-386 — Planar Portals, AI Sensory Perception, Procedural Ivy Climber, Footstep Director, Dynamic Gravity, Cloud Shadows, Snow/Mud Trail Stamper, Tactical Cover Scanner, Catenary Cables & 3-Way Scene Diff/Merge, +10 -> 106 studios) }
+  Reg('portal_studio', 'Planar Portal & Seamless Mirror Oblique Teleport Studio', 'Portal',
+    shcWorldEnvironment, 377, 'planar portal doorway mirror oblique frustum clip plane teleport turnaround lockout',
+    'SE(3) 180-degree doorway turnaround portals, planar mirrors & Lengyel oblique clip planes.');
+  Reg('sensory_perception', 'AI Sensory Perception Sight, Hearing & Scent Studio', 'Sense',
+    shcCharactersAiGas, 378, 'ai sensory perception foveal peripheral sight worldray wall muffled hearing decibel scent',
+    'Dual-cone foveal/peripheral sight occlusion, wall-muffled dB hearing & olfactory scent trails.');
+  Reg('ivy_climber', 'Procedural Ivy, Vine & Root Surface Climber Studio', 'Ivy',
+    shcArchitecturePcg, 379, 'procedural ivy vine creeper root climber thigmotropism phototropism masonry wall leaf',
+    'WorldRay thigmotropic botanical tendril growth, lateral branching & leaf clusters.');
+  Reg('footstep_director', 'Skeletal Footstep Decal, Splash & Acoustic Surface Studio', 'Footstep',
+    shcCinematicsAudioInput, 380, 'skeletal footstep gait phase boot print decal snow puddle metal acoustic surface splash',
+    'Alternating Left/Right stride crossings, WorldRay surface lookup & speed/armor audio scaling.');
+  Reg('gravity_field', 'Dynamic Gravity Well, Planetary Walk & Ringworld Tube Studio', 'Gravity',
+    shcWorldEnvironment, 381, 'dynamic gravity well spherical planet walk hollow cylinder ringworld ceiling slerp priority',
+    'Spherical planetoid attractors, O''Neill spinning cylinder interiors & antipodal-safe Up slerp.');
+  Reg('cloud_shadows', '2.5D Atmospheric Cloud Shadow & Crepuscular God-Ray Studio', 'Clouds',
+    shcMaterialsVfxLighting, 382, 'atmospheric cloud shadow scroller wind dual octave solar offset mie crepuscular god ray',
+    'Solar-offset wind-advected dual-octave cloud transmittance & Henyey-Greenstein light shafts.');
+  Reg('trail_stamper', 'Interactive Snow, Mud & Sand Deformation Trail Studio', 'SnowTrk',
+    shcWorldEnvironment, 383, 'snow mud sand deformation trail stamper furrow rut rim berm compaction weather refill',
+    'Persistent 2D depression & raised collar berm grid with bilinear normals & snowfall refill.');
+  Reg('cover_point_scanner', 'Tactical Cover Point Scanner, Peek/Lean & Crossfire Studio', 'CoverAI',
+    shcCharactersAiGas, 384, 'tactical cover scanner waist crouch peek standing pillar corner lean flank crossfire',
+    'Automated WorldRay waist over-peek & pillar corner-lean baking with multi-threat crossfire.');
+  Reg('catenary_cable', 'Procedural Catenary Cable, Powerline Sag & Lantern Studio', 'Cable',
+    shcArchitecturePcg, 385, 'catenary cable powerline hyperbolic cosh sag pendulum sway lantern garland insulator',
+    'Exact hyperbolic cosine sag solver, lateral wind sway & arc-length lantern attachments.');
+  Reg('prefab_diff_merge', 'Three-Way Scene & Prefab Diff/Merge & 106-Studio Hub', 'Merge3',
+    shcPerformanceQaDeploy, 386, 'three way scene prefab diff merge ancestor ours theirs conflict resolution 106 studio hub',
+    'Structural 3-way Ancestor/Ours/Theirs JSON merge, conflict policies & 106-Studio Hub / 20 MCP.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -824,6 +859,17 @@ var
     if C is TCastleAeroFoilBehavior then BumpSub(shcWorldEnvironment);
     if C is TCastleCreviceClutterVolume then BumpSub(shcArchitecturePcg);
     if C is TCastleCameraShakeDirector then BumpSub(shcCinematicsAudioInput);
+
+    { Horizon 12 Subsystems }
+    if (C is TCastlePortalGateway) or (C is TCastleGravityField) or
+       (C is TCastleTrailStamper) then
+      BumpSub(shcWorldEnvironment);
+    if C is TCastleCloudShadowProjector then BumpSub(shcMaterialsVfxLighting);
+    if (C is TCastleIvyClimber) or (C is TCastleCatenaryCable) then
+      BumpSub(shcArchitecturePcg);
+    if (C is TCastleSensoryPerception) or (C is TCastleCoverPointScanner) then
+      BumpSub(shcCharactersAiGas);
+    if C is TCastleFootstepDirector then BumpSub(shcCinematicsAudioInput);
   end;
 
   procedure Traverse(const C: TComponent);
