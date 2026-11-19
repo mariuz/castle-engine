@@ -701,6 +701,7 @@ type
       MenuItemCatenaryCable: TMenuItem;
       MenuItemPrefabDiffMerge: TMenuItem;
       MenuItemBallisticStudio: TMenuItem;
+      MenuItemAcousticSpace: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -822,6 +823,7 @@ type
     procedure MenuItemCatenaryCableClick(Sender: TObject);
     procedure MenuItemPrefabDiffMergeClick(Sender: TObject);
     procedure MenuItemBallisticStudioClick(Sender: TObject);
+    procedure MenuItemAcousticSpaceClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2951,6 +2953,11 @@ begin
   MenuItemBallisticStudio.Caption := 'Ballistic Trajectory & Ricochet/Penetration Studio...';
   MenuItemBallisticStudio.OnClick := @MenuItemBallisticStudioClick;
   MenuItemDesign.Add(MenuItemBallisticStudio);
+
+  MenuItemAcousticSpace := TMenuItem.Create(MenuItemDesign);
+  MenuItemAcousticSpace.Caption := 'Acoustic Raytraced Reverb (RT60) & Diffraction Studio...';
+  MenuItemAcousticSpace.OnClick := @MenuItemAcousticSpaceClick;
+  MenuItemDesign.Add(MenuItemAcousticSpace);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6533,6 +6540,12 @@ procedure TProjectForm.MenuItemBallisticStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowBallisticStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemAcousticSpaceClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowAcousticSpaceDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -214,6 +214,7 @@ uses
   TestToolCatenaryCable,
   TestToolPrefabDiffMerge,
   TestToolBallisticStudio,
+  TestToolAcousticSpace,
   TestCastleVulkanRHI;
 
 implementation

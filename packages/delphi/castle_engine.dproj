@@ -538,6 +538,7 @@
         <DCCReference Include="..\..\src\scene\castlecoverpointscanner.pas"/>
         <DCCReference Include="..\..\src\scene\castlecatenarycable.pas"/>
         <DCCReference Include="..\..\src\scene\castleballisticsolver.pas"/>
+        <DCCReference Include="..\..\src\scene\castleacousticspace.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>

@@ -377,6 +377,7 @@ contains
   castlecoverpointscanner in '..\..\src\scene\castlecoverpointscanner.pas',
   castlecatenarycable in '..\..\src\scene\castlecatenarycable.pas',
   castleballisticsolver in '..\..\src\scene\castleballisticsolver.pas',
+  castleacousticspace in '..\..\src\scene\castleacousticspace.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',
