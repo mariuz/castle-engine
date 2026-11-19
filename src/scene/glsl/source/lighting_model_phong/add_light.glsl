@@ -156,6 +156,11 @@ void PLUG_add_light(inout vec4 color,
   vec3 color_scale = vec3(1.0);
   /* PLUG: light_color_scale (color_scale, normal_eye, light_dir) */
 
+  /* The light adds nothing here (e.g. outside a light volume made by
+     the light_scale plug): skip the rest, the result is the same. */
+  if (scale <= 0.0)
+    return;
+
 #ifdef LIGHT<Light>_TYPE_SPOT
 #ifdef LIGHT<Light>_HAS_BEAM_WIDTH
   /* calculate spot following VRML 2.0/X3D idea of beamWidth */
@@ -192,6 +197,8 @@ void PLUG_add_light(inout vec4 color,
   if (distance_to_light >= castle_LightSource<Light>Radius)
     scale = 0.0;
   #endif
+  if (scale <= 0.0)
+    return;
 #endif
 
   /* add ambient term */

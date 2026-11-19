@@ -83,6 +83,8 @@ type
     { Valid only during @link(Render), copied from TRenderOnePassParams. }
     FShadowVolumesLights: Contnrs.TObjectList;
     FLightContributionOnly: TObject;
+    { The global light of FLightContributionOnly, nil when not found. }
+    FContributionLight: PLightInstance;
     FBatching: TBatchShapes;
     FDynamicBatching: Boolean;
     FOcclusionCulling: Boolean;
@@ -132,6 +134,13 @@ type
       and LightRenderDisableListedLights turn off. }
     function LightZeroShadowVolumeCastingLights(const Light: TLightInstance): Boolean;
     function LightZeroListedLights(const Light: TLightInstance): Boolean;
+
+    { Can FContributionLight light the shape: like the tests of
+      TLightsRenderer.Render (the scene's InternalGlobalLightsMask,
+      the radius, TAbstractPositionalLightNode.InternalVolumeBox).
+      When not, its pass of the light (TRenderOnePassParams.LightContributionOnly)
+      would add nothing, so the shape is skipped. }
+    function ContributionLightReaches(const CollectedShape: TCollectedShape): Boolean;
 
     { Turn off global lights that are duplicated in current scene.
       This way we render our own lights through SceneLights at each shape,
@@ -221,7 +230,7 @@ implementation
 uses SysUtils,
   {$ifdef OpenGLES} CastleGLES, {$else} CastleGL, {$endif}
   CastleScene, CastleGLUtils, CastleRenderContext, CastleColors,
-  X3DCameraUtils, CastleTimeUtils;
+  X3DCameraUtils, CastleTimeUtils, CastleBoxes;
 
 { TRenderEventList ---------------------------------------------------------- }
 
@@ -444,6 +453,54 @@ end;
 function TShapesRenderer.LightZeroListedLights(const Light: TLightInstance): Boolean;
 begin
   Result := FShadowVolumesLights.IndexOf(Light.Node) <> -1;
+end;
+
+function TShapesRenderer.ContributionLightReaches(const CollectedShape: TCollectedShape): Boolean;
+var
+  Light: PLightInstance;
+  Scene: TX3DEventsEngine;
+  Box, VolumeBox: TBox3D;
+  PosNode: TAbstractPositionalLightNode;
+begin
+  Result := true;
+  Light := FContributionLight;
+  if Light = nil then
+    Exit;
+
+  { lights restricted to some scenes }
+  Scene := CollectedShape.Shape.ParentScene;
+  if (Light^.Node.InternalGlobalLightsMaskIndex > 0) and
+     (Scene <> nil) and
+     (Length(Scene.InternalGlobalLightsMask) <> 0) and
+     not ( (Light^.Node.InternalGlobalLightsMaskIndex <= Length(Scene.InternalGlobalLightsMask)) and
+           Scene.InternalGlobalLightsMask[Light^.Node.InternalGlobalLightsMaskIndex - 1] ) then
+    Exit(false);
+
+  if not (Light^.Node is TAbstractPositionalLightNode) then
+    Exit;
+  PosNode := TAbstractPositionalLightNode(Light^.Node);
+  if not (PosNode.HasRadius or not PosNode.InternalVolumeBox.IsEmpty) then
+    Exit;
+
+  { global lights are in world space }
+  Box := CollectedShape.Shape.BoundingBox;
+  if Box.IsEmpty then
+    Exit(false);
+  if not TMatrix4.PerfectlyEquals(CollectedShape.SceneTransform, TMatrix4.Identity) then
+    Box := Box.Transform(CollectedShape.SceneTransform);
+
+  if PosNode.HasRadius and
+     (Box.PointDistanceSqr(Light^.Location) > Sqr(Light^.Radius)) then
+    Exit(false);
+
+  if not PosNode.InternalVolumeBox.IsEmpty then
+  begin
+    VolumeBox := PosNode.InternalVolumeBox;
+    if not TMatrix4.PerfectlyEquals(Light^.Transform, TMatrix4.Identity) then
+      VolumeBox := VolumeBox.Transform(Light^.Transform);
+    if not Box.Collides(VolumeBox) then
+      Exit(false);
+  end;
 end;
 
 procedure TShapesRenderer.LightRenderSingleLight(const Shape: TShape;
@@ -713,6 +770,8 @@ var
   LightRenderEvent: TLightRenderEvent;
   LightZeroEvent: TLightZeroEvent;
   CollectedShape: TCollectedShape;
+  GlobalLights: TLightInstancesList;
+  I: Integer;
 begin
   if Shapes.FRenderEvents <> nil then
     Shapes.FRenderEvents.ExecuteAll(PassParams);
@@ -723,6 +782,17 @@ begin
 
   FShadowVolumesLights := PassParams.ShadowVolumesLights;
   FLightContributionOnly := PassParams.LightContributionOnly;
+  FContributionLight := nil;
+  if (FLightContributionOnly <> nil) and (Params.GlobalLights <> nil) then
+  begin
+    GlobalLights := Params.GlobalLights as TLightInstancesList;
+    for I := 0 to GlobalLights.Count - 1 do
+      if PLightInstance(GlobalLights.Ptr(I))^.Node = FLightContributionOnly then
+      begin
+        FContributionLight := PLightInstance(GlobalLights.Ptr(I));
+        Break;
+      end;
+  end;
   LightZeroEvent := nil;
   if PassParams.LightContributionOnly <> nil then
     LightRenderEvent := {$ifdef FPC}@{$endif}LightRenderSingleLight
@@ -804,6 +874,9 @@ begin
   try
     for CollectedShape in Shapes.FCollected do
     begin
+      { a light's own pass adds nothing to the shapes it can't reach }
+      if (FContributionLight <> nil) and not ContributionLightReaches(CollectedShape) then
+        Continue;
       if not (EffectiveDynamicBatching and Batching.Batch(CollectedShape)) then
         RenderShape_OcclusionTests(CollectedShape, Params, PassParams);
     end;

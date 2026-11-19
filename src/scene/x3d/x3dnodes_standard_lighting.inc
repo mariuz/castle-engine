@@ -231,6 +231,17 @@
   { Base class for all positional lights. }
   TAbstractPositionalLightNode = class(TAbstractPunctualLightNode)
   public
+    { The box the light can reach, in the same coordinates as its location,
+      or empty (the default) when only the radius bounds it.
+      When not empty, shapes whose bounding box doesn't collide with it
+      don't get this light (like shapes the radius doesn't reach),
+      so their shaders don't calculate it: lights whose volume is a box
+      or a frustum (not a sphere) reach fewer shapes this way.
+      Change it when the light moves (like the location).
+      Not used for shapes whose box in world space changes all the time
+      (TShader.ShapeBoundingBoxInWorldDynamic), like the radius. }
+    InternalVolumeBox: TBox3D;
+
     constructor Create(const AX3DName: string = ''; const ABaseUrl: String = ''); override;
 
     { Calculate light intensity drop because of the distance to the light.
@@ -707,6 +718,7 @@ constructor TAbstractPositionalLightNode.Create(const AX3DName, ABaseUrl: String
 begin
   inherited;
   FdGlobal.Value := true;
+  InternalVolumeBox := TBox3D.Empty;
 end;
 
 function TAbstractPositionalLightNode.DistanceNeededForAttenuation: boolean;

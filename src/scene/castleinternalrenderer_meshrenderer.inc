@@ -1124,7 +1124,10 @@ begin
 
       { the driver is still compiling it (InternalParallelShaderCompile):
         don't draw the shape this time }
-      if not RendererCache.Program_Ready(Shape.ProgramCache[Pass], Shader, Shape.NiceName) then
+      { (Pending checked here first: Shape.NiceName makes a string,
+        for every shape rendered) }
+      if Shape.ProgramCache[Pass].Pending and
+         not RendererCache.Program_Ready(Shape.ProgramCache[Pass], Shader, Shape.NiceName) then
       begin
         ProgramNotReady := true;
         CurrentMeshShader := nil;

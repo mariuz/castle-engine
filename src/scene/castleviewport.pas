@@ -1599,6 +1599,17 @@ var
     @exclude }
   InternalShadowVolumesLightDepthBounds: Boolean = true;
 
+  { Render the shadow volumes of one light (TCastleViewport.ShadowVolumesMaxLights = 1)
+    like those of several lights: the lit pass adds only the light's
+    contribution (blending), within its screen rectangle and depth range,
+    only to the shapes the light reaches,
+    instead of rendering every shape again with all its lights.
+    Faster when shapes have many lights (each pixel runs every light's shader
+    code twice the other way). The result looks the same
+    (up to colors over 1, clamped after each pass this way).
+    @exclude }
+  InternalShadowVolumesAdditive: Boolean = false;
+
   { Prepare the shapes (TCastleViewport.PrepareResources) with the lights
     of the TCastleScene.CastGlobalLights scenes, like they are rendered.
     Only to compare and test.
@@ -3101,7 +3112,8 @@ procedure TCastleViewport.RenderFromView3D(const Params: TRenderParams);
     end;
     FShadowVolumeRenderer.DebugRender := ShadowVolumesRender;
     FShadowVolumeRenderer.InitFrustumAndLight(Params.RenderingCamera.Frustum, MainLightPosition);
-    if FShadowVolumesLights.Count > 1 then
+    if (FShadowVolumesLights.Count > 1) or
+       ((FShadowVolumesLights.Count = 1) and InternalShadowVolumesAdditive) then
     begin
       if InternalShadowVolumesLightScissor then
       begin
@@ -3145,7 +3157,7 @@ begin
   FShadowVolumesLights.Clear;
   if GLFeatures.ShadowVolumesPossible and
      ShadowVolumes and
-     (ShadowVolumesMaxLights > 1) and
+     ((ShadowVolumesMaxLights > 1) or InternalShadowVolumesAdditive) and
      (ShadowVolumesLights(Params.GlobalLights) > 0) then
   begin
     Params.UsingShadowVolumes := true;

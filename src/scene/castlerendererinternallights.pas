@@ -305,6 +305,21 @@ begin
   Inc(Statistics[Result]);
 end;
 
+{ Is the light an environment light (probe)?
+  The common light classes answer without "is", which walks the class's
+  whole ancestry when the answer is false (for every light, every shape
+  rendered: a few percent of the frame in a world with hundreds of lights). }
+function IsEnvironmentLight(const Node: TAbstractLightNode): Boolean;
+var
+  C: TClass;
+begin
+  C := Node.ClassType;
+  if (C = TPointLightNode) or (C = TSpotLightNode) or (C = TDirectionalLightNode) then
+    Result := false
+  else
+    Result := Node is TEnvironmentLightNode;
+end;
+
 procedure TLightsRenderer.Render(const Shape: TShape;
   const GlobalLights, SceneLights: TLightInstancesList;
   const Shader: TShader);
@@ -314,7 +329,7 @@ var
   function InsideLightRadius(const Light: TLightInstance): Boolean;
   var
     LightPosNode: TAbstractPositionalLightNode;
-    ShapeBox: TBox3D;
+    ShapeBox, VolumeBox: TBox3D;
     RadiusInWorld: Single;
     LocationInWorld: TVector3;
   begin
@@ -353,6 +368,22 @@ var
 
         { Light will never reach the shape. }
         if ShapeBox.PointDistanceSqr(LocationInWorld) > Sqr(RadiusInWorld) then
+          Exit(false);
+      end;
+
+      { the box the light can reach (TAbstractPositionalLightNode.InternalVolumeBox) }
+      if not LightPosNode.InternalVolumeBox.IsEmpty then
+      begin
+        ShapeBox := Shader.ShapeBoundingBoxInWorld;
+        if ShapeBox.IsEmpty then
+          Exit(false);
+        VolumeBox := LightPosNode.InternalVolumeBox;
+        if not TMatrix4.PerfectlyEquals(Light.Transform, TMatrix4.Identity) then
+          VolumeBox := VolumeBox.Transform(Light.Transform);
+        if (not Light.WorldCoordinates) and
+           (not TMatrix4.PerfectlyEquals(Shader.SceneTransform, TMatrix4.Identity)) then
+          VolumeBox := VolumeBox.Transform(Shader.SceneTransform);
+        if not ShapeBox.Collides(VolumeBox) then
           Exit(false);
       end;
     end;
@@ -410,7 +441,7 @@ var
     for I := 0 to Lights.Count - 1 do
     begin
       Light := PLightInstance(Lights.Ptr(I));
-      if not (Light^.Node is TEnvironmentLightNode) then
+      if not IsEnvironmentLight(Light^.Node) then
         Continue;
       EnvLight := TEnvironmentLightNode(Light^.Node);
       if not ProbeHasBox(EnvLight) then
@@ -437,7 +468,7 @@ var
     the chosen probe, or (when no probe was chosen) a light without a box. }
   function ProbeUsed(const Light: PLightInstance): Boolean;
   begin
-    if not (Light^.Node is TEnvironmentLightNode) then
+    if not IsEnvironmentLight(Light^.Node) then
       Exit(true);
     if ProbeHasBox(TEnvironmentLightNode(Light^.Node)) then
       Result := Light = ChosenProbe
@@ -522,11 +553,11 @@ var
       Light := PLightInstance(Lights.Ptr(I));
 
       LightOn := Light^.Node.FdOn.Value;
-      if Assigned(LightRenderEvent) then
-        LightRenderEvent(Shape, Light^, IsGlobalLight, LightOn);
 
       { lights restricted to some scenes
-        (TAbstractLightNode.InternalGlobalLightsMaskIndex) }
+        (TAbstractLightNode.InternalGlobalLightsMaskIndex).
+        Tested first: it's cheap and leaves out most lights of a large world,
+        and LightRenderEvent can only turn lights off. }
       if LightOn and IsGlobalLight and
          (Light^.Node.InternalGlobalLightsMaskIndex > 0) and
          (Shape.ParentScene <> nil) and
@@ -534,6 +565,11 @@ var
         LightOn :=
           (Light^.Node.InternalGlobalLightsMaskIndex <= Length(Shape.ParentScene.InternalGlobalLightsMask)) and
           Shape.ParentScene.InternalGlobalLightsMask[Light^.Node.InternalGlobalLightsMaskIndex - 1];
+      if not LightOn then
+        Continue;
+
+      if Assigned(LightRenderEvent) then
+        LightRenderEvent(Shape, Light^, IsGlobalLight, LightOn);
 
       Zero := LightOn and Assigned(LightZeroEvent) and LightZeroEvent(Light^);
       if Zero and GLFeatures.EnableFixedFunction then
