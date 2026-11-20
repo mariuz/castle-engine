@@ -712,6 +712,7 @@ type
       MenuItemBudgetTreemap: TMenuItem;
       MenuItemIcicleOverhang: TMenuItem;
       MenuItemQuadrupedGait: TMenuItem;
+      MenuItemZiplineRig: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -844,6 +845,7 @@ type
     procedure MenuItemBudgetTreemapClick(Sender: TObject);
     procedure MenuItemIcicleOverhangClick(Sender: TObject);
     procedure MenuItemQuadrupedGaitClick(Sender: TObject);
+    procedure MenuItemZiplineRigClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3028,6 +3030,11 @@ begin
   MenuItemQuadrupedGait.Caption := 'Multi-Leg Quadruped, Hexapod & Spider Gait Studio...';
   MenuItemQuadrupedGait.OnClick := @MenuItemQuadrupedGaitClick;
   MenuItemDesign.Add(MenuItemQuadrupedGait);
+
+  MenuItemZiplineRig := TMenuItem.Create(MenuItemDesign);
+  MenuItemZiplineRig.Caption := 'Procedural Zipline, Pulley Acceleration & Vault Studio...';
+  MenuItemZiplineRig.OnClick := @MenuItemZiplineRigClick;
+  MenuItemDesign.Add(MenuItemZiplineRig);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6676,6 +6683,12 @@ procedure TProjectForm.MenuItemQuadrupedGaitClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowQuadrupedGaitDialog;
+end;
+
+procedure TProjectForm.MenuItemZiplineRigClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowZiplineRigDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

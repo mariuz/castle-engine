@@ -387,6 +387,7 @@ contains
   castlesplatterburst in '..\..\src\scene\castlesplatterburst.pas',
   castleicicleoverhang in '..\..\src\scene\castleicicleoverhang.pas',
   castlequadrupedgait in '..\..\src\scene\castlequadrupedgait.pas',
+  castleziplinerig in '..\..\src\scene\castleziplinerig.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

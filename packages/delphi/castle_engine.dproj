@@ -548,6 +548,7 @@
         <DCCReference Include="..\..\src\scene\castlesplatterburst.pas"/>
         <DCCReference Include="..\..\src\scene\castleicicleoverhang.pas"/>
         <DCCReference Include="..\..\src\scene\castlequadrupedgait.pas"/>
+        <DCCReference Include="..\..\src\scene\castleziplinerig.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>

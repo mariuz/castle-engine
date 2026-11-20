@@ -4855,6 +4855,13 @@ Phase 398 adds **Procedural `4/6/8`-Leg Locomotion & Terrain Slope Adaptation** 
 - **Hildebrand Gait Phases & Parabolic Swing (`EvaluateAtNormalizedCycle`)**: Schedules diagonal canine trot (`4` legs), insect tripod (`6` legs), and arachnid octopod (`8` legs) duty factors with $4 H_{\text{step}} s (1 - s)$ swing lift.
 - **`WorldRay` Foot-Planting & Body Slope Tilt**: Probes uneven rock/ledge heights per foot and adapts `BodyPitchDeg` and `BodyRollDeg`.
 
+## 66DT. Phase 399: Procedural Zipline, Pulley Trolley Gravity Acceleration, Hand-Brake & Momentum Vault Studio
+
+Phase 399 adds **Sloped Zipline Pulley Traversal & Momentum Vaulting** via `TCastleZiplineRig` (`src/scene/castleziplinerig.pas`), `TZiplineRigHelper` (`tools/common-code/toolziplinerig.pas`), and `TZiplineRigForm` (`tools/castle-editor/code/formziplinerig.pas`), accessible from **`Zipline`** in the top viewport toolbar, **`Design -> Procedural Zipline, Pulley Acceleration & Vault Studio...`**, or `LaunchStudioById('zipline_rig')`.
+
+- **Rider-Loaded Sag & Tangential Pulley Kinematics (`StepZiplineRide`)**: Integrates downhill gravity acceleration, rolling friction, quadratic air drag, hand-brake clamping, and end-of-line arrestor spring braking across 3 presets (`zrpAlpineCanyonZipline`, `zrpUrbanTacticalRappelLine`, `zrpHeavyMinecartCableway`).
+- **Mid-Span Momentum Vault (`DisembarkVaultLaunch`)**: Detaches the rider cleanly with tangential cable velocity plus `VaultJumpUpSpeedMps`.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5041,4 +5048,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolbudgettreemap.pas`](../tests/code/testcases/testtoolbudgettreemap.pas) (`TTestToolBudgetTreemap` — 2 tests)**: Verifies exact `600 x 400` area conservation, pairwise zero-overlap squarified treemap cells (`< 3.5:1` aspect), `2048 KB` vs. `800 KB` outlier detection, the unified **116-Studio Hub** catalog (`Phases 1–396`), and the **21st MCP tool** `cge_audit_scene_budget` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolicicleoverhang.pas`](../tests/code/testcases/testtoolicicleoverhang.pas) (`TTestToolIcicleOverhang` — 2 tests)**: Verifies upward `WorldRay` overhang detection with zero open-sky floating spikes, paired floor stalagmite alignment, cramped crawlspace rejection (`< MinClearDropMeters`), Stefan tapered profile radii, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolquadrupedgait.pas`](../tests/code/testcases/testtoolquadrupedgait.pas) (`TTestToolQuadrupedGait` — 2 tests)**: Verifies 20-step hexapod tripod static stability (`>= 3` grounded legs), elevated front rock-ledge nose-up `BodyPitchDeg > 5°`, exact parabolic swing apex lift, `8`-leg arachnid preset, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolziplinerig.pas`](../tests/code/testcases/testtoolziplinerig.pas) (`TTestToolZiplineRig` — 2 tests)**: Verifies downhill gravity acceleration (`> 5.0 m/s`), live rider cable sag, hand-brake deceleration, end-of-line arrestor collar stop (`Speed = 0`), momentum-conserving mid-span vault launch, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
