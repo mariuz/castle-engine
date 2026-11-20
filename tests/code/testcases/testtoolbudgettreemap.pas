@@ -116,7 +116,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify all 116 studios (Horizons 2-13, Phases 1-396) are registered }
-  AssertEquals(116, TStudioHubManager.StudioCount);
+  AssertEquals(126, TStudioHubManager.StudioCount);
   AssertTrue(TStudioHubManager.FindStudioById('ballistic_studio', Entry));
   AssertTrue(TStudioHubManager.FindStudioById('acoustic_space', Entry));
   AssertTrue(TStudioHubManager.FindStudioById('suspension_bridge', Entry));
@@ -146,7 +146,7 @@ begin
     ListResp := Srv.HandleJsonRpcString('{"jsonrpc":"2.0","id":1,"method":"tools/list"}', '');
     OuterJson := GetJSON(ListResp);
     ToolsArr := TJSONObject(OuterJson).Objects['result'].Arrays['tools'];
-    AssertEquals(21, ToolsArr.Count);
+    AssertEquals(22, ToolsArr.Count);
     FreeAndNil(OuterJson);
 
     CallResp := Srv.HandleJsonRpcString(
@@ -157,7 +157,7 @@ begin
     InnerJson := GetJSON(InnerText);
     PayloadObj := TJSONObject(InnerJson);
     AssertTrue(PayloadObj.Booleans['ok']);
-    AssertEquals(116, PayloadObj.Integers['studioCatalogCount']);
+    AssertEquals(126, PayloadObj.Integers['studioCatalogCount']);
     AssertEquals(2, PayloadObj.Integers['overBudgetNodeCount']);
     AssertEquals(5, PayloadObj.Arrays['cells'].Count);
   finally

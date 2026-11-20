@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="283">
+    <Units Count="285">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1497,6 +1497,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormCrowdFormation"/>
       </Unit282>
+      <Unit283>
+        <Filename Value="../common-code/toollodinstancing.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolLodInstancing"/>
+      </Unit283>
+      <Unit284>
+        <Filename Value="code/formlodinstancing.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormLodInstancing"/>
+      </Unit284>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1053,6 +1053,15 @@ begin
   AddToolDef('cge_audit_scene_budget',
     'Partition open scene memory & triangle footprint via a Bruls-Huizing-van Wijk squarified treemap and report over-budget outliers.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'LOD & instancing operation: analyze_scene or status.'));
+  P.Add('minBatchInstances', MakePropSchema('integer', 'Minimum repeated instances required to form a GPU instancing batch (default 2).'));
+  P.Add('verticalFovDeg', MakePropSchema('number', 'Camera vertical FOV in degrees for screen-coverage LOD distances (default 60).'));
+  P.Add('lodMinTriangles', MakePropSchema('integer', 'Minimum base mesh triangle count to synthesize a 4-tier LOD chain (default 500).'));
+  AddToolDef('cge_optimize_lod_instancing',
+    'Cluster repeated meshes into GPU-instanced draw-call batches and synthesize 4-tier screen-size hysteresis LOD chains.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1180,6 +1189,9 @@ var
   DiffBaseStr, DiffOursStr, DiffTheirsStr: String;
   BudgetRep: TSceneBudgetTreemapReport;
   BudgetLimitVal, NodeCapVal, TreemapW, TreemapH: Single;
+  LodInstRep: TLodInstancingReport;
+  MinBatchInstVal, LodMinTrisVal: Integer;
+  LodFovVal: Single;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2170,6 +2182,71 @@ begin
       TargetsArr := nil;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally
+      FreeAndNil(TargetsArr);
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_optimize_lod_instancing' then
+  begin
+    if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    ActionName := 'analyze_scene';
+    MinBatchInstVal := 2;
+    LodFovVal := 60.0;
+    LodMinTrisVal := 500;
+    if ArgsObj <> nil then
+    begin
+      ActionName := ArgsObj.Get('action', 'analyze_scene');
+      MinBatchInstVal := ArgsObj.Get('minBatchInstances', 2);
+      LodFovVal := ArgsObj.Get('verticalFovDeg', 60.0);
+      LodMinTrisVal := ArgsObj.Get('lodMinTriangles', 500);
+    end;
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if SameText(ActionName, 'status') then
+      LodInstRep := TLodInstancingOptimizer.SharedOptimizer.LastReport
+    else
+      LodInstRep := TLodInstancingOptimizer.SharedOptimizer.AnalyzeSceneInstancingAndLod(
+        DesignRoot, MinBatchInstVal, LodFovVal, LodMinTrisVal);
+
+    OutPayload := TJSONObject.Create;
+    TargetsArr := TJSONArray.Create;
+    ClassesArr := TJSONArray.Create;
+    try
+      for I := 0 to High(LodInstRep.Batches) do
+      begin
+        StudioItemObj := TJSONObject.Create;
+        StudioItemObj.Add('signature', LodInstRep.Batches[I].SignatureKey);
+        StudioItemObj.Add('representative', LodInstRep.Batches[I].RepresentativeName);
+        StudioItemObj.Add('instances', LodInstRep.Batches[I].InstanceCount);
+        StudioItemObj.Add('savedDrawCalls', LodInstRep.Batches[I].SavedDrawCalls);
+        TargetsArr.Add(StudioItemObj);
+      end;
+      for I := 0 to High(LodInstRep.LodPlans) do
+      begin
+        StudioItemObj := TJSONObject.Create;
+        StudioItemObj.Add('archetype', LodInstRep.LodPlans[I].ArchetypeName);
+        StudioItemObj.Add('baseTriangles', LodInstRep.LodPlans[I].BaseLod0Triangles);
+        StudioItemObj.Add('lod1DistMeters', LodInstRep.LodPlans[I].Tiers[1].EnterDistanceMeters);
+        StudioItemObj.Add('lod2DistMeters', LodInstRep.LodPlans[I].Tiers[2].EnterDistanceMeters);
+        StudioItemObj.Add('lod3DistMeters', LodInstRep.LodPlans[I].Tiers[3].EnterDistanceMeters);
+        ClassesArr.Add(StudioItemObj);
+      end;
+      OutPayload.Add('ok', True);
+      OutPayload.Add('action', ActionName);
+      OutPayload.Add('totalTransforms', LodInstRep.TotalAnalyzedTransforms);
+      OutPayload.Add('baselineDrawCalls', LodInstRep.BaselineDrawCalls);
+      OutPayload.Add('optimizedDrawCalls', LodInstRep.OptimizedDrawCalls);
+      OutPayload.Add('savedDrawCalls', LodInstRep.PotentialDrawCallReduction);
+      OutPayload.Add('reductionPercent', LodInstRep.ReductionPercent);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('batches', TargetsArr);
+      TargetsArr := nil;
+      OutPayload.Add('lodPlans', ClassesArr);
+      ClassesArr := nil;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(ClassesArr);
       FreeAndNil(TargetsArr);
       FreeAndNil(OutPayload);
     end;

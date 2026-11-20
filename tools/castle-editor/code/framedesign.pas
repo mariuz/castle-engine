@@ -43,7 +43,7 @@ uses
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolSmartObjectSlots, ToolAeroFoil, ToolCreviceClutter, ToolCameraShake, ToolFireGrid2D, ToolGameplayMessenger, ToolOctahedralImpostor, ToolPoseSnapshot, ToolMacroRecorder, ToolPortalStudio, ToolSensoryPerception, ToolIvyClimber, ToolFootstepDirector, ToolGravityField, ToolCloudShadows, ToolTrailStamper, ToolCoverPointScanner, ToolCatenaryCable, ToolPrefabDiffMerge, ToolBallisticStudio, ToolAcousticSpace, ToolSuspensionBridge, ToolWorldWaypoint, ToolBuoyancyHull, ToolSpiderweb, ToolFoliageTrample, ToolInteractScanner, ToolSplatterBurst, ToolBudgetTreemap, ToolIcicleOverhang, ToolQuadrupedGait, ToolZiplineRig, ToolFractureVoronoi, ToolThermalMirage, ToolStealthLightGem, ToolGrapplePendulum, ToolFlameFlicker, ToolCrowdFormation;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolSmartObjectSlots, ToolAeroFoil, ToolCreviceClutter, ToolCameraShake, ToolFireGrid2D, ToolGameplayMessenger, ToolOctahedralImpostor, ToolPoseSnapshot, ToolMacroRecorder, ToolPortalStudio, ToolSensoryPerception, ToolIvyClimber, ToolFootstepDirector, ToolGravityField, ToolCloudShadows, ToolTrailStamper, ToolCoverPointScanner, ToolCatenaryCable, ToolPrefabDiffMerge, ToolBallisticStudio, ToolAcousticSpace, ToolSuspensionBridge, ToolWorldWaypoint, ToolBuoyancyHull, ToolSpiderweb, ToolFoliageTrample, ToolInteractScanner, ToolSplatterBurst, ToolBudgetTreemap, ToolIcicleOverhang, ToolQuadrupedGait, ToolZiplineRig, ToolFractureVoronoi, ToolThermalMirage, ToolStealthLightGem, ToolGrapplePendulum, ToolFlameFlicker, ToolCrowdFormation, ToolLodInstancing;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -976,6 +976,8 @@ type
       MenuTreeViewItemFlameFlicker: TMenuItem;
       ButtonCrowdFormation: TSpeedButton;
       MenuTreeViewItemCrowdFormation: TMenuItem;
+      ButtonLodInstancing: TSpeedButton;
+      MenuTreeViewItemLodInstancing: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1649,6 +1651,8 @@ type
     procedure MenuTreeViewItemFlameFlickerClick(Sender: TObject);
     procedure ButtonCrowdFormationClick(Sender: TObject);
     procedure MenuTreeViewItemCrowdFormationClick(Sender: TObject);
+    procedure ButtonLodInstancingClick(Sender: TObject);
+    procedure MenuTreeViewItemLodInstancingClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -3205,6 +3209,7 @@ type
     procedure ShowGrapplePendulumDialog;
     procedure ShowFlameFlickerDialog;
     procedure ShowCrowdFormationDialog;
+    procedure ShowLodInstancingDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -3226,7 +3231,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormSmartObjectSlots, FormAeroFoil, FormCreviceClutter, FormCameraShake, FormFireGrid2D, FormGameplayMessenger, FormOctahedralImpostor, FormPoseSnapshot, FormMacroRecorder, FormPortalStudio, FormSensoryPerception, FormIvyClimber, FormFootstepDirector, FormGravityField, FormCloudShadows, FormTrailStamper, FormCoverPointScanner, FormCatenaryCable, FormPrefabDiffMerge, FormBallisticStudio, FormAcousticSpace, FormSuspensionBridge, FormWorldWaypoint, FormBuoyancyHull, FormSpiderweb, FormFoliageTrample, FormInteractScanner, FormSplatterBurst, FormBudgetTreemap, FormIcicleOverhang, FormQuadrupedGait, FormZiplineRig, FormFractureVoronoi, FormThermalMirage, FormStealthLightGem, FormGrapplePendulum, FormFlameFlicker, FormCrowdFormation, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormSmartObjectSlots, FormAeroFoil, FormCreviceClutter, FormCameraShake, FormFireGrid2D, FormGameplayMessenger, FormOctahedralImpostor, FormPoseSnapshot, FormMacroRecorder, FormPortalStudio, FormSensoryPerception, FormIvyClimber, FormFootstepDirector, FormGravityField, FormCloudShadows, FormTrailStamper, FormCoverPointScanner, FormCatenaryCable, FormPrefabDiffMerge, FormBallisticStudio, FormAcousticSpace, FormSuspensionBridge, FormWorldWaypoint, FormBuoyancyHull, FormSpiderweb, FormFoliageTrample, FormInteractScanner, FormSplatterBurst, FormBudgetTreemap, FormIcicleOverhang, FormQuadrupedGait, FormZiplineRig, FormFractureVoronoi, FormThermalMirage, FormStealthLightGem, FormGrapplePendulum, FormFlameFlicker, FormCrowdFormation, FormLodInstancing, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -9041,6 +9046,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonCrowdFormation,
       PanelMiddleTop.GetControlIndex(ButtonFlameFlicker) + 1);
 
+  ButtonLodInstancing := TSpeedButton.Create(Self);
+  ButtonLodInstancing.Caption := 'AutoLOD';
+  ButtonLodInstancing.Hint := 'Automated LOD Chain & GPU Draw-Call Instancing Optimizer (126-Studio Hub / 22 MCP)' + NL +
+    'Cluster repeated meshes into GPU-instanced batches & synthesize 4-tier hysteresis LOD chains';
+  ButtonLodInstancing.ShowHint := true;
+  ButtonLodInstancing.AutoSize := true;
+  ButtonLodInstancing.Constraints.MinHeight := 33;
+  ButtonLodInstancing.Constraints.MinWidth := 62;
+  ButtonLodInstancing.BorderSpacing.Left := 2;
+  ButtonLodInstancing.OnClick := @ButtonLodInstancingClick;
+  ButtonLodInstancing.Parent := PanelMiddleTop;
+  if ButtonCrowdFormation.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonLodInstancing,
+      PanelMiddleTop.GetControlIndex(ButtonCrowdFormation) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -12482,6 +12502,11 @@ begin
   MenuTreeViewItemCrowdFormation.Caption := 'Tactical Squad Formation (Wedge, Phalanx, Shield-Circle) Studio...';
   MenuTreeViewItemCrowdFormation.OnClick := @MenuTreeViewItemCrowdFormationClick;
   MenuTreeView.Items.Add(MenuTreeViewItemCrowdFormation);
+
+  MenuTreeViewItemLodInstancing := TMenuItem.Create(Self);
+  MenuTreeViewItemLodInstancing.Caption := 'Automated LOD Chain & GPU Instancing Optimizer (126 Studios)...';
+  MenuTreeViewItemLodInstancing.OnClick := @MenuTreeViewItemLodInstancingClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemLodInstancing);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -58261,6 +58286,7 @@ begin
   else if SameText(AStudioId, 'grapple_pendulum') then ShowGrapplePendulumDialog
   else if SameText(AStudioId, 'flame_flicker') then ShowFlameFlickerDialog
   else if SameText(AStudioId, 'crowd_formation') then ShowCrowdFormationDialog
+  else if SameText(AStudioId, 'lod_instancing') then ShowLodInstancingDialog
   else
     Result := False;
 end;
@@ -60693,6 +60719,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemCrowdFormationClick(Sender: TObject);
 begin
   ShowCrowdFormationDialog;
+end;
+
+procedure TDesignFrame.ShowLodInstancingDialog;
+var
+  Dlg: TLodInstancingForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TLodInstancingForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonLodInstancingClick(Sender: TObject);
+begin
+  ShowLodInstancingDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemLodInstancingClick(Sender: TObject);
+begin
+  ShowLodInstancingDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

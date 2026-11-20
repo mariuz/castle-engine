@@ -232,6 +232,7 @@ uses
   TestToolGrapplePendulum,
   TestToolFlameFlicker,
   TestToolCrowdFormation,
+  TestToolLodInstancing,
   TestCastleVulkanRHI;
 
 implementation

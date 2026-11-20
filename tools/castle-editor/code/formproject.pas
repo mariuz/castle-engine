@@ -719,6 +719,7 @@ type
       MenuItemGrapplePendulum: TMenuItem;
       MenuItemFlameFlicker: TMenuItem;
       MenuItemCrowdFormation: TMenuItem;
+      MenuItemLodInstancing: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -858,6 +859,7 @@ type
     procedure MenuItemGrapplePendulumClick(Sender: TObject);
     procedure MenuItemFlameFlickerClick(Sender: TObject);
     procedure MenuItemCrowdFormationClick(Sender: TObject);
+    procedure MenuItemLodInstancingClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3077,6 +3079,11 @@ begin
   MenuItemCrowdFormation.Caption := 'Tactical Squad Formation (Wedge, Phalanx, Shield-Circle) Studio...';
   MenuItemCrowdFormation.OnClick := @MenuItemCrowdFormationClick;
   MenuItemDesign.Add(MenuItemCrowdFormation);
+
+  MenuItemLodInstancing := TMenuItem.Create(MenuItemDesign);
+  MenuItemLodInstancing.Caption := 'Automated LOD Chain & GPU Instancing Optimizer (126 Studios)...';
+  MenuItemLodInstancing.OnClick := @MenuItemLodInstancingClick;
+  MenuItemDesign.Add(MenuItemLodInstancing);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6767,6 +6774,12 @@ procedure TProjectForm.MenuItemCrowdFormationClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCrowdFormationDialog;
+end;
+
+procedure TProjectForm.MenuItemLodInstancingClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowLodInstancingDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

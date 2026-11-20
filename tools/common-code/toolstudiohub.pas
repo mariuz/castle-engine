@@ -139,7 +139,10 @@ uses
   CastleTrailStamper, CastleCoverPointScanner, CastleCatenaryCable,
   CastleBallisticSolver, CastleAcousticSpace, CastleSuspensionBridge,
   CastleWorldWaypoint, CastleBuoyancyHull, CastleSpiderweb,
-  CastleFoliageTrample, CastleInteractScanner, CastleSplatterBurst;
+  CastleFoliageTrample, CastleInteractScanner, CastleSplatterBurst,
+  CastleIcicleOverhang, CastleQuadrupedGait, CastleZiplineRig,
+  CastleFractureVoronoi, CastleThermalMirage, CastleStealthLightGem,
+  CastleGrapplePendulum, CastleFlameFlicker, CastleCrowdFormation;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -595,6 +598,38 @@ begin
   Reg('budget_treemap', 'Squarified Scene Budget Treemap & 116-Studio Hub / 21st MCP', 'Treemap',
     shcPerformanceQaDeploy, 396, 'squarified scene memory triangle budget treemap bruls huizing van wijk outlier 116 studio hub',
     'Bruls-Huizing-van Wijk squarified scene memory/triangle treemap, outlier hints & 21st MCP tool.');
+
+  { Horizon 14 (Phases 397-406) }
+  Reg('icicle_overhang', 'Procedural Icicle, Stalactite & Cave Drip Overhang Studio', 'Icicle',
+    shcArchitecturePcg, 397, 'procedural icicle stalactite stalagmite cave overhang worldray ceiling drip stefan taper',
+    'Upward WorldRay overhang probing, downward floor clearance & paired meltwater stalagmites.');
+  Reg('quadruped_gait', 'Multi-Leg Quadruped, Hexapod & Spider Gait Phase Studio', 'QuadGait',
+    shcCharactersAiGas, 398, 'multi leg quadruped hexapod octopod spider gait hildebrand tripod parabolic swing terrain tilt',
+    '4/6/8-leg Hildebrand phase scheduler, parabolic swing lift, WorldRay foot-plant & body tilt.');
+  Reg('zipline_rig', 'Procedural Zipline, Pulley Gravity Acceleration & Vault Studio', 'Zipline',
+    shcCharactersAiGas, 399, 'procedural zipline pulley trolley cable sag downhill gravity hand brake arrestor vault launch',
+    'Rider-loaded cable sag, tangential pulley gravity/drag/brake kinematics & momentum vault.');
+  Reg('fracture_voronoi', 'Voronoi Destruction Fracture & BFS Collapse Studio', 'Voronoi',
+    shcArchitecturePcg, 400, 'voronoi fracture destruction shard cell cutter bond graph bfs ground support floating collapse',
+    'Volume-conserving 3D Voronoi cells, facet tensile bonds & BFS floating-island collapse.');
+  Reg('thermal_mirage', 'Heat-Haze Mirage, Thermal Plume & Underwater Caustics Studio', 'Mirage',
+    shcMaterialsVfxLighting, 401, 'heat haze desert inferior mirage edlen boussinesq thermal plume underwater coral caustics',
+    'Edlen grazing inferior desert mirage, Boussinesq convection shimmer & reef caustic cusps.');
+  Reg('stealth_light_gem', 'Tactical Stealth Light-Gem & Backlight Silhouette Studio', 'LightGem',
+    shcCharactersAiGas, 402, 'tactical stealth thief light gem worldray torch shadow occlusion backlight silhouette crouch',
+    'Multi-torch WorldRay shadow occlusion, guard-sightline backlight silhouette & stance scale.');
+  Reg('grapple_pendulum', 'Grappling Hook Pendulum Swing, Winch Reel & Apex Jump Studio', 'Grapple',
+    shcCharactersAiGas, 403, 'grappling hook vine 3d spherical pendulum swing taut slack freefall motorized winch apex jump',
+    'WorldRay overhead hook lock, unilateral 3D spherical pendulum arc, winch reel & apex boost.');
+  Reg('flame_flicker', 'Procedural Torch Blackbody Flicker, Wind Blowout & Soot Studio', 'Torch',
+    shcMaterialsVfxLighting, 404, 'procedural torch sconce campfire planckian blackbody kelvin flicker wind gust blowout soot',
+    '1800K..2900K Planckian blackbody shift, wind-draft tilt, gust blowout & WorldRay wall soot.');
+  Reg('crowd_formation', 'Tactical Squad Formation (Wedge, Phalanx, Shield-Circle) Studio', 'Squad',
+    shcCharactersAiGas, 405, 'tactical squad crowd formation wedge phalanx vip shield circle column worldray boulder split',
+    '1..64 unit Wedge/Phalanx/Shield-Circle/Column solver, WorldRay ground snap & boulder split.');
+  Reg('lod_instancing', 'Automated LOD Chain & GPU Instancing Optimizer (126 Studios / 22 MCP)', 'AutoLOD',
+    shcPerformanceQaDeploy, 406, 'automated lod chain qem hysteresis gpu draw call instancing batch optimizer 126 studio hub',
+    'GPU draw-call instancing batch clustering, 4-tier hysteresis LOD chains & 22nd MCP tool.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -916,6 +951,16 @@ var
     if (C is TCastleBuoyancyHull) or (C is TCastleFoliageTrampleField) then
       BumpSub(shcWorldEnvironment);
     if C is TCastleSplatterBurst then BumpSub(shcMaterialsVfxLighting);
+
+    { Horizon 14 Subsystems }
+    if (C is TCastleIcicleOverhang) or (C is TCastleVoronoiFractureVolume) then
+      BumpSub(shcArchitecturePcg);
+    if (C is TCastleMultiLegGaitRig) or (C is TCastleZiplineRig) or
+       (C is TCastleStealthLightGem) or (C is TCastleGrapplePendulum) or
+       (C is TCastleCrowdFormation) then
+      BumpSub(shcCharactersAiGas);
+    if (C is TCastleThermalMirageVolume) or (C is TCastleFlameFlickerRig) then
+      BumpSub(shcMaterialsVfxLighting);
   end;
 
   procedure Traverse(const C: TComponent);
