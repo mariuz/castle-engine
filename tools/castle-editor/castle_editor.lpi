@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="281">
+    <Units Count="283">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1487,6 +1487,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormFlameFlicker"/>
       </Unit280>
+      <Unit281>
+        <Filename Value="../common-code/toolcrowdformation.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCrowdFormation"/>
+      </Unit281>
+      <Unit282>
+        <Filename Value="code/formcrowdformation.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCrowdFormation"/>
+      </Unit282>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

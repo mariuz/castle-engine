@@ -4897,6 +4897,13 @@ Phase 404 adds **Planckian Blackbody Combustion Flicker, Wind Gust Blowout & `Wo
 - **Planckian `1800K..2900K` Flicker, Wind Tilt & Gust Blowout (`StepFlameCombustion`)**: Evaluates `KelvinToBlackbodyRgb`, 3-octave intensity turbulence, shadow-origin micro-jitter, wind-draft tilt, and blowout extinguishing above `BlowoutWindSpeedMps` across 3 presets (`ffpDungeonWallSconceTorch`, `ffpHearthCampfireBrazier`, `ffpStormLanternShielded`).
 - **`WorldRay` Wall & Ceiling Soot (`ProbeWallAndCeilingSoot`)**: Casts upward ceiling and 4-cardinal wall probes to compute quadratic soot darkening on nearby masonry.
 
+## 66DZ. Phase 405: Tactical Squad & Crowd Formation Controller (Wedge, Phalanx, Shield-Circle & Boulder Split) Studio
+
+Phase 405 adds **Total War / RTS-Style Tactical Squad Slot Topologies & `WorldRay` Obstacle Avoidance** via `TCastleCrowdFormation` (`src/scene/castlecrowdformation.pas`), `TCrowdFormationHelper` (`tools/common-code/toolcrowdformation.pas`), and `TCrowdFormationForm` (`tools/castle-editor/code/formcrowdformation.pas`), accessible from **`Squad`** in the top viewport toolbar, **`Design -> Tactical Squad Formation (Wedge, Phalanx, Shield-Circle) Studio...`**, or `LaunchStudioById('crowd_formation')`.
+
+- **4 Tactical Topologies (`SolveFormationSlots`)**: Solves `1..64` unit slots across `sfsCavalryVWedge`, `sfsHoplitesPhalanxGrid`, `sfsVipOutwardShieldCircle` (`360°` outward bodyguard facing), and `sfsTacticalDoubleColumn`.
+- **Downward `WorldRay` Terrain Snap & Boulder Split-Around**: Snaps slots onto walkable slopes/steps (`<= MaxStepHeightMeters`) while deflecting blocked slots laterally around tall boulders and pillars (`ObstacleAvoidedSlotCount`).
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5089,4 +5096,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolstealthlightgem.pas`](../tests/code/testcases/testtoolstealthlightgem.pas) (`TTestToolStealthLightGem` — 2 tests)**: Verifies `WorldRay` stone-pillar shadow occlusion (`< 0.05` visibility) vs. direct torchlight (`> 0.70`), crouch + stillness concealment multipliers, guard-sightline backlight silhouette exposure (`> 0.65`) vs. side-angle safety (`0.0`), and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgrapplependulum.pas`](../tests/code/testcases/testtoolgrapplependulum.pas) (`TTestToolGrapplePendulum` — 2 tests)**: Verifies `WorldRay` overhead gargoyle hook lock (`Y = 14.0m`), energy-conserving spherical pendulum arc & centripetal cable tension, slack inside-sphere freefall (`0 N`), motorized grapnel winch lift, apex jump release boost, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolflameflicker.pas`](../tests/code/testcases/testtoolflameflicker.pas) (`TTestToolFlameFlicker` — 2 tests)**: Verifies `1800K` vs. `2900K` Planckian blackbody RGB shift, `+5 m/s` wind-draft flame tilt, `14 m/s` gale blowout on open sconces vs. hurricane-shielded storm-lantern survival, `WorldRay` wall/ceiling soot darkening, `ReigniteFlame`, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcrowdformation.pas`](../tests/code/testcases/testtoolcrowdformation.pas) (`TTestToolCrowdFormation` — 2 tests)**: Verifies 16-unit phalanx lateral split-around past a `3.0m` granite boulder with zero footprint intrusion, `0.65m` walkable stone-terrace elevation snapping, V-wedge wing symmetry, `360°` outward VIP shield-circle facing vectors, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

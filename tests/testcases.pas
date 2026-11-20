@@ -231,6 +231,7 @@ uses
   TestToolStealthLightGem,
   TestToolGrapplePendulum,
   TestToolFlameFlicker,
+  TestToolCrowdFormation,
   TestCastleVulkanRHI;
 
 implementation

@@ -718,6 +718,7 @@ type
       MenuItemStealthLightGem: TMenuItem;
       MenuItemGrapplePendulum: TMenuItem;
       MenuItemFlameFlicker: TMenuItem;
+      MenuItemCrowdFormation: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -856,6 +857,7 @@ type
     procedure MenuItemStealthLightGemClick(Sender: TObject);
     procedure MenuItemGrapplePendulumClick(Sender: TObject);
     procedure MenuItemFlameFlickerClick(Sender: TObject);
+    procedure MenuItemCrowdFormationClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3070,6 +3072,11 @@ begin
   MenuItemFlameFlicker.Caption := 'Procedural Torch Blackbody Flicker, Wind Blowout & Soot Studio...';
   MenuItemFlameFlicker.OnClick := @MenuItemFlameFlickerClick;
   MenuItemDesign.Add(MenuItemFlameFlicker);
+
+  MenuItemCrowdFormation := TMenuItem.Create(MenuItemDesign);
+  MenuItemCrowdFormation.Caption := 'Tactical Squad Formation (Wedge, Phalanx, Shield-Circle) Studio...';
+  MenuItemCrowdFormation.OnClick := @MenuItemCrowdFormationClick;
+  MenuItemDesign.Add(MenuItemCrowdFormation);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6754,6 +6761,12 @@ procedure TProjectForm.MenuItemFlameFlickerClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowFlameFlickerDialog;
+end;
+
+procedure TProjectForm.MenuItemCrowdFormationClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCrowdFormationDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
