@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="273">
+    <Units Count="275">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1447,6 +1447,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormFractureVoronoi"/>
       </Unit272>
+      <Unit273>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolthermalmirage.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolThermalMirage"/>
+      </Unit273>
+      <Unit274>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formthermalmirage.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormThermalMirage"/>
+      </Unit274>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

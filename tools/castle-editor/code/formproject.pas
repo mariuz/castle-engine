@@ -714,6 +714,7 @@ type
       MenuItemQuadrupedGait: TMenuItem;
       MenuItemZiplineRig: TMenuItem;
       MenuItemFractureVoronoi: TMenuItem;
+      MenuItemThermalMirage: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -848,6 +849,7 @@ type
     procedure MenuItemQuadrupedGaitClick(Sender: TObject);
     procedure MenuItemZiplineRigClick(Sender: TObject);
     procedure MenuItemFractureVoronoiClick(Sender: TObject);
+    procedure MenuItemThermalMirageClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3042,6 +3044,11 @@ begin
   MenuItemFractureVoronoi.Caption := 'Voronoi Destruction Fracture & BFS Collapse Studio...';
   MenuItemFractureVoronoi.OnClick := @MenuItemFractureVoronoiClick;
   MenuItemDesign.Add(MenuItemFractureVoronoi);
+
+  MenuItemThermalMirage := TMenuItem.Create(MenuItemDesign);
+  MenuItemThermalMirage.Caption := 'Heat-Haze Mirage, Thermal Plume & Caustics Studio...';
+  MenuItemThermalMirage.OnClick := @MenuItemThermalMirageClick;
+  MenuItemDesign.Add(MenuItemThermalMirage);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6702,6 +6709,12 @@ procedure TProjectForm.MenuItemFractureVoronoiClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowFractureVoronoiDialog;
+end;
+
+procedure TProjectForm.MenuItemThermalMirageClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowThermalMirageDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt, CastleMover2, CastleCameraRigRail, CastleMeshletCluster, CastleTetSoftBody, CastleMassTraffic, CastleSurfaceGi, CastleContextualAnim, CastleTargetingSystem, CastleMutableCharacter, CastleRiverSpline, CastleOccluderFader, CastleGameplayDebugger, CastleWindField, CastleAssetPreloader, CastleSubstrateMaterial, CastleSmartObjectSlots, CastleAeroFoil, CastleCreviceClutter, CastleCameraShake, CastleFireGrid2D, CastleGameplayMessenger, CastleOctahedralImpostor, CastlePoseSnapshot, CastlePortalPair, CastleSensoryPerception, CastleIvyClimber, CastleFootstepDirector, CastleGravityField, CastleCloudShadows, CastleTrailStamper, CastleCoverPointScanner, CastleCatenaryCable, CastleBallisticSolver, CastleAcousticSpace, CastleSuspensionBridge, CastleWorldWaypoint, CastleBuoyancyHull, CastleSpiderweb, CastleFoliageTrample, CastleInteractScanner, CastleSplatterBurst, CastleIcicleOverhang, CastleQuadrupedGait, CastleZiplineRig, CastleFractureVoronoi,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt, CastleMover2, CastleCameraRigRail, CastleMeshletCluster, CastleTetSoftBody, CastleMassTraffic, CastleSurfaceGi, CastleContextualAnim, CastleTargetingSystem, CastleMutableCharacter, CastleRiverSpline, CastleOccluderFader, CastleGameplayDebugger, CastleWindField, CastleAssetPreloader, CastleSubstrateMaterial, CastleSmartObjectSlots, CastleAeroFoil, CastleCreviceClutter, CastleCameraShake, CastleFireGrid2D, CastleGameplayMessenger, CastleOctahedralImpostor, CastlePoseSnapshot, CastlePortalPair, CastleSensoryPerception, CastleIvyClimber, CastleFootstepDirector, CastleGravityField, CastleCloudShadows, CastleTrailStamper, CastleCoverPointScanner, CastleCatenaryCable, CastleBallisticSolver, CastleAcousticSpace, CastleSuspensionBridge, CastleWorldWaypoint, CastleBuoyancyHull, CastleSpiderweb, CastleFoliageTrample, CastleInteractScanner, CastleSplatterBurst, CastleIcicleOverhang, CastleQuadrupedGait, CastleZiplineRig, CastleFractureVoronoi, CastleThermalMirage,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolSmartObjectSlots, ToolAeroFoil, ToolCreviceClutter, ToolCameraShake, ToolFireGrid2D, ToolGameplayMessenger, ToolOctahedralImpostor, ToolPoseSnapshot, ToolMacroRecorder, ToolPortalStudio, ToolSensoryPerception, ToolIvyClimber, ToolFootstepDirector, ToolGravityField, ToolCloudShadows, ToolTrailStamper, ToolCoverPointScanner, ToolCatenaryCable, ToolPrefabDiffMerge, ToolBallisticStudio, ToolAcousticSpace, ToolSuspensionBridge, ToolWorldWaypoint, ToolBuoyancyHull, ToolSpiderweb, ToolFoliageTrample, ToolInteractScanner, ToolSplatterBurst, ToolBudgetTreemap, ToolIcicleOverhang, ToolQuadrupedGait, ToolZiplineRig, ToolFractureVoronoi;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolSmartObjectSlots, ToolAeroFoil, ToolCreviceClutter, ToolCameraShake, ToolFireGrid2D, ToolGameplayMessenger, ToolOctahedralImpostor, ToolPoseSnapshot, ToolMacroRecorder, ToolPortalStudio, ToolSensoryPerception, ToolIvyClimber, ToolFootstepDirector, ToolGravityField, ToolCloudShadows, ToolTrailStamper, ToolCoverPointScanner, ToolCatenaryCable, ToolPrefabDiffMerge, ToolBallisticStudio, ToolAcousticSpace, ToolSuspensionBridge, ToolWorldWaypoint, ToolBuoyancyHull, ToolSpiderweb, ToolFoliageTrample, ToolInteractScanner, ToolSplatterBurst, ToolBudgetTreemap, ToolIcicleOverhang, ToolQuadrupedGait, ToolZiplineRig, ToolFractureVoronoi, ToolThermalMirage;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -966,6 +966,8 @@ type
       MenuTreeViewItemZiplineRig: TMenuItem;
       ButtonFractureVoronoi: TSpeedButton;
       MenuTreeViewItemFractureVoronoi: TMenuItem;
+      ButtonThermalMirage: TSpeedButton;
+      MenuTreeViewItemThermalMirage: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1629,6 +1631,8 @@ type
     procedure MenuTreeViewItemZiplineRigClick(Sender: TObject);
     procedure ButtonFractureVoronoiClick(Sender: TObject);
     procedure MenuTreeViewItemFractureVoronoiClick(Sender: TObject);
+    procedure ButtonThermalMirageClick(Sender: TObject);
+    procedure MenuTreeViewItemThermalMirageClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -3180,6 +3184,7 @@ type
     procedure ShowQuadrupedGaitDialog;
     procedure ShowZiplineRigDialog;
     procedure ShowFractureVoronoiDialog;
+    procedure ShowThermalMirageDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -3201,7 +3206,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormSmartObjectSlots, FormAeroFoil, FormCreviceClutter, FormCameraShake, FormFireGrid2D, FormGameplayMessenger, FormOctahedralImpostor, FormPoseSnapshot, FormMacroRecorder, FormPortalStudio, FormSensoryPerception, FormIvyClimber, FormFootstepDirector, FormGravityField, FormCloudShadows, FormTrailStamper, FormCoverPointScanner, FormCatenaryCable, FormPrefabDiffMerge, FormBallisticStudio, FormAcousticSpace, FormSuspensionBridge, FormWorldWaypoint, FormBuoyancyHull, FormSpiderweb, FormFoliageTrample, FormInteractScanner, FormSplatterBurst, FormBudgetTreemap, FormIcicleOverhang, FormQuadrupedGait, FormZiplineRig, FormFractureVoronoi, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormSmartObjectSlots, FormAeroFoil, FormCreviceClutter, FormCameraShake, FormFireGrid2D, FormGameplayMessenger, FormOctahedralImpostor, FormPoseSnapshot, FormMacroRecorder, FormPortalStudio, FormSensoryPerception, FormIvyClimber, FormFootstepDirector, FormGravityField, FormCloudShadows, FormTrailStamper, FormCoverPointScanner, FormCatenaryCable, FormPrefabDiffMerge, FormBallisticStudio, FormAcousticSpace, FormSuspensionBridge, FormWorldWaypoint, FormBuoyancyHull, FormSpiderweb, FormFoliageTrample, FormInteractScanner, FormSplatterBurst, FormBudgetTreemap, FormIcicleOverhang, FormQuadrupedGait, FormZiplineRig, FormFractureVoronoi, FormThermalMirage, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -8941,6 +8946,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonFractureVoronoi,
       PanelMiddleTop.GetControlIndex(ButtonZiplineRig) + 1);
 
+  ButtonThermalMirage := TSpeedButton.Create(Self);
+  ButtonThermalMirage.Caption := 'Mirage';
+  ButtonThermalMirage.Hint := 'Heat-Haze Mirage, Thermal Convection Plume & Underwater Caustics Studio' + NL +
+    'Simulate grazing inferior desert mirage, Boussinesq shimmer & reef caustics';
+  ButtonThermalMirage.ShowHint := true;
+  ButtonThermalMirage.AutoSize := true;
+  ButtonThermalMirage.Constraints.MinHeight := 33;
+  ButtonThermalMirage.Constraints.MinWidth := 62;
+  ButtonThermalMirage.BorderSpacing.Left := 2;
+  ButtonThermalMirage.OnClick := @ButtonThermalMirageClick;
+  ButtonThermalMirage.Parent := PanelMiddleTop;
+  if ButtonFractureVoronoi.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonThermalMirage,
+      PanelMiddleTop.GetControlIndex(ButtonFractureVoronoi) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -12357,6 +12377,11 @@ begin
   MenuTreeViewItemFractureVoronoi.Caption := 'Voronoi Destruction Fracture & BFS Collapse Studio...';
   MenuTreeViewItemFractureVoronoi.OnClick := @MenuTreeViewItemFractureVoronoiClick;
   MenuTreeView.Items.Add(MenuTreeViewItemFractureVoronoi);
+
+  MenuTreeViewItemThermalMirage := TMenuItem.Create(Self);
+  MenuTreeViewItemThermalMirage.Caption := 'Heat-Haze Mirage, Thermal Plume & Caustics Studio...';
+  MenuTreeViewItemThermalMirage.OnClick := @MenuTreeViewItemThermalMirageClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemThermalMirage);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -17807,6 +17832,8 @@ var
         Suffix := Suffix + ' ' + TCastleZiplineRig(NodeObj).ZiplineSummaryBadge
       else if NodeObj is TCastleVoronoiFractureVolume then
         Suffix := Suffix + ' ' + TCastleVoronoiFractureVolume(NodeObj).FractureSummaryBadge
+      else if NodeObj is TCastleThermalMirageVolume then
+        Suffix := Suffix + ' ' + TCastleThermalMirageVolume(NodeObj).MirageSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -58121,6 +58148,7 @@ begin
   else if SameText(AStudioId, 'quadruped_gait') then ShowQuadrupedGaitDialog
   else if SameText(AStudioId, 'zipline_rig') then ShowZiplineRigDialog
   else if SameText(AStudioId, 'fracture_voronoi') then ShowFractureVoronoiDialog
+  else if SameText(AStudioId, 'thermal_mirage') then ShowThermalMirageDialog
   else
     Result := False;
 end;
@@ -60418,6 +60446,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemFractureVoronoiClick(Sender: TObject);
 begin
   ShowFractureVoronoiDialog;
+end;
+
+procedure TDesignFrame.ShowThermalMirageDialog;
+var
+  Dlg: TThermalMirageForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TThermalMirageForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonThermalMirageClick(Sender: TObject);
+begin
+  ShowThermalMirageDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemThermalMirageClick(Sender: TObject);
+begin
+  ShowThermalMirageDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

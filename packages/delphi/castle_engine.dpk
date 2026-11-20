@@ -389,6 +389,7 @@ contains
   castlequadrupedgait in '..\..\src\scene\castlequadrupedgait.pas',
   castleziplinerig in '..\..\src\scene\castleziplinerig.pas',
   castlefracturevoronoi in '..\..\src\scene\castlefracturevoronoi.pas',
+  castlethermalmirage in '..\..\src\scene\castlethermalmirage.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

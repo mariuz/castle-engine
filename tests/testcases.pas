@@ -227,6 +227,7 @@ uses
   TestToolQuadrupedGait,
   TestToolZiplineRig,
   TestToolFractureVoronoi,
+  TestToolThermalMirage,
   TestCastleVulkanRHI;
 
 implementation
