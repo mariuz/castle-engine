@@ -606,6 +606,7 @@ begin
     P.Targets.AddUnit('castlefoliagetrample.pas');
     P.Targets.AddUnit('castleinteractscanner.pas');
     P.Targets.AddUnit('castlesplatterburst.pas');
+    P.Targets.AddUnit('castleicicleoverhang.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

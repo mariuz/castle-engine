@@ -385,6 +385,7 @@ contains
   castlefoliagetrample in '..\..\src\scene\castlefoliagetrample.pas',
   castleinteractscanner in '..\..\src\scene\castleinteractscanner.pas',
   castlesplatterburst in '..\..\src\scene\castlesplatterburst.pas',
+  castleicicleoverhang in '..\..\src\scene\castleicicleoverhang.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

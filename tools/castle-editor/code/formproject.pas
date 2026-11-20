@@ -710,6 +710,7 @@ type
       MenuItemInteractScanner: TMenuItem;
       MenuItemSplatterBurst: TMenuItem;
       MenuItemBudgetTreemap: TMenuItem;
+      MenuItemIcicleOverhang: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -840,6 +841,7 @@ type
     procedure MenuItemInteractScannerClick(Sender: TObject);
     procedure MenuItemSplatterBurstClick(Sender: TObject);
     procedure MenuItemBudgetTreemapClick(Sender: TObject);
+    procedure MenuItemIcicleOverhangClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3014,6 +3016,11 @@ begin
   MenuItemBudgetTreemap.Caption := 'Squarified Scene Budget Treemap & 116-Studio Hub...';
   MenuItemBudgetTreemap.OnClick := @MenuItemBudgetTreemapClick;
   MenuItemDesign.Add(MenuItemBudgetTreemap);
+
+  MenuItemIcicleOverhang := TMenuItem.Create(MenuItemDesign);
+  MenuItemIcicleOverhang.Caption := 'Procedural Icicle, Stalactite & Overhang Studio...';
+  MenuItemIcicleOverhang.OnClick := @MenuItemIcicleOverhangClick;
+  MenuItemDesign.Add(MenuItemIcicleOverhang);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6650,6 +6657,12 @@ procedure TProjectForm.MenuItemBudgetTreemapClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowBudgetTreemapDialog;
+end;
+
+procedure TProjectForm.MenuItemIcicleOverhangClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowIcicleOverhangDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

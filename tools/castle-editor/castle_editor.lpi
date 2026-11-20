@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="265">
+    <Units Count="267">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1407,6 +1407,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormBudgetTreemap"/>
       </Unit264>
+      <Unit265>
+        <Filename Value="../common-code/toolicicleoverhang.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolIcicleOverhang"/>
+      </Unit265>
+      <Unit266>
+        <Filename Value="code/formicicleoverhang.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormIcicleOverhang"/>
+      </Unit266>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

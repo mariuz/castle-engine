@@ -223,6 +223,7 @@ uses
   TestToolInteractScanner,
   TestToolSplatterBurst,
   TestToolBudgetTreemap,
+  TestToolIcicleOverhang,
   TestCastleVulkanRHI;
 
 implementation
