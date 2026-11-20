@@ -228,6 +228,7 @@ uses
   TestToolZiplineRig,
   TestToolFractureVoronoi,
   TestToolThermalMirage,
+  TestToolStealthLightGem,
   TestCastleVulkanRHI;
 
 implementation

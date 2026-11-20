@@ -715,6 +715,7 @@ type
       MenuItemZiplineRig: TMenuItem;
       MenuItemFractureVoronoi: TMenuItem;
       MenuItemThermalMirage: TMenuItem;
+      MenuItemStealthLightGem: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -850,6 +851,7 @@ type
     procedure MenuItemZiplineRigClick(Sender: TObject);
     procedure MenuItemFractureVoronoiClick(Sender: TObject);
     procedure MenuItemThermalMirageClick(Sender: TObject);
+    procedure MenuItemStealthLightGemClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3049,6 +3051,11 @@ begin
   MenuItemThermalMirage.Caption := 'Heat-Haze Mirage, Thermal Plume & Caustics Studio...';
   MenuItemThermalMirage.OnClick := @MenuItemThermalMirageClick;
   MenuItemDesign.Add(MenuItemThermalMirage);
+
+  MenuItemStealthLightGem := TMenuItem.Create(MenuItemDesign);
+  MenuItemStealthLightGem.Caption := 'Tactical Stealth Light-Gem & Backlight Silhouette Studio...';
+  MenuItemStealthLightGem.OnClick := @MenuItemStealthLightGemClick;
+  MenuItemDesign.Add(MenuItemStealthLightGem);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6715,6 +6722,12 @@ procedure TProjectForm.MenuItemThermalMirageClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowThermalMirageDialog;
+end;
+
+procedure TProjectForm.MenuItemStealthLightGemClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowStealthLightGemDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

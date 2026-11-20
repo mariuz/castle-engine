@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="275">
+    <Units Count="277">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1457,6 +1457,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormThermalMirage"/>
       </Unit274>
+      <Unit275>
+        <Filename Value="../common-code/toolstealthlightgem.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolStealthLightGem"/>
+      </Unit275>
+      <Unit276>
+        <Filename Value="code/formstealthlightgem.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormStealthLightGem"/>
+      </Unit276>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

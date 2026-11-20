@@ -60,7 +60,7 @@ This is the same license as used by Lazarus LCL and FPC RTL.
 See https://castle-engine.io/license for details.
 "/>
     <Version Major="6" Minor="93" Release="1"/>
-    <Files Count="1336">
+    <Files Count="1337">
       <Item1>
         <Filename Value="../../src/audio/castleinternalabstractsoundbackend.pas"/>
         <UnitName Value="CastleInternalAbstractSoundBackend"/>
@@ -5435,6 +5435,10 @@ See https://castle-engine.io/license for details.
         <Filename Value="../../src/scene/castlethermalmirage.pas"/>
         <UnitName Value="CastleThermalMirage"/>
       </Item1336>
+      <Item1337>
+        <Filename Value="../../src/scene/castlestealthlightgem.pas"/>
+        <UnitName Value="CastleStealthLightGem"/>
+      </Item1337>
     </Files>
     <CompatibilityMode Value="True"/>
     <RequiredPkgs Count="1">
