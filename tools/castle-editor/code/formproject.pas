@@ -711,6 +711,7 @@ type
       MenuItemSplatterBurst: TMenuItem;
       MenuItemBudgetTreemap: TMenuItem;
       MenuItemIcicleOverhang: TMenuItem;
+      MenuItemQuadrupedGait: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -842,6 +843,7 @@ type
     procedure MenuItemSplatterBurstClick(Sender: TObject);
     procedure MenuItemBudgetTreemapClick(Sender: TObject);
     procedure MenuItemIcicleOverhangClick(Sender: TObject);
+    procedure MenuItemQuadrupedGaitClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3021,6 +3023,11 @@ begin
   MenuItemIcicleOverhang.Caption := 'Procedural Icicle, Stalactite & Overhang Studio...';
   MenuItemIcicleOverhang.OnClick := @MenuItemIcicleOverhangClick;
   MenuItemDesign.Add(MenuItemIcicleOverhang);
+
+  MenuItemQuadrupedGait := TMenuItem.Create(MenuItemDesign);
+  MenuItemQuadrupedGait.Caption := 'Multi-Leg Quadruped, Hexapod & Spider Gait Studio...';
+  MenuItemQuadrupedGait.OnClick := @MenuItemQuadrupedGaitClick;
+  MenuItemDesign.Add(MenuItemQuadrupedGait);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6663,6 +6670,12 @@ procedure TProjectForm.MenuItemIcicleOverhangClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowIcicleOverhangDialog;
+end;
+
+procedure TProjectForm.MenuItemQuadrupedGaitClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowQuadrupedGaitDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

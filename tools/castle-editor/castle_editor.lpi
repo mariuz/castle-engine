@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="267">
+    <Units Count="269">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1417,6 +1417,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormIcicleOverhang"/>
       </Unit266>
+      <Unit267>
+        <Filename Value="../common-code/toolquadrupedgait.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolQuadrupedGait"/>
+      </Unit267>
+      <Unit268>
+        <Filename Value="code/formquadrupedgait.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormQuadrupedGait"/>
+      </Unit268>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

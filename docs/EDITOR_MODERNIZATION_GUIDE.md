@@ -4848,6 +4848,13 @@ Phase 397 opens **Horizon 14 (`Phases 397–406`)** with **Overhang Icicle & Cav
 - **Upward Overhang + Downward Drip Clearance (`GrowOverhangSpikes`)**: Locates ceiling undersides via upward `WorldRay` probes, rejects cramped crawlspaces (`< MinClearDropMeters`), and clamps spike lengths safely above floors across 3 presets (`iopRoofEaveWinterIcicles`, `iopLimestoneCaveStalactites`, `iopGlacialIceCavern`).
 - **Paired Meltwater Stalagmites & Stefan Taper Profile**: Spawns aligned floor stalagmite mounds directly beneath ceiling drips and evaluates ribbed taper $r(u) = R_0 (1 - u)^{0.72} (1 + 0.08\sin(18\pi u))$.
 
+## 66DS. Phase 398: Multi-Leg Quadruped / Hexapod / Spider Gait Phase & Terrain Foot-Plant Studio
+
+Phase 398 adds **Procedural `4/6/8`-Leg Locomotion & Terrain Slope Adaptation** via `TCastleMultiLegGaitRig` (`src/scene/castlequadrupedgait.pas`), `TQuadrupedGaitHelper` (`tools/common-code/toolquadrupedgait.pas`), and `TQuadrupedGaitForm` (`tools/castle-editor/code/formquadrupedgait.pas`), accessible from **`QuadGait`** in the top viewport toolbar, **`Design -> Multi-Leg Quadruped, Hexapod & Spider Gait Studio...`**, or `LaunchStudioById('quadruped_gait')`.
+
+- **Hildebrand Gait Phases & Parabolic Swing (`EvaluateAtNormalizedCycle`)**: Schedules diagonal canine trot (`4` legs), insect tripod (`6` legs), and arachnid octopod (`8` legs) duty factors with $4 H_{\text{step}} s (1 - s)$ swing lift.
+- **`WorldRay` Foot-Planting & Body Slope Tilt**: Probes uneven rock/ledge heights per foot and adapts `BodyPitchDeg` and `BodyRollDeg`.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5033,4 +5040,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolsplatterburst.pas`](../tests/code/testcases/testtoolsplatterburst.pas) (`TTestToolSplatterBurst` — 2 tests)**: Verifies `90°` perpendicular `1.0x` round droplet vs. `~12°` grazing wall `> 3.0x` tangent-aligned streak elongation, `MaxActiveSplats` LRU ring capping (`36 -> 16`), linear evaporation fade to `0`, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolbudgettreemap.pas`](../tests/code/testcases/testtoolbudgettreemap.pas) (`TTestToolBudgetTreemap` — 2 tests)**: Verifies exact `600 x 400` area conservation, pairwise zero-overlap squarified treemap cells (`< 3.5:1` aspect), `2048 KB` vs. `800 KB` outlier detection, the unified **116-Studio Hub** catalog (`Phases 1–396`), and the **21st MCP tool** `cge_audit_scene_budget` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolicicleoverhang.pas`](../tests/code/testcases/testtoolicicleoverhang.pas) (`TTestToolIcicleOverhang` — 2 tests)**: Verifies upward `WorldRay` overhang detection with zero open-sky floating spikes, paired floor stalagmite alignment, cramped crawlspace rejection (`< MinClearDropMeters`), Stefan tapered profile radii, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolquadrupedgait.pas`](../tests/code/testcases/testtoolquadrupedgait.pas) (`TTestToolQuadrupedGait` — 2 tests)**: Verifies 20-step hexapod tripod static stability (`>= 3` grounded legs), elevated front rock-ledge nose-up `BodyPitchDeg > 5°`, exact parabolic swing apex lift, `8`-leg arachnid preset, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

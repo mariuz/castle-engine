@@ -224,6 +224,7 @@ uses
   TestToolSplatterBurst,
   TestToolBudgetTreemap,
   TestToolIcicleOverhang,
+  TestToolQuadrupedGait,
   TestCastleVulkanRHI;
 
 implementation
