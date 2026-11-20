@@ -143,6 +143,10 @@ type
   protected
     { Nodes that have interface declarations with textures for this shader. }
     UniformsTextures: TX3DFieldList;
+    { The texture fields of the shape rendered now, of its effects with
+      TEffectNode.SharedUniforms: set by TShader.SetDynamicUniforms before
+      each shape, bound (and forgotten) by the next SetupUniforms. }
+    ShapeTextures: TX3DFieldList;
   public
     constructor Create;
     destructor Destroy; override;
@@ -899,6 +903,7 @@ begin
   inherited;
   EventsObserved := TX3DEventList.Create(false);
   UniformsTextures := TX3DFieldList.Create(false);
+  ShapeTextures := TX3DFieldList.Create(false);
   FLightUniformsList := TLightUniformsList.Create(true);
 end;
 
@@ -913,6 +918,7 @@ begin
     FreeAndNil(EventsObserved);
   end;
   FreeAndNil(UniformsTextures);
+  FreeAndNil(ShapeTextures);
   FreeAndNil(FLightUniformsList);
   inherited;
 end;
@@ -1579,7 +1585,10 @@ procedure TShader.EffectsGenerateCode(Effects: TX3DNodeList;
       if Effect.FdParts[I] is TEffectPartNode then
         ProcessEffectPart(TEffectPartNode(Effect.FdParts[I]));
 
-    UniformsNodes.Add(Effect);
+    { an effect sharing its program gets its values per shape
+      (SetDynamicUniforms), the program must not observe this node }
+    if not Effect.SharedUniforms then
+      UniformsNodes.Add(Effect);
   end;
 
 var
@@ -2822,9 +2831,46 @@ begin
 end;
 
 procedure TShader.SetDynamicUniforms(AProgram: TX3DShaderProgram);
+
+  { The uniforms of this shape's effects with TEffectNode.SharedUniforms:
+    the program is shared by effects with equal code, the values are this
+    node's. }
+  procedure SetSharedEffectUniforms(const Effects: TX3DNodeList);
+  var
+    I, J: Integer;
+    Effect: TEffectNode;
+    Field: TX3DField;
+  begin
+    for I := 0 to Effects.Count - 1 do
+      if (Effects[I] is TEffectNode) and
+         TEffectNode(Effects[I]).SharedUniforms and
+         TEffectNode(Effects[I]).FdEnabled.Value and
+         (Effects[I].InterfaceDeclarations <> nil) then
+      begin
+        Effect := TEffectNode(Effects[I]);
+        for J := 0 to Effect.InterfaceDeclarations.Count - 1 do
+        begin
+          Field := Effect.InterfaceDeclarations[J].Field;
+          if Field = nil then
+            Continue;
+          if (Field is TSFNode) or (Field is TMFNode) then
+            AProgram.ShapeTextures.Add(Field)
+          else
+            AProgram.SetUniformFromField(Field.X3DName, Field,
+              UniformMissingFromNode(Effect), false);
+        end;
+      end;
+  end;
+
 var
   I: Integer;
 begin
+  AProgram.ShapeTextures.Count := 0;
+  if AppearanceEffects <> nil then
+    SetSharedEffectUniforms(AppearanceEffects.InternalItems);
+  if GroupEffects <> nil then
+    SetSharedEffectUniforms(GroupEffects);
+
   for I := 0 to LightShaders.Count - 1 do
     LightShaders[I].SetDynamicUniforms(AProgram);
   for I := 0 to DynamicUniforms.Count - 1 do

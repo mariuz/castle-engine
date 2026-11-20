@@ -51,6 +51,10 @@ type
       equal effects (in different scenes, or created again later) share
       a shader program. Effects with uniforms are hashed by the node. }
     procedure TestEffectCodeHash;
+    { Effect nodes with TEffectNode.SharedUniforms share a shader program
+      when their code and uniforms (names, types) are equal; each shape
+      still gets its own uniform values and textures. }
+    procedure TestEffectSharedUniforms;
   end;
 
 implementation
@@ -411,6 +415,122 @@ begin
     FreeAndNil(WithUniformA);
     FreeAndNil(WithUniformB);
   end;
+end;
+
+procedure TTestCastleRendererInternalShader.TestEffectSharedUniforms;
+const
+  EffectCode =
+    'uniform vec3 test_color;' + LineEnding +
+    'uniform sampler2D test_texture;' + LineEnding +
+    'void PLUG_fragment_modify(inout vec4 fragment_color)' + LineEnding +
+    '{' + LineEnding +
+    '  fragment_color = vec4(test_color * texture2D(test_texture, vec2(0.5)).rgb, 1.0);' + LineEnding +
+    '}';
+var
+  Window: TCastleWindow;
+
+  { Effect with uniforms: a color and a 1x1 texture of TextureColor. }
+  function CreateColorEffect(const Color, TextureColor: TVector3;
+    const ColorName: String = 'test_color'): TEffectNode;
+  var
+    Part: TEffectPartNode;
+    Tex: TPixelTextureNode;
+    Image: TRGBImage;
+  begin
+    Result := TEffectNode.Create;
+    Result.Language := slGLSL;
+    Result.SharedUniforms := true;
+    Result.AddCustomField(TSFVec3f.Create(Result, true, ColorName, Color));
+    Image := TRGBImage.Create(1, 1);
+    Image.Clear(Vector4Byte(
+      Round(TextureColor.X * 255), Round(TextureColor.Y * 255), Round(TextureColor.Z * 255), 255));
+    Tex := TPixelTextureNode.Create;
+    Tex.FdImage.Value := Image;
+    Result.AddCustomField(TSFNode.Create(Result, true, 'test_texture',
+      [TAbstractTextureNode], Tex));
+    Part := TEffectPartNode.Create;
+    Part.ShaderType := stFragment;
+    Part.Contents := EffectCode;
+    Result.SetParts([Part]);
+  end;
+
+  { A scene with an unlit floor patch at (X, 0, 0) with its own effect. }
+  function CreatePatch(const X: Single; const Effect: TEffectNode): TCastleScene;
+  var
+    Root: TX3DRootNode;
+    Shape: TShapeNode;
+    Appearance: TAppearanceNode;
+    Box: TBoxNode;
+    Transform: TTransformNode;
+  begin
+    Root := TX3DRootNode.Create;
+    Appearance := TAppearanceNode.Create;
+    Appearance.Material := TUnlitMaterialNode.Create;
+    Appearance.SetEffects([Effect]);
+    Box := TBoxNode.CreateWithShape(Shape);
+    Box.Size := PatchSize;
+    Shape.Appearance := Appearance;
+    Transform := TTransformNode.Create;
+    Transform.Translation := Vector3(X, -0.1, 0);
+    Transform.AddChildren(Shape);
+    Root.AddChildren(Transform);
+    Result := TCastleScene.Create(Window);
+    Result.Load(Root, true);
+  end;
+
+  function HashOf(const Effect: TEffectNode): TShaderCodeHash;
+  begin
+    Result.Clear;
+    Result.AddEffect(Effect);
+  end;
+
+var
+  Viewport: TCastleViewport;
+  A, B, OtherName: TEffectNode;
+  Code: UInt32;
+  Left, Right: TCastleColor;
+begin
+  { hashes: by the code and the uniforms' names and types, not values }
+  A := CreateColorEffect(Vector3(1, 0, 0), Vector3(1, 1, 1));
+  B := CreateColorEffect(Vector3(0, 1, 0), Vector3(0, 0, 1));
+  OtherName := CreateColorEffect(Vector3(1, 0, 0), Vector3(1, 1, 1), 'test_other_color');
+  try
+    AssertTrue(A.InternalCodeHash(Code));
+    AssertTrue(HashOf(A) = HashOf(B));
+    AssertFalse(HashOf(A) = HashOf(OtherName));
+    { without SharedUniforms: by the node }
+    B.SharedUniforms := false;
+    AssertFalse(B.InternalCodeHash(Code));
+    AssertFalse(HashOf(A) = HashOf(B));
+  finally
+    FreeAndNil(A);
+    FreeAndNil(B);
+    FreeAndNil(OtherName);
+  end;
+
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Viewport := OpenWindowWithViewport(Window);
+    { one program, each patch with its own color and texture: red times
+      white on the left, white times green on the right }
+    Viewport.Items.Add(CreatePatch(-PatchX, CreateColorEffect(Vector3(1, 0, 0), Vector3(1, 1, 1))));
+    Viewport.Items.Add(CreatePatch(PatchX, CreateColorEffect(Vector3(1, 1, 1), Vector3(0, 1, 0))));
+
+    Left := RenderedPatchColor(Window, Viewport, -PatchX);
+    Right := RenderedPatchColor(Window, Viewport, PatchX);
+    AssertTrue(Left.X > 0.9);
+    AssertTrue(Left.Y < 0.1);
+    AssertTrue(Right.X < 0.1);
+    AssertTrue(Right.Y > 0.9);
+
+    Window.Close;
+  finally DestroyWindowForTest(Window) end;
 end;
 
 initialization
