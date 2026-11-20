@@ -209,10 +209,28 @@
   { Shader effect, that can be composed with other effect or standard rendering.
     See https://castle-engine.io/shaders . }
   TEffectNode = class(TAbstractChildNode)
+  strict private
+    FSharedUniforms: Boolean;
   protected
     procedure GroupBeforeTraverse(const State: TX3DGraphTraverseState; var WasPointingDeviceSensor: Boolean); override;
   public
     constructor Create(const AX3DName: String = ''; const ABaseUrl: String = ''); override;
+
+    { Share a shader program with other Effect nodes that have equal code
+      and equal uniforms (interface declarations with the same names and
+      field types), setting this node's uniform values (and binding its
+      textures) every time a shape using it is rendered.
+
+      By default (@false) an effect with uniforms has a shader program of
+      its own: its values are set once and then when they change (the
+      program observes the fields). That is cheaper per shape, but many
+      Effect nodes with equal code (e.g. one per shape, or created again
+      when a level is loaded again) link as many shader programs.
+
+      Only fields are supported as uniforms of such effect (not input
+      events, they have no value to set before rendering). An effect with
+      an input event in its interface declarations doesn't share. }
+    property SharedUniforms: Boolean read FSharedUniforms write FSharedUniforms default false;
 
     { Hash of the effect's shader code (language, shader libraries, parts'
       types and contents), for the renderer's cache of shader programs.
@@ -222,6 +240,8 @@
       a shader program with another Effect node, even one with equal code.
       An effect without them is fully described by its code, so
       2 such Effect nodes with equal code can share a shader program.
+      With @link(SharedUniforms), the uniforms' names and field types are
+      hashed too, and the effect shares (its values are set per shape).
       @exclude }
     function InternalCodeHash(out Hash: UInt32): Boolean;
   {$I auto_generated_node_helpers/x3dnodes_effect.inc}
@@ -656,9 +676,26 @@ var
 begin
   Hash := 0;
   if (InterfaceDeclarations <> nil) and (InterfaceDeclarations.Count <> 0) then
-    Exit(false);
+  begin
+    if not SharedUniforms then
+      Exit(false);
+    { events have no value to set before rendering a shape }
+    for I := 0 to InterfaceDeclarations.Count - 1 do
+      if InterfaceDeclarations[I].Field = nil then
+        Exit(false);
+  end;
   {$include norqcheckbegin.inc}
   Hash := UInt32(2166136261) + UInt32(FdLanguage.EnumValue);
+  if (InterfaceDeclarations <> nil) and (InterfaceDeclarations.Count <> 0) then
+  begin
+    { the uniforms: names and types (not values, set per shape) }
+    Hash := Hash * 31 + 3;
+    for I := 0 to InterfaceDeclarations.Count - 1 do
+    begin
+      Hash := EffectStringHash(InterfaceDeclarations[I].Field.X3DName, Hash * 31 + 11);
+      Hash := EffectStringHash(InterfaceDeclarations[I].Field.ClassName, Hash * 31 + 13);
+    end;
+  end;
   for I := 0 to FdShaderLibraries.Count - 1 do
     Hash := EffectStringHash(FdShaderLibraries.Items[I], Hash * 31 + 7);
   for I := 0 to FdParts.Count - 1 do

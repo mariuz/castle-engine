@@ -121,6 +121,11 @@ begin
       UniformsTexturesNames.Delete(I);
     end;
   end;
+  { the textures of this shape's effects with TEffectNode.SharedUniforms
+    (TShader.SetDynamicUniforms): bound for this shape only }
+  for I := 0 to ShapeTextures.Count - 1 do
+    BindTextureUniform(ShapeTextures[I], '');
+  ShapeTextures.Count := 0;
 end;
 
 {$endif read_implementation}
