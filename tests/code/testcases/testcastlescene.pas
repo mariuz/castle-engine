@@ -665,7 +665,7 @@ begin
     'PROFILE Interchange' + LineEnding +
     'DEF S Shape {' + LineEnding +
     '  appearance Appearance {' + LineEnding +
-    '    depthMode DepthMode { depthFunc "lequal" polygonOffset -1 -2 }' + LineEnding +
+    '    depthMode DepthMode { depthFunc "lequal" polygonOffset -1 -2 colorWrite FALSE }' + LineEnding +
     '  }' + LineEnding +
     '  geometry Box { }' + LineEnding +
     '}', '');
@@ -675,12 +675,14 @@ begin
     AssertTrue(DepthMode <> nil);
     AssertTrue(DepthMode.DepthFunc = dmfLessEqual);
     AssertVectorEquals(Vector2(-1, -2), DepthMode.PolygonOffset);
+    AssertFalse(DepthMode.ColorWrite);
   finally FreeAndNil(Root) end;
 
   DepthMode := TDepthModeNode.Create;
   try
     AssertTrue(DepthMode.DepthFunc = dmfDefault);
     AssertVectorEquals(Vector2(0, 0), DepthMode.PolygonOffset);
+    AssertTrue(DepthMode.ColorWrite);
     DepthMode.FdDepthFunc.Value := 'always';
     AssertTrue(DepthMode.DepthFunc = dmfAlways);
   finally FreeAndNil(DepthMode) end;
@@ -784,6 +786,14 @@ begin
     DepthMode.DepthFunc := dmfDefault;
     DepthMode.PolygonOffset := Vector2(0, 0);
     AssertCenter(RedRGB, 'default again');
+
+    // colorWrite FALSE: the green square passes the depth test but leaves
+    // the color (only its depth is written)
+    DepthMode.DepthFunc := dmfAlways;
+    DepthMode.ColorWrite := false;
+    AssertCenter(RedRGB, 'always, colorWrite FALSE');
+    DepthMode.ColorWrite := true;
+    AssertCenter(GreenRGB, 'always, colorWrite TRUE again');
 
     CheckGLErrors('TestDepthModeRender');
     Window.Close;

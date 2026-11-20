@@ -292,6 +292,9 @@ DepthMode {
   SFVec2f    [in,out]      polygonOffset  0 0
     change: chRedisplay
     doc: Polygon offset (factor, units), like OpenGL glPolygonOffset. Zero (default) means no offset. Negative values move the shape towards the camera, to show it over other coplanar shapes (decals).
+  SFBool     [in,out]      colorWrite     TRUE
+    change: chRedisplay
+    doc: Does the shape write the color buffer. @false makes it write only the depth (and stencil) buffer: it hides what is behind it and shows what was drawn before (e.g. a viewport rendered under a @link(TCastleViewport.Transparent) one), like a hole.
 }
 
 # See https://castle-engine.io/mirror_plane

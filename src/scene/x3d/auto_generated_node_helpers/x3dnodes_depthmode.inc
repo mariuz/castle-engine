@@ -28,6 +28,8 @@
     procedure SetDepthFunc(const Value: TDepthModeFunction);
     function GetPolygonOffset: TVector2;
     procedure SetPolygonOffset(const Value: TVector2);
+    function GetColorWrite: Boolean;
+    procedure SetColorWrite(const Value: Boolean);
   public
     { Create node fields and events. }
     procedure CreateNode; override;
@@ -44,6 +46,12 @@
     public property FdPolygonOffset: TSFVec2f read FFdPolygonOffset;
     { Polygon offset (factor, units), like OpenGL glPolygonOffset. Zero (default) means no offset. Negative values move the shape towards the camera, to show it over other coplanar shapes (decals). }
     property PolygonOffset: TVector2 read GetPolygonOffset write SetPolygonOffset;
+
+    strict private FFdColorWrite: TSFBool;
+    { Internal wrapper for property @code(ColorWrite). This wrapper API may change, we advise to access simpler @code(ColorWrite) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
+    public property FdColorWrite: TSFBool read FFdColorWrite;
+    { Does the shape write the color buffer. @false makes it write only the depth (and stencil) buffer: it hides what is behind it and shows what was drawn before (e.g. a viewport rendered under a @link(TCastleViewport.Transparent) one), like a hole. }
+    property ColorWrite: Boolean read GetColorWrite write SetColorWrite;
     procedure GetExtensions(const ExtensionNames: TStrings); override;
 
 {$endif read_interface}
@@ -72,6 +80,16 @@ begin
   FdPolygonOffset.Send(Value);
 end;
 
+function TDepthModeNode.GetColorWrite: Boolean;
+begin
+  Result := FdColorWrite.Value;
+end;
+
+procedure TDepthModeNode.SetColorWrite(const Value: Boolean);
+begin
+  FdColorWrite.Send(Value);
+end;
+
 class function TDepthModeNode.ClassX3DType: String;
 begin
   Result := 'DepthMode';
@@ -88,6 +106,10 @@ begin
   FFdPolygonOffset := TSFVec2f.Create(Self, True, 'polygonOffset', Vector2(0, 0));
    FdPolygonOffset.ChangeAlways := chRedisplay;
   AddField(FFdPolygonOffset);
+
+  FFdColorWrite := TSFBool.Create(Self, True, 'colorWrite', true);
+   FdColorWrite.ChangeAlways := chRedisplay;
+  AddField(FFdColorWrite);
 
   DefaultContainerField := 'depthMode';
 end;
