@@ -713,6 +713,7 @@ type
       MenuItemIcicleOverhang: TMenuItem;
       MenuItemQuadrupedGait: TMenuItem;
       MenuItemZiplineRig: TMenuItem;
+      MenuItemFractureVoronoi: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -846,6 +847,7 @@ type
     procedure MenuItemIcicleOverhangClick(Sender: TObject);
     procedure MenuItemQuadrupedGaitClick(Sender: TObject);
     procedure MenuItemZiplineRigClick(Sender: TObject);
+    procedure MenuItemFractureVoronoiClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3035,6 +3037,11 @@ begin
   MenuItemZiplineRig.Caption := 'Procedural Zipline, Pulley Acceleration & Vault Studio...';
   MenuItemZiplineRig.OnClick := @MenuItemZiplineRigClick;
   MenuItemDesign.Add(MenuItemZiplineRig);
+
+  MenuItemFractureVoronoi := TMenuItem.Create(MenuItemDesign);
+  MenuItemFractureVoronoi.Caption := 'Voronoi Destruction Fracture & BFS Collapse Studio...';
+  MenuItemFractureVoronoi.OnClick := @MenuItemFractureVoronoiClick;
+  MenuItemDesign.Add(MenuItemFractureVoronoi);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6689,6 +6696,12 @@ procedure TProjectForm.MenuItemZiplineRigClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowZiplineRigDialog;
+end;
+
+procedure TProjectForm.MenuItemFractureVoronoiClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowFractureVoronoiDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="271">
+    <Units Count="273">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1437,6 +1437,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormZiplineRig"/>
       </Unit270>
+      <Unit271>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolfracturevoronoi.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFractureVoronoi"/>
+      </Unit271>
+      <Unit272>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formfracturevoronoi.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFractureVoronoi"/>
+      </Unit272>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

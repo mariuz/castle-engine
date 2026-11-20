@@ -226,6 +226,7 @@ uses
   TestToolIcicleOverhang,
   TestToolQuadrupedGait,
   TestToolZiplineRig,
+  TestToolFractureVoronoi,
   TestCastleVulkanRHI;
 
 implementation

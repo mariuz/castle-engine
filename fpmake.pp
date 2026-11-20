@@ -609,6 +609,7 @@ begin
     P.Targets.AddUnit('castleicicleoverhang.pas');
     P.Targets.AddUnit('castlequadrupedgait.pas');
     P.Targets.AddUnit('castleziplinerig.pas');
+    P.Targets.AddUnit('castlefracturevoronoi.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

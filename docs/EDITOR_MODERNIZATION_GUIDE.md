@@ -4862,6 +4862,13 @@ Phase 399 adds **Sloped Zipline Pulley Traversal & Momentum Vaulting** via `TCas
 - **Rider-Loaded Sag & Tangential Pulley Kinematics (`StepZiplineRide`)**: Integrates downhill gravity acceleration, rolling friction, quadratic air drag, hand-brake clamping, and end-of-line arrestor spring braking across 3 presets (`zrpAlpineCanyonZipline`, `zrpUrbanTacticalRappelLine`, `zrpHeavyMinecartCableway`).
 - **Mid-Span Momentum Vault (`DisembarkVaultLaunch`)**: Detaches the rider cleanly with tangential cable velocity plus `VaultJumpUpSpeedMps`.
 
+## 66DU. Phase 400 (Milestone 400th Phase!): Voronoi Fracture Cell Cutter, Bond Graph & BFS Ground-Support Collapse Studio
+
+Phase 400 marks the **400th Editor Modernization Phase** with **Chaos-Style 3D Voronoi Fracture & BFS Connectivity Collapse** via `TCastleVoronoiFractureVolume` (`src/scene/castlefracturevoronoi.pas`), `TFractureVoronoiHelper` (`tools/common-code/toolfracturevoronoi.pas`), and `TFractureVoronoiForm` (`tools/castle-editor/code/formfracturevoronoi.pas`), accessible from **`Voronoi`** in the top viewport toolbar, **`Design -> Voronoi Destruction Fracture & BFS Collapse Studio...`**, or `LaunchStudioById('fracture_voronoi')`.
+
+- **Volume-Conserving 3D Voronoi Partition & Facet Bonds (`GenerateVoronoiShards`)**: Partitions walls/pillars into stratified Voronoi shards ($\sum V_i = W H D$) and extracts 6-neighbor facet-sharing tensile bonds across 3 presets (`vfpBrittleMasonryWall`, `vfpReinforcedConcretePillar`, `vfpShatteredTemperedGlass`).
+- **BFS Ground-Support Collapse (`RecomputeSupportConnectivityBFS`)**: Runs Breadth-First Search from `IsGroundAnchored` foundation shards across unbroken bonds so severed upper structures collapse cleanly onto the rubble floor (`Y >= 0`) with zero floating sky-islands.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5049,4 +5056,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolicicleoverhang.pas`](../tests/code/testcases/testtoolicicleoverhang.pas) (`TTestToolIcicleOverhang` — 2 tests)**: Verifies upward `WorldRay` overhang detection with zero open-sky floating spikes, paired floor stalagmite alignment, cramped crawlspace rejection (`< MinClearDropMeters`), Stefan tapered profile radii, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolquadrupedgait.pas`](../tests/code/testcases/testtoolquadrupedgait.pas) (`TTestToolQuadrupedGait` — 2 tests)**: Verifies 20-step hexapod tripod static stability (`>= 3` grounded legs), elevated front rock-ledge nose-up `BodyPitchDeg > 5°`, exact parabolic swing apex lift, `8`-leg arachnid preset, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolziplinerig.pas`](../tests/code/testcases/testtoolziplinerig.pas) (`TTestToolZiplineRig` — 2 tests)**: Verifies downhill gravity acceleration (`> 5.0 m/s`), live rider cable sag, hand-brake deceleration, end-of-line arrestor collar stop (`Speed = 0`), momentum-conserving mid-span vault launch, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolfracturevoronoi.pas`](../tests/code/testcases/testtoolfracturevoronoi.pas) (`TTestToolFractureVoronoi` — 2 tests)**: Verifies exact `7.20 m^3` Voronoi volume conservation, waist-band cannon breach triggering BFS floating-parapet detachment (`>= 8` falling shards), reinforced concrete `480 Ns` impact resistance, `Y >= 0` rubble floor arrest, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
