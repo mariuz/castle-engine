@@ -712,7 +712,8 @@ procedure TRenderer.RenderShape(const Shape: TX3DRendererShape;
     by DepthModeEnd. }
   function DepthModeBegin(const DepthMode: TDepthModeNode;
     out SavedDepthFunc: TDepthFunction;
-    out SavedPolygonOffset: TPolygonOffset): Boolean;
+    out SavedPolygonOffset: TPolygonOffset;
+    out SavedColorChannels: TColorChannels): Boolean;
   const
     DepthFunctions: array [TDepthModeFunction] of TDepthFunction = (
       dfLess, // dmfDefault, not used
@@ -740,7 +741,12 @@ procedure TRenderer.RenderShape(const Shape: TX3DRendererShape;
 
     SavedDepthFunc := RenderContext.DepthFunc;
     SavedPolygonOffset := RenderContext.PolygonOffset;
+    SavedColorChannels := RenderContext.ColorChannels;
     Result := true;
+
+    { colorWrite FALSE: only depth (and stencil) }
+    if not DepthMode.ColorWrite then
+      RenderContext.ColorChannels := [];
 
     if DepthMode.DepthFunc <> dmfDefault then
     begin
@@ -779,10 +785,12 @@ procedure TRenderer.RenderShape(const Shape: TX3DRendererShape;
   end;
 
   procedure DepthModeEnd(const SavedDepthFunc: TDepthFunction;
-    const SavedPolygonOffset: TPolygonOffset);
+    const SavedPolygonOffset: TPolygonOffset;
+    const SavedColorChannels: TColorChannels);
   begin
     RenderContext.DepthFunc := SavedDepthFunc;
     RenderContext.PolygonOffset := SavedPolygonOffset;
+    RenderContext.ColorChannels := SavedColorChannels;
   end;
 
 var
@@ -790,12 +798,13 @@ var
   DepthModeChanged: Boolean;
   SavedDepthFunc: TDepthFunction;
   SavedPolygonOffset: TPolygonOffset;
+  SavedColorChannels: TColorChannels;
 begin
   InitializeFromRenderOptions;
 
   RenderContext.DepthRange := DepthRange;
   DepthModeChanged := DepthModeBegin(Shape.State.DepthMode,
-    SavedDepthFunc, SavedPolygonOffset);
+    SavedDepthFunc, SavedPolygonOffset, SavedColorChannels);
 
   Shader := InitializeShader;
   FixedFunctionBegin(Shader.SceneModelView);
@@ -805,7 +814,7 @@ begin
   FixedFunctionEnd;
 
   if DepthModeChanged then
-    DepthModeEnd(SavedDepthFunc, SavedPolygonOffset);
+    DepthModeEnd(SavedDepthFunc, SavedPolygonOffset, SavedColorChannels);
 end;
 
 procedure TRenderer.RenderShapeLineProperties(const Shape: TX3DRendererShape;
