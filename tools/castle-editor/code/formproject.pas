@@ -716,6 +716,7 @@ type
       MenuItemFractureVoronoi: TMenuItem;
       MenuItemThermalMirage: TMenuItem;
       MenuItemStealthLightGem: TMenuItem;
+      MenuItemGrapplePendulum: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -852,6 +853,7 @@ type
     procedure MenuItemFractureVoronoiClick(Sender: TObject);
     procedure MenuItemThermalMirageClick(Sender: TObject);
     procedure MenuItemStealthLightGemClick(Sender: TObject);
+    procedure MenuItemGrapplePendulumClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3056,6 +3058,11 @@ begin
   MenuItemStealthLightGem.Caption := 'Tactical Stealth Light-Gem & Backlight Silhouette Studio...';
   MenuItemStealthLightGem.OnClick := @MenuItemStealthLightGemClick;
   MenuItemDesign.Add(MenuItemStealthLightGem);
+
+  MenuItemGrapplePendulum := TMenuItem.Create(MenuItemDesign);
+  MenuItemGrapplePendulum.Caption := 'Grappling Hook Pendulum Swing, Winch Reel & Apex Jump Studio...';
+  MenuItemGrapplePendulum.OnClick := @MenuItemGrapplePendulumClick;
+  MenuItemDesign.Add(MenuItemGrapplePendulum);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6728,6 +6735,12 @@ procedure TProjectForm.MenuItemStealthLightGemClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowStealthLightGemDialog;
+end;
+
+procedure TProjectForm.MenuItemGrapplePendulumClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowGrapplePendulumDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

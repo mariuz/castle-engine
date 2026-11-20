@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="277">
+    <Units Count="279">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1467,6 +1467,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormStealthLightGem"/>
       </Unit276>
+      <Unit277>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolgrapplependulum.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGrapplePendulum"/>
+      </Unit277>
+      <Unit278>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formgrapplependulum.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGrapplePendulum"/>
+      </Unit278>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

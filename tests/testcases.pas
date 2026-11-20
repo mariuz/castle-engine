@@ -229,6 +229,7 @@ uses
   TestToolFractureVoronoi,
   TestToolThermalMirage,
   TestToolStealthLightGem,
+  TestToolGrapplePendulum,
   TestCastleVulkanRHI;
 
 implementation

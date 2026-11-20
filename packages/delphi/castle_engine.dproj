@@ -552,6 +552,7 @@
         <DCCReference Include="..\..\src\scene\castlefracturevoronoi.pas"/>
         <DCCReference Include="..\..\src\scene\castlethermalmirage.pas"/>
         <DCCReference Include="..\..\src\scene\castlestealthlightgem.pas"/>
+        <DCCReference Include="..\..\src\scene\castlegrapplependulum.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>
