@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="279">
+    <Units Count="281">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1477,6 +1477,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormGrapplePendulum"/>
       </Unit278>
+      <Unit279>
+        <Filename Value="../common-code/toolflameflicker.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFlameFlicker"/>
+      </Unit279>
+      <Unit280>
+        <Filename Value="code/formflameflicker.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFlameFlicker"/>
+      </Unit280>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

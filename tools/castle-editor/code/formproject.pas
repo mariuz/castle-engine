@@ -717,6 +717,7 @@ type
       MenuItemThermalMirage: TMenuItem;
       MenuItemStealthLightGem: TMenuItem;
       MenuItemGrapplePendulum: TMenuItem;
+      MenuItemFlameFlicker: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -854,6 +855,7 @@ type
     procedure MenuItemThermalMirageClick(Sender: TObject);
     procedure MenuItemStealthLightGemClick(Sender: TObject);
     procedure MenuItemGrapplePendulumClick(Sender: TObject);
+    procedure MenuItemFlameFlickerClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3063,6 +3065,11 @@ begin
   MenuItemGrapplePendulum.Caption := 'Grappling Hook Pendulum Swing, Winch Reel & Apex Jump Studio...';
   MenuItemGrapplePendulum.OnClick := @MenuItemGrapplePendulumClick;
   MenuItemDesign.Add(MenuItemGrapplePendulum);
+
+  MenuItemFlameFlicker := TMenuItem.Create(MenuItemDesign);
+  MenuItemFlameFlicker.Caption := 'Procedural Torch Blackbody Flicker, Wind Blowout & Soot Studio...';
+  MenuItemFlameFlicker.OnClick := @MenuItemFlameFlickerClick;
+  MenuItemDesign.Add(MenuItemFlameFlicker);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6741,6 +6748,12 @@ procedure TProjectForm.MenuItemGrapplePendulumClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowGrapplePendulumDialog;
+end;
+
+procedure TProjectForm.MenuItemFlameFlickerClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowFlameFlickerDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

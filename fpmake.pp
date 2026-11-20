@@ -613,6 +613,7 @@ begin
     P.Targets.AddUnit('castlethermalmirage.pas');
     P.Targets.AddUnit('castlestealthlightgem.pas');
     P.Targets.AddUnit('castlegrapplependulum.pas');
+    P.Targets.AddUnit('castleflameflicker.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

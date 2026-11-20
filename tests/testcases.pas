@@ -230,6 +230,7 @@ uses
   TestToolThermalMirage,
   TestToolStealthLightGem,
   TestToolGrapplePendulum,
+  TestToolFlameFlicker,
   TestCastleVulkanRHI;
 
 implementation
