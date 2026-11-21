@@ -237,6 +237,7 @@ uses
   TestToolAvalancheSlide,
   TestToolMagneticField,
   TestToolClimbingHold,
+  TestToolLaserBeam,
   TestCastleVulkanRHI;
 
 implementation

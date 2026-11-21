@@ -4939,6 +4939,13 @@ Phase 410 marks the **410th Editor Modernization Phase** with **Free-Climbing Le
 - **`WorldRay` Ledge-Lip Extraction & Summit BFS (`ScanCliffLedgeHolds` / `CanReachSummitBFS`)**: Pairs recessed depth differentials (`>= MinLedgeLipDepthMeters`) with downward top-lip rays to reject smooth sheer walls while solving static arm-reach vs. **Dyno leap** summit paths across 3 presets (`chpAthleticRockClimber`, `chpHeavyArmoredMountaineer`, `chpAssassinSpeedScaler`).
 - **Overhang & Rain Stamina Drain (`ComputeStaminaDrainPerSec`)**: Scales grip fatigue across inclined slabs (`< 0°`), vertical cliffs (`0°`), negative overhangs (`> 0°`), and rain slipperiness.
 
+## 66EF. Phase 411: Multi-Bounce Optical Laser, Mirror Reflection, Snell Prism Refraction & Beam-Break Cutoff Studio
+
+Phase 411 adds **Portal / Talos-Style Multi-Bounce Optical Laser Puzzles** via `TCastleLaserBeamRig` (`src/scene/castlelaserbeam.pas`), `TLaserBeamHelper` (`tools/common-code/toollaserbeam.pas`), and `TLaserBeamForm` (`tools/castle-editor/code/formlaserbeam.pas`), accessible from **`Laser`** in the top viewport toolbar, **`Design -> Multi-Bounce Optical Laser, Mirror/Prism & Cutoff Gate Studio...`**, or `LaunchStudioById('laser_beam')`.
+
+- **Iterative `WorldRay` Mirror Bounce & Receiver Powering (`TraceLaserBeam`)**: Reflects beams across rotated `Mirror_*` surfaces, powers `Receiver_*` goal crystals, and cuts off immediately on opaque blockers across 3 presets (`lbpRubyPuzzleRelayLaser`, `lbpHighPowerIndustrialCutter`, `lbpCrownGlassPrismLab`).
+- **Exact Vector Snell's Law & Total Internal Reflection (`ComputeSnellRefractionOrTIR`)**: Evaluates $n_1 \sin\theta_1 = n_2 \sin\theta_2$ refraction and critical-angle TIR inside `Prism_*` dielectrics.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5137,4 +5144,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolavalancheslide.pas`](../tests/code/testcases/testtoolavalancheslide.pas) (`TTestToolAvalancheSlide` — 2 tests)**: Verifies exact `72.0 m^3` debris volume conservation across `80` passes, `16°` wet-slab snow vs. `38°` granite scree runout scaling, `WorldRay` `6.0m` concrete retention berm arresting `100%` of debris upstream (`0.0 m^3` downstream), and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmagneticfield.pas`](../tests/code/testcases/testtoolmagneticfield.pas) (`TTestToolMagneticField` — 2 tests)**: Verifies exact `2.0x` polar-to-equatorial $|\mathbf{B}|$ ratio, $1/r^3$ falloff, North–South attraction vs. North–North repulsion symmetry, Lenz eddy-current velocity braking, `WorldRay` inverted zero-G hull mag-boot locking, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolclimbinghold.pas`](../tests/code/testcases/testtoolclimbinghold.pas) (`TTestToolClimbingHold` — 2 tests)**: Verifies `WorldRay` protruding ledge-lip extraction (`4` West-face holds vs. `0` on the smooth sheer East monolith), static arm-reach block vs. `3`-hop Dyno summit BFS, slab/vertical/`+40°` overhang + rainstorm stamina drain scaling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoollaserbeam.pas`](../tests/code/testcases/testtoollaserbeam.pas) (`TTestToolLaserBeam` — 2 tests)**: Verifies two-`45°`-mirror U-turn optical relay powering `Receiver_CrystalGoal`, instant Leg #2 `Crate_BeamBlocker` cutoff, exact $n_1 \sin\theta_1 = n_2 \sin\theta_2$ Snell refraction, `60°` crown-glass Total Internal Reflection, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

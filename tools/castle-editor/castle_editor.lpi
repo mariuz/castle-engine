@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="293">
+    <Units Count="295">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1547,6 +1547,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormClimbingHold"/>
       </Unit292>
+      <Unit293>
+        <Filename Value="../common-code/toollaserbeam.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolLaserBeam"/>
+      </Unit293>
+      <Unit294>
+        <Filename Value="code/formlaserbeam.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormLaserBeam"/>
+      </Unit294>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
