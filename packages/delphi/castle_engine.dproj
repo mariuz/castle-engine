@@ -565,6 +565,7 @@
         <DCCReference Include="..\..\src\scene\castlebossarena.pas"/>
         <DCCReference Include="..\..\src\scene\castleturretgimbal.pas"/>
         <DCCReference Include="..\..\src\scene\castlesonarpulse.pas"/>
+        <DCCReference Include="..\..\src\scene\castlegearlinkage.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>

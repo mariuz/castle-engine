@@ -241,6 +241,7 @@ uses
   TestToolBossArena,
   TestToolTurretGimbal,
   TestToolSonarPulse,
+  TestToolGearLinkage,
   TestCastleVulkanRHI;
 
 implementation

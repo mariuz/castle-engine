@@ -728,6 +728,7 @@ type
       MenuItemBossArena: TMenuItem;
       MenuItemTurretGimbal: TMenuItem;
       MenuItemSonarPulse: TMenuItem;
+      MenuItemGearLinkage: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -876,6 +877,7 @@ type
     procedure MenuItemBossArenaClick(Sender: TObject);
     procedure MenuItemTurretGimbalClick(Sender: TObject);
     procedure MenuItemSonarPulseClick(Sender: TObject);
+    procedure MenuItemGearLinkageClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3140,6 +3142,11 @@ begin
   MenuItemSonarPulse.Caption := '3D Echolocation & Active Sonar Pulse (Wavefront & Doppler) Studio...';
   MenuItemSonarPulse.OnClick := @MenuItemSonarPulseClick;
   MenuItemDesign.Add(MenuItemSonarPulse);
+
+  MenuItemGearLinkage := TMenuItem.Create(MenuItemDesign);
+  MenuItemGearLinkage.Caption := 'Mechanical Gear Train, Rack-and-Pinion & Clockwork Studio...';
+  MenuItemGearLinkage.OnClick := @MenuItemGearLinkageClick;
+  MenuItemDesign.Add(MenuItemGearLinkage);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6884,6 +6891,12 @@ procedure TProjectForm.MenuItemSonarPulseClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSonarPulseDialog;
+end;
+
+procedure TProjectForm.MenuItemGearLinkageClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowGearLinkageDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

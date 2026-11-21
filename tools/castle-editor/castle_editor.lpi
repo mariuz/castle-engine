@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="301">
+    <Units Count="303">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1587,6 +1587,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSonarPulse"/>
       </Unit300>
+      <Unit301>
+        <Filename Value="../common-code/toolgearlinkage.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolGearLinkage"/>
+      </Unit301>
+      <Unit302>
+        <Filename Value="code/formgearlinkage.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormGearLinkage"/>
+      </Unit302>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

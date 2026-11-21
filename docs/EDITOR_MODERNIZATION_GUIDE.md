@@ -4967,6 +4967,13 @@ Phase 414 adds **Active Sonar Roundtrip Echoes, Material Reflectivity & Monostat
 - **Two-Way Roundtrip Echo Gate & Stealth Reflectivity (`EmitSonarPing` / `StepPulsePropagation`)**: Expands $R(t) = c \cdot t$ and keeps contacts hidden until $t \ge 2 d / c$, scaling phosphor blips by steel (`0.95`) vs. anechoic stealth (`0.08`) reflectivity across 3 presets (`sppSubmarineHydrophone1500`, `sppBatCaveBiosonar343`, `sppSciFiMotionTrackerPulse`).
 - **Exact Monostatic Doppler Shift (`ComputeTwoWayDopplerShiftHz`)**: Evaluates $\Delta f = f_0 (\frac{c + v_{\text{closing}}}{c - v_{\text{closing}}} - 1)$ and rejects contacts shadowed behind `WorldRay` ridges.
 
+## 66EJ. Phase 415: Mechanical Gear Train, Rack-and-Pinion, Belt Pulley & Jam Detection Studio
+
+Phase 415 adds **Topological Clockwork Gear Trains, Portcullis Racks & Odd-Cycle Jam Detection** via `TCastleGearLinkage` (`src/scene/castlegearlinkage.pas`), `TGearLinkageHelper` (`tools/common-code/toolgearlinkage.pas`), and `TGearLinkageForm` (`tools/castle-editor/code/formgearlinkage.pas`), accessible from **`Gears`** in the top viewport toolbar, **`Design -> Mechanical Gear Train, Rack-and-Pinion & Clockwork Studio...`**, or `LaunchStudioById('gear_linkage')`.
+
+- **Spur, Belt, Coaxial & Rack-and-Pinion Kinematics (`SolveGearTrainKinematics`)**: Propagates RPM, sign reversals, stage-efficiency torque $\tau_B = \tau_A (Z_B/Z_A)\eta$, and linear rack speed $v = \omega R$ across 3 presets (`glpPortcullisWinchCompoundTrain`, `glpCathedralClocktowerEscapement`, `glpBeltDrivenSawmillPulley`).
+- **Contradictory Loop Jam Detection (`IsJammedLoop`)**: Flags odd-cycle 3-gear triangular meshes and mismatched closed ratios, freezing all shafts safely.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5169,4 +5176,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolbossarena.pas`](../tests/code/testcases/testtoolbossarena.pas) (`TTestToolBossArena` — 2 tests)**: Verifies 3-zone overlapping Cone + Donut + Shock-Ring hit summation (`1370` dmg), `R < 3.5m` inner donut safe-eye, `WorldRay` `RaidLineOfSightPillar` breath occlusion, `1.35m` airborne jump over `0.90m` ground shockwave rings, rotated charge lanes, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolturretgimbal.pas`](../tests/code/testcases/testtoolturretgimbal.pas) (`TTestToolTurretGimbal` — 2 tests)**: Verifies shortest-arc `+170° -> -170°` `20°` wraparound slew, `[-45°..+45°]` casemate clamping, `WorldRay` `FriendlyShipSuperstructureBridge` fire inhibit, 3-salvo overheat lockout & cooling hysteresis, critically-damped recoil recovery, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsonarpulse.pas`](../tests/code/testcases/testtoolsonarpulse.pas) (`TTestToolSonarPulse` — 2 tests)**: Verifies two-way $t \ge 2 d / c$ echo arrival gating (`12m` steel wreck revealed at `0.75s` while `32m` anechoic sub stays hidden until `> 1.60s`), phosphor decay, `+142.86 Hz` closing vs. negative receding Doppler shifts, `WorldRay` seamount ridge occlusion, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolgearlinkage.pas`](../tests/code/testcases/testtoolgearlinkage.pas) (`TTestToolGearLinkage` — 2 tests)**: Verifies `12:1` compound spur/coaxial reduction (`+120 -> -40 -> +10 RPM`, `108.3 Nm` torque), rack-and-pinion portcullis lift (`+1.047 m/s`), sign-preserving belt pulleys (`+360 RPM`), 3-gear odd-triangle jam detection vs. 4-gear even-loop free spin, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
