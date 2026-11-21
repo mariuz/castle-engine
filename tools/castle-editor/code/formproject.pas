@@ -721,6 +721,7 @@ type
       MenuItemCrowdFormation: TMenuItem;
       MenuItemLodInstancing: TMenuItem;
       MenuItemPuddleWetness: TMenuItem;
+      MenuItemAvalancheSlide: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -862,6 +863,7 @@ type
     procedure MenuItemCrowdFormationClick(Sender: TObject);
     procedure MenuItemLodInstancingClick(Sender: TObject);
     procedure MenuItemPuddleWetnessClick(Sender: TObject);
+    procedure MenuItemAvalancheSlideClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3091,6 +3093,11 @@ begin
   MenuItemPuddleWetness.Caption := 'Procedural Rain Puddle, Roof Shelter & Splash Ripple Studio...';
   MenuItemPuddleWetness.OnClick := @MenuItemPuddleWetnessClick;
   MenuItemDesign.Add(MenuItemPuddleWetness);
+
+  MenuItemAvalancheSlide := TMenuItem.Create(MenuItemDesign);
+  MenuItemAvalancheSlide.Caption := 'Granular Rockslide, Talus Scree & Avalanche Runout Studio...';
+  MenuItemAvalancheSlide.OnClick := @MenuItemAvalancheSlideClick;
+  MenuItemDesign.Add(MenuItemAvalancheSlide);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6793,6 +6800,12 @@ procedure TProjectForm.MenuItemPuddleWetnessClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowPuddleWetnessDialog;
+end;
+
+procedure TProjectForm.MenuItemAvalancheSlideClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowAvalancheSlideDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

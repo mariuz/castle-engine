@@ -234,6 +234,7 @@ uses
   TestToolCrowdFormation,
   TestToolLodInstancing,
   TestToolPuddleWetness,
+  TestToolAvalancheSlide,
   TestCastleVulkanRHI;
 
 implementation

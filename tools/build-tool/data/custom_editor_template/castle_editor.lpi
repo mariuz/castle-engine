@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="287">
+    <Units Count="289">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1517,6 +1517,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormPuddleWetness"/>
       </Unit286>
+      <Unit287>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolavalancheslide.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolAvalancheSlide"/>
+      </Unit287>
+      <Unit288>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formavalancheslide.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormAvalancheSlide"/>
+      </Unit288>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

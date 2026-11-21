@@ -4918,6 +4918,13 @@ Phase 407 opens **Horizon 15 (`Phases 407–416`)** with **Rain Puddle Basin Poo
 - **Upward `WorldRay` Roof Shelter & Basin Pooling (`SampleSurfaceWetnessAtWorld`)**: Keeps areas beneath bridges, awnings, and porches dry (`RoofSheltered = True`) while pooling standing mirror puddles (`EffectiveRoughness = 0.025`) and capillary porous darkening (`PorousAlbedoScale`) in open-sky basins across 3 presets (`pwpCobblestoneAlleyStorm`, `pwpMuddyTrenchDownpour`, `pwpMarbleCourtyardAfterRain`).
 - **Ring-Buffered Footstep & Raindrop Ripples (`TriggerSplashAtWorld`)**: Propagates damped circular wave crests ($R = v \cdot t$) across `MaxPooledPuddleRipples = 24` slots.
 
+## 66EC. Phase 408: Granular Rockslide, Talus Scree Cone & Angle-of-Repose Avalanche Studio
+
+Phase 408 adds **Mohr–Coulomb Granular Debris Chutes & Deflection Berm Arrest** via `TCastleAvalancheSlide` (`src/scene/castleavalancheslide.pas`), `TAvalancheSlideHelper` (`tools/common-code/toolavalancheslide.pas`), and `TAvalancheSlideForm` (`tools/castle-editor/code/formavalancheslide.pas`), accessible from **`Rockslide`** in the top viewport toolbar, **`Design -> Granular Rockslide, Talus Scree & Avalanche Runout Studio...`**, or `LaunchStudioById('avalanche_slide')`.
+
+- **Mass-Conserving Mohr–Coulomb Relaxation (`StepAvalancheRelaxation`)**: Relaxes over-steepened slopes above $\Delta x \tan\theta_r$ with exact pairwise volume conservation across 3 presets (`aspGraniteTalusRockslide` `38°`, `aspDryDuneSandAvalanche` `31°`, `aspWetAlpineSlabAvalanche` `16°`).
+- **`WorldRay` Bedrock & Retention Berm Baking (`BakeBedrockAndBermsFromWorld`)**: Captures 3D snow-shed walls and deflection berms so downstream roads remain protected.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5113,4 +5120,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolcrowdformation.pas`](../tests/code/testcases/testtoolcrowdformation.pas) (`TTestToolCrowdFormation` — 2 tests)**: Verifies 16-unit phalanx lateral split-around past a `3.0m` granite boulder with zero footprint intrusion, `0.65m` walkable stone-terrace elevation snapping, V-wedge wing symmetry, `360°` outward VIP shield-circle facing vectors, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoollodinstancing.pas`](../tests/code/testcases/testtoollodinstancing.pas) (`TTestToolLodInstancing` — 2 tests)**: Verifies `19 -> 3` (`-84.2%`) colonnade GPU instancing draw-call reduction, `>= 9` threshold filtering, 4-tier perspective screen-size LOD distance & `1.12x` exit hysteresis monotonicity, the unified **126-Studio Hub** catalog (`Phases 1–406`), and the **22nd MCP tool** `cge_optimize_lod_instancing` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolpuddlewetness.pas`](../tests/code/testcases/testtoolpuddlewetness.pas) (`TTestToolPuddleWetness` — 2 tests)**: Verifies open-sky `> 25mm` puddle pooling (`0.025` mirror roughness + capillary darkening) vs. upward `WorldRay` porch-awning dry shelter (`0mm`, `1.0` albedo), `R = v * t` splash wavefront crest propagation, `24`-slot ring cap, sun evaporation, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolavalancheslide.pas`](../tests/code/testcases/testtoolavalancheslide.pas) (`TTestToolAvalancheSlide` — 2 tests)**: Verifies exact `72.0 m^3` debris volume conservation across `80` passes, `16°` wet-slab snow vs. `38°` granite scree runout scaling, `WorldRay` `6.0m` concrete retention berm arresting `100%` of debris upstream (`0.0 m^3` downstream), and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
