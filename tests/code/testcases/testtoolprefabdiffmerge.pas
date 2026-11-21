@@ -93,10 +93,8 @@ end;
 
 procedure TTestToolPrefabDiffMerge.TestUnified106StudioHubCatalogAnd20thMcpDiffMergeSceneTool;
 const
-  Horizon12Ids: array[0..9] of String = (
-    'portal_studio', 'sensory_perception', 'ivy_climber', 'footstep_director',
-    'gravity_field', 'cloud_shadows', 'trail_stamper', 'cover_point_scanner',
-    'catenary_cable', 'prefab_diff_merge'
+  Horizon11MidIds: array[0..2] of String = (
+    'gravity_field', 'cloud_shadows', 'prefab_diff_merge'
   );
 var
   Entry: TStudioCatalogEntry;
@@ -110,12 +108,12 @@ var
   ToolsArr: TJSONArray;
   PayloadObj: TJSONObject;
 begin
-  { 1. Verify all 106 studios (Horizons 2-12, Phases 1-386) are registered }
-  AssertEquals(136, TStudioHubManager.StudioCount);
-  for I := 0 to High(Horizon12Ids) do
+  { 1. Verify all 100 UE 5.x studios (Horizons 2-11, Phases 1-380) are registered }
+  AssertEquals(100, TStudioHubManager.StudioCount);
+  for I := 0 to High(Horizon11MidIds) do
   begin
-    AssertTrue(TStudioHubManager.FindStudioById(Horizon12Ids[I], Entry));
-    AssertEquals(377 + I, Entry.PhaseNumber);
+    AssertTrue(TStudioHubManager.FindStudioById(Horizon11MidIds[I], Entry));
+    AssertEquals(373 + I, Entry.PhaseNumber);
   end;
 
   { 2. Verify 20th MCP tool cge_diff_merge_scene in tools/list and live JSON-RPC execution }
@@ -166,7 +164,7 @@ begin
       try
         PayloadObj := PayloadData as TJSONObject;
         AssertTrue(PayloadObj.Booleans['ok']);
-        AssertEquals(136, PayloadObj.Integers['studioCatalogCount']);
+        AssertEquals(100, PayloadObj.Integers['studioCatalogCount']);
         AssertEquals(1, PayloadObj.Integers['conflictCount']);
         AssertTrue(PayloadObj.Integers['autoMergedCount'] >= 3);
         AssertTrue(Pos('WatchtowerTheirs', PayloadObj.Strings['mergedJson']) > 0);

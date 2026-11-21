@@ -91,9 +91,9 @@ end;
 
 procedure TTestToolMacroRecorder.TestUnified96StudioHubCatalogAnd19thMcpRunEditorMacroTool;
 const
-  Horizon11Ids: array[0..9] of String = (
-    'substrate_studio', 'smart_object_slots', 'aero_foil', 'crevice_clutter', 'camera_shake',
-    'fire_grid_2d', 'gameplay_messenger', 'octahedral_impostor', 'pose_snapshot', 'macro_recorder'
+  Horizon11Ids: array[0..5] of String = (
+    'substrate_studio', 'fire_grid_2d', 'gameplay_messenger',
+    'octahedral_impostor', 'pose_snapshot', 'macro_recorder'
   );
 var
   DesignOwner: TComponent;
@@ -105,8 +105,8 @@ var
   OuterJson, InnerJson: TJSONData;
   I: Integer;
 begin
-  { 1. Verify all 96 studios across Horizons 2-11 are indexed in TStudioHubManager }
-  AssertEquals(136, TStudioHubManager.StudioCount);
+  { 1. Verify all 100 UE 5.x studios across Horizons 2-11 are indexed in TStudioHubManager }
+  AssertEquals(100, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon11Ids) do
     AssertTrue('Missing Horizon 11 studio in Hub: ' + Horizon11Ids[I],
       TStudioHubManager.FindStudioById(Horizon11Ids[I], Entry));
@@ -135,7 +135,7 @@ begin
       try
         AssertTrue(TJSONObject(InnerJson).Booleans['ok']);
         AssertEquals(1, TJSONObject(InnerJson).Integers['stepCount']);
-        AssertEquals(136, TJSONObject(InnerJson).Integers['studioCatalogCount']);
+        AssertEquals(100, TJSONObject(InnerJson).Integers['studioCatalogCount']);
       finally
         FreeAndNil(InnerJson);
       end;

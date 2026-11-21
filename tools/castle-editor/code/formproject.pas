@@ -681,54 +681,18 @@ type
       MenuItemPreloadStudio: TMenuItem;
       MenuItemCollabPresence: TMenuItem;
       MenuItemSubstrateStudio: TMenuItem;
-      MenuItemSmartObjectSlots: TMenuItem;
-      MenuItemAeroFoil: TMenuItem;
-      MenuItemCreviceClutter: TMenuItem;
-      MenuItemCameraShake: TMenuItem;
       MenuItemFireGrid2D: TMenuItem;
       MenuItemGameplayMessenger: TMenuItem;
       MenuItemOctahedralImpostor: TMenuItem;
       MenuItemPoseSnapshot: TMenuItem;
       MenuItemMacroRecorder: TMenuItem;
-      MenuItemPortalStudio: TMenuItem;
-      MenuItemSensoryPerception: TMenuItem;
-      MenuItemIvyClimber: TMenuItem;
-      MenuItemFootstepDirector: TMenuItem;
       MenuItemGravityField: TMenuItem;
       MenuItemCloudShadows: TMenuItem;
-      MenuItemTrailStamper: TMenuItem;
-      MenuItemCoverPointScanner: TMenuItem;
-      MenuItemCatenaryCable: TMenuItem;
       MenuItemPrefabDiffMerge: TMenuItem;
       MenuItemBallisticStudio: TMenuItem;
       MenuItemAcousticSpace: TMenuItem;
-      MenuItemSuspensionBridge: TMenuItem;
-      MenuItemWorldWaypoint: TMenuItem;
-      MenuItemBuoyancyHull: TMenuItem;
-      MenuItemSpiderweb: TMenuItem;
-      MenuItemFoliageTrample: TMenuItem;
-      MenuItemInteractScanner: TMenuItem;
-      MenuItemSplatterBurst: TMenuItem;
       MenuItemBudgetTreemap: TMenuItem;
-      MenuItemIcicleOverhang: TMenuItem;
-      MenuItemQuadrupedGait: TMenuItem;
-      MenuItemZiplineRig: TMenuItem;
-      MenuItemFractureVoronoi: TMenuItem;
-      MenuItemThermalMirage: TMenuItem;
-      MenuItemStealthLightGem: TMenuItem;
-      MenuItemGrapplePendulum: TMenuItem;
-      MenuItemFlameFlicker: TMenuItem;
-      MenuItemCrowdFormation: TMenuItem;
       MenuItemLodInstancing: TMenuItem;
-      MenuItemPuddleWetness: TMenuItem;
-      MenuItemAvalancheSlide: TMenuItem;
-      MenuItemMagneticField: TMenuItem;
-      MenuItemClimbingHold: TMenuItem;
-      MenuItemLaserBeam: TMenuItem;
-      MenuItemBossArena: TMenuItem;
-      MenuItemTurretGimbal: TMenuItem;
-      MenuItemSonarPulse: TMenuItem;
-      MenuItemGearLinkage: TMenuItem;
       MenuItemShaderComplexity: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
@@ -831,54 +795,18 @@ type
     procedure MenuItemPreloadStudioClick(Sender: TObject);
     procedure MenuItemCollabPresenceClick(Sender: TObject);
     procedure MenuItemSubstrateStudioClick(Sender: TObject);
-    procedure MenuItemSmartObjectSlotsClick(Sender: TObject);
-    procedure MenuItemAeroFoilClick(Sender: TObject);
-    procedure MenuItemCreviceClutterClick(Sender: TObject);
-    procedure MenuItemCameraShakeClick(Sender: TObject);
     procedure MenuItemFireGrid2DClick(Sender: TObject);
     procedure MenuItemGameplayMessengerClick(Sender: TObject);
     procedure MenuItemOctahedralImpostorClick(Sender: TObject);
     procedure MenuItemPoseSnapshotClick(Sender: TObject);
     procedure MenuItemMacroRecorderClick(Sender: TObject);
-    procedure MenuItemPortalStudioClick(Sender: TObject);
-    procedure MenuItemSensoryPerceptionClick(Sender: TObject);
-    procedure MenuItemIvyClimberClick(Sender: TObject);
-    procedure MenuItemFootstepDirectorClick(Sender: TObject);
     procedure MenuItemGravityFieldClick(Sender: TObject);
     procedure MenuItemCloudShadowsClick(Sender: TObject);
-    procedure MenuItemTrailStamperClick(Sender: TObject);
-    procedure MenuItemCoverPointScannerClick(Sender: TObject);
-    procedure MenuItemCatenaryCableClick(Sender: TObject);
     procedure MenuItemPrefabDiffMergeClick(Sender: TObject);
     procedure MenuItemBallisticStudioClick(Sender: TObject);
     procedure MenuItemAcousticSpaceClick(Sender: TObject);
-    procedure MenuItemSuspensionBridgeClick(Sender: TObject);
-    procedure MenuItemWorldWaypointClick(Sender: TObject);
-    procedure MenuItemBuoyancyHullClick(Sender: TObject);
-    procedure MenuItemSpiderwebClick(Sender: TObject);
-    procedure MenuItemFoliageTrampleClick(Sender: TObject);
-    procedure MenuItemInteractScannerClick(Sender: TObject);
-    procedure MenuItemSplatterBurstClick(Sender: TObject);
     procedure MenuItemBudgetTreemapClick(Sender: TObject);
-    procedure MenuItemIcicleOverhangClick(Sender: TObject);
-    procedure MenuItemQuadrupedGaitClick(Sender: TObject);
-    procedure MenuItemZiplineRigClick(Sender: TObject);
-    procedure MenuItemFractureVoronoiClick(Sender: TObject);
-    procedure MenuItemThermalMirageClick(Sender: TObject);
-    procedure MenuItemStealthLightGemClick(Sender: TObject);
-    procedure MenuItemGrapplePendulumClick(Sender: TObject);
-    procedure MenuItemFlameFlickerClick(Sender: TObject);
-    procedure MenuItemCrowdFormationClick(Sender: TObject);
     procedure MenuItemLodInstancingClick(Sender: TObject);
-    procedure MenuItemPuddleWetnessClick(Sender: TObject);
-    procedure MenuItemAvalancheSlideClick(Sender: TObject);
-    procedure MenuItemMagneticFieldClick(Sender: TObject);
-    procedure MenuItemClimbingHoldClick(Sender: TObject);
-    procedure MenuItemLaserBeamClick(Sender: TObject);
-    procedure MenuItemBossArenaClick(Sender: TObject);
-    procedure MenuItemTurretGimbalClick(Sender: TObject);
-    procedure MenuItemSonarPulseClick(Sender: TObject);
-    procedure MenuItemGearLinkageClick(Sender: TObject);
     procedure MenuItemShaderComplexityClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
@@ -2910,25 +2838,9 @@ begin
   MenuItemSubstrateStudio.OnClick := @MenuItemSubstrateStudioClick;
   MenuItemDesign.Add(MenuItemSubstrateStudio);
 
-  MenuItemSmartObjectSlots := TMenuItem.Create(MenuItemDesign);
-  MenuItemSmartObjectSlots.Caption := 'Multi-Slot SmartObject Queue & Cooldown Studio...';
-  MenuItemSmartObjectSlots.OnClick := @MenuItemSmartObjectSlotsClick;
-  MenuItemDesign.Add(MenuItemSmartObjectSlots);
 
-  MenuItemAeroFoil := TMenuItem.Create(MenuItemDesign);
-  MenuItemAeroFoil.Caption := 'Aerodynamic Wing/Sail Lift-Drag & Stall Studio...';
-  MenuItemAeroFoil.OnClick := @MenuItemAeroFoilClick;
-  MenuItemDesign.Add(MenuItemAeroFoil);
 
-  MenuItemCreviceClutter := TMenuItem.Create(MenuItemDesign);
-  MenuItemCreviceClutter.Caption := 'Wall-Crevice & Seam Micro-Clutter Studio...';
-  MenuItemCreviceClutter.OnClick := @MenuItemCreviceClutterClick;
-  MenuItemDesign.Add(MenuItemCreviceClutter);
 
-  MenuItemCameraShake := TMenuItem.Create(MenuItemDesign);
-  MenuItemCameraShake.Caption := 'Cinematic Camera Shake, Recoil & FOV Kick Studio...';
-  MenuItemCameraShake.OnClick := @MenuItemCameraShakeClick;
-  MenuItemDesign.Add(MenuItemCameraShake);
 
   MenuItemFireGrid2D := TMenuItem.Create(MenuItemDesign);
   MenuItemFireGrid2D.Caption := 'Niagara Grid2D Cellular Fire Spread Studio...';
@@ -2955,25 +2867,9 @@ begin
   MenuItemMacroRecorder.OnClick := @MenuItemMacroRecorderClick;
   MenuItemDesign.Add(MenuItemMacroRecorder);
 
-  MenuItemPortalStudio := TMenuItem.Create(MenuItemDesign);
-  MenuItemPortalStudio.Caption := 'Planar Portal & Seamless Mirror Studio...';
-  MenuItemPortalStudio.OnClick := @MenuItemPortalStudioClick;
-  MenuItemDesign.Add(MenuItemPortalStudio);
 
-  MenuItemSensoryPerception := TMenuItem.Create(MenuItemDesign);
-  MenuItemSensoryPerception.Caption := 'AI Sensory Perception Studio...';
-  MenuItemSensoryPerception.OnClick := @MenuItemSensoryPerceptionClick;
-  MenuItemDesign.Add(MenuItemSensoryPerception);
 
-  MenuItemIvyClimber := TMenuItem.Create(MenuItemDesign);
-  MenuItemIvyClimber.Caption := 'Procedural Ivy & Vine Climber Studio...';
-  MenuItemIvyClimber.OnClick := @MenuItemIvyClimberClick;
-  MenuItemDesign.Add(MenuItemIvyClimber);
 
-  MenuItemFootstepDirector := TMenuItem.Create(MenuItemDesign);
-  MenuItemFootstepDirector.Caption := 'Skeletal Footstep & Surface Decal Studio...';
-  MenuItemFootstepDirector.OnClick := @MenuItemFootstepDirectorClick;
-  MenuItemDesign.Add(MenuItemFootstepDirector);
 
   MenuItemGravityField := TMenuItem.Create(MenuItemDesign);
   MenuItemGravityField.Caption := 'Dynamic Gravity Well & Planetary Walk Studio...';
@@ -2985,20 +2881,8 @@ begin
   MenuItemCloudShadows.OnClick := @MenuItemCloudShadowsClick;
   MenuItemDesign.Add(MenuItemCloudShadows);
 
-  MenuItemTrailStamper := TMenuItem.Create(MenuItemDesign);
-  MenuItemTrailStamper.Caption := 'Interactive Snow, Mud & Sand Trail Stamper Studio...';
-  MenuItemTrailStamper.OnClick := @MenuItemTrailStamperClick;
-  MenuItemDesign.Add(MenuItemTrailStamper);
 
-  MenuItemCoverPointScanner := TMenuItem.Create(MenuItemDesign);
-  MenuItemCoverPointScanner.Caption := 'Tactical Cover Point Scanner & Flanking Studio...';
-  MenuItemCoverPointScanner.OnClick := @MenuItemCoverPointScannerClick;
-  MenuItemDesign.Add(MenuItemCoverPointScanner);
 
-  MenuItemCatenaryCable := TMenuItem.Create(MenuItemDesign);
-  MenuItemCatenaryCable.Caption := 'Procedural Catenary Cable & Lantern Garland Studio...';
-  MenuItemCatenaryCable.OnClick := @MenuItemCatenaryCableClick;
-  MenuItemDesign.Add(MenuItemCatenaryCable);
 
   MenuItemPrefabDiffMerge := TMenuItem.Create(MenuItemDesign);
   MenuItemPrefabDiffMerge.Caption := 'Three-Way Scene & Prefab Diff/Merge & 106-Studio Hub...';
@@ -3015,143 +2899,43 @@ begin
   MenuItemAcousticSpace.OnClick := @MenuItemAcousticSpaceClick;
   MenuItemDesign.Add(MenuItemAcousticSpace);
 
-  MenuItemSuspensionBridge := TMenuItem.Create(MenuItemDesign);
-  MenuItemSuspensionBridge.Caption := 'Procedural Rope Suspension Bridge & Live-Load Studio...';
-  MenuItemSuspensionBridge.OnClick := @MenuItemSuspensionBridgeClick;
-  MenuItemDesign.Add(MenuItemSuspensionBridge);
 
-  MenuItemWorldWaypoint := TMenuItem.Create(MenuItemDesign);
-  MenuItemWorldWaypoint.Caption := 'Diegetic 3D World Waypoint & Offscreen HUD Studio...';
-  MenuItemWorldWaypoint.OnClick := @MenuItemWorldWaypointClick;
-  MenuItemDesign.Add(MenuItemWorldWaypoint);
 
-  MenuItemBuoyancyHull := TMenuItem.Create(MenuItemDesign);
-  MenuItemBuoyancyHull.Caption := 'Multi-Pontoon Buoyancy Hydrostatics & Wave Torque Studio...';
-  MenuItemBuoyancyHull.OnClick := @MenuItemBuoyancyHullClick;
-  MenuItemDesign.Add(MenuItemBuoyancyHull);
 
-  MenuItemSpiderweb := TMenuItem.Create(MenuItemDesign);
-  MenuItemSpiderweb.Caption := 'Procedural Spiderweb, Wall Mooring & Dewdrop Silk Studio...';
-  MenuItemSpiderweb.OnClick := @MenuItemSpiderwebClick;
-  MenuItemDesign.Add(MenuItemSpiderweb);
 
-  MenuItemFoliageTrample := TMenuItem.Create(MenuItemDesign);
-  MenuItemFoliageTrample.Caption := 'Dynamic Foliage Trample, Blast Flatten & Spring-Back Studio...';
-  MenuItemFoliageTrample.OnClick := @MenuItemFoliageTrampleClick;
-  MenuItemDesign.Add(MenuItemFoliageTrample);
 
-  MenuItemInteractScanner := TMenuItem.Create(MenuItemDesign);
-  MenuItemInteractScanner.Caption := 'Gameplay Interaction Focus Scanner & Hold-Ring Studio...';
-  MenuItemInteractScanner.OnClick := @MenuItemInteractScannerClick;
-  MenuItemDesign.Add(MenuItemInteractScanner);
 
-  MenuItemSplatterBurst := TMenuItem.Create(MenuItemDesign);
-  MenuItemSplatterBurst.Caption := 'Procedural Decal Splatter Burst & Grazing Streak Studio...';
-  MenuItemSplatterBurst.OnClick := @MenuItemSplatterBurstClick;
-  MenuItemDesign.Add(MenuItemSplatterBurst);
 
   MenuItemBudgetTreemap := TMenuItem.Create(MenuItemDesign);
   MenuItemBudgetTreemap.Caption := 'Squarified Scene Budget Treemap & 116-Studio Hub...';
   MenuItemBudgetTreemap.OnClick := @MenuItemBudgetTreemapClick;
   MenuItemDesign.Add(MenuItemBudgetTreemap);
 
-  MenuItemIcicleOverhang := TMenuItem.Create(MenuItemDesign);
-  MenuItemIcicleOverhang.Caption := 'Procedural Icicle, Stalactite & Overhang Studio...';
-  MenuItemIcicleOverhang.OnClick := @MenuItemIcicleOverhangClick;
-  MenuItemDesign.Add(MenuItemIcicleOverhang);
 
-  MenuItemQuadrupedGait := TMenuItem.Create(MenuItemDesign);
-  MenuItemQuadrupedGait.Caption := 'Multi-Leg Quadruped, Hexapod & Spider Gait Studio...';
-  MenuItemQuadrupedGait.OnClick := @MenuItemQuadrupedGaitClick;
-  MenuItemDesign.Add(MenuItemQuadrupedGait);
 
-  MenuItemZiplineRig := TMenuItem.Create(MenuItemDesign);
-  MenuItemZiplineRig.Caption := 'Procedural Zipline, Pulley Acceleration & Vault Studio...';
-  MenuItemZiplineRig.OnClick := @MenuItemZiplineRigClick;
-  MenuItemDesign.Add(MenuItemZiplineRig);
 
-  MenuItemFractureVoronoi := TMenuItem.Create(MenuItemDesign);
-  MenuItemFractureVoronoi.Caption := 'Voronoi Destruction Fracture & BFS Collapse Studio...';
-  MenuItemFractureVoronoi.OnClick := @MenuItemFractureVoronoiClick;
-  MenuItemDesign.Add(MenuItemFractureVoronoi);
 
-  MenuItemThermalMirage := TMenuItem.Create(MenuItemDesign);
-  MenuItemThermalMirage.Caption := 'Heat-Haze Mirage, Thermal Plume & Caustics Studio...';
-  MenuItemThermalMirage.OnClick := @MenuItemThermalMirageClick;
-  MenuItemDesign.Add(MenuItemThermalMirage);
 
-  MenuItemStealthLightGem := TMenuItem.Create(MenuItemDesign);
-  MenuItemStealthLightGem.Caption := 'Tactical Stealth Light-Gem & Backlight Silhouette Studio...';
-  MenuItemStealthLightGem.OnClick := @MenuItemStealthLightGemClick;
-  MenuItemDesign.Add(MenuItemStealthLightGem);
 
-  MenuItemGrapplePendulum := TMenuItem.Create(MenuItemDesign);
-  MenuItemGrapplePendulum.Caption := 'Grappling Hook Pendulum Swing, Winch Reel & Apex Jump Studio...';
-  MenuItemGrapplePendulum.OnClick := @MenuItemGrapplePendulumClick;
-  MenuItemDesign.Add(MenuItemGrapplePendulum);
 
-  MenuItemFlameFlicker := TMenuItem.Create(MenuItemDesign);
-  MenuItemFlameFlicker.Caption := 'Procedural Torch Blackbody Flicker, Wind Blowout & Soot Studio...';
-  MenuItemFlameFlicker.OnClick := @MenuItemFlameFlickerClick;
-  MenuItemDesign.Add(MenuItemFlameFlicker);
 
-  MenuItemCrowdFormation := TMenuItem.Create(MenuItemDesign);
-  MenuItemCrowdFormation.Caption := 'Tactical Squad Formation (Wedge, Phalanx, Shield-Circle) Studio...';
-  MenuItemCrowdFormation.OnClick := @MenuItemCrowdFormationClick;
-  MenuItemDesign.Add(MenuItemCrowdFormation);
 
   MenuItemLodInstancing := TMenuItem.Create(MenuItemDesign);
-  MenuItemLodInstancing.Caption := 'Automated LOD Chain & GPU Instancing Optimizer (126 Studios)...';
+  MenuItemLodInstancing.Caption := 'Automated LOD Chain & GPU Instancing Optimizer (100 UE Studios)...';
   MenuItemLodInstancing.OnClick := @MenuItemLodInstancingClick;
   MenuItemDesign.Add(MenuItemLodInstancing);
 
-  MenuItemPuddleWetness := TMenuItem.Create(MenuItemDesign);
-  MenuItemPuddleWetness.Caption := 'Procedural Rain Puddle, Roof Shelter & Splash Ripple Studio...';
-  MenuItemPuddleWetness.OnClick := @MenuItemPuddleWetnessClick;
-  MenuItemDesign.Add(MenuItemPuddleWetness);
 
-  MenuItemAvalancheSlide := TMenuItem.Create(MenuItemDesign);
-  MenuItemAvalancheSlide.Caption := 'Granular Rockslide, Talus Scree & Avalanche Runout Studio...';
-  MenuItemAvalancheSlide.OnClick := @MenuItemAvalancheSlideClick;
-  MenuItemDesign.Add(MenuItemAvalancheSlide);
 
-  MenuItemMagneticField := TMenuItem.Create(MenuItemDesign);
-  MenuItemMagneticField.Caption := '3D Magnetic Dipole, Mag-Boots & Eddy-Current Brake Studio...';
-  MenuItemMagneticField.OnClick := @MenuItemMagneticFieldClick;
-  MenuItemDesign.Add(MenuItemMagneticField);
 
-  MenuItemClimbingHold := TMenuItem.Create(MenuItemDesign);
-  MenuItemClimbingHold.Caption := 'Free-Climbing Hold Scanner, Reach Graph & Overhang Stamina Studio...';
-  MenuItemClimbingHold.OnClick := @MenuItemClimbingHoldClick;
-  MenuItemDesign.Add(MenuItemClimbingHold);
 
-  MenuItemLaserBeam := TMenuItem.Create(MenuItemDesign);
-  MenuItemLaserBeam.Caption := 'Multi-Bounce Optical Laser, Mirror/Prism & Cutoff Gate Studio...';
-  MenuItemLaserBeam.OnClick := @MenuItemLaserBeamClick;
-  MenuItemDesign.Add(MenuItemLaserBeam);
 
-  MenuItemBossArena := TMenuItem.Create(MenuItemDesign);
-  MenuItemBossArena.Caption := 'Boss Telegraph & AoE Hazard (Cone, Donut, Shock-Ring) Studio...';
-  MenuItemBossArena.OnClick := @MenuItemBossArenaClick;
-  MenuItemDesign.Add(MenuItemBossArena);
 
-  MenuItemTurretGimbal := TMenuItem.Create(MenuItemDesign);
-  MenuItemTurretGimbal.Caption := 'Dual-Axis Gimbal Turret, Slew Servo, Recoil & Overheat Studio...';
-  MenuItemTurretGimbal.OnClick := @MenuItemTurretGimbalClick;
-  MenuItemDesign.Add(MenuItemTurretGimbal);
 
-  MenuItemSonarPulse := TMenuItem.Create(MenuItemDesign);
-  MenuItemSonarPulse.Caption := '3D Echolocation & Active Sonar Pulse (Wavefront & Doppler) Studio...';
-  MenuItemSonarPulse.OnClick := @MenuItemSonarPulseClick;
-  MenuItemDesign.Add(MenuItemSonarPulse);
 
-  MenuItemGearLinkage := TMenuItem.Create(MenuItemDesign);
-  MenuItemGearLinkage.Caption := 'Mechanical Gear Train, Rack-and-Pinion & Clockwork Studio...';
-  MenuItemGearLinkage.OnClick := @MenuItemGearLinkageClick;
-  MenuItemDesign.Add(MenuItemGearLinkage);
 
   MenuItemShaderComplexity := TMenuItem.Create(MenuItemDesign);
-  MenuItemShaderComplexity.Caption := 'Viewport Overdraw & Shader ALU Complexity Auditor (136 Studios)...';
+  MenuItemShaderComplexity.Caption := 'Viewport Overdraw & Shader ALU Complexity Auditor (100 UE Studios)...';
   MenuItemShaderComplexity.OnClick := @MenuItemShaderComplexityClick;
   MenuItemDesign.Add(MenuItemShaderComplexity);
 
@@ -6618,29 +6402,9 @@ begin
     Design.ShowSubstrateStudioDialog;
 end;
 
-procedure TProjectForm.MenuItemSmartObjectSlotsClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowSmartObjectSlotsDialog;
-end;
 
-procedure TProjectForm.MenuItemAeroFoilClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowAeroFoilDialog;
-end;
 
-procedure TProjectForm.MenuItemCreviceClutterClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowCreviceClutterDialog;
-end;
 
-procedure TProjectForm.MenuItemCameraShakeClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowCameraShakeDialog;
-end;
 
 procedure TProjectForm.MenuItemFireGrid2DClick(Sender: TObject);
 begin
@@ -6672,29 +6436,9 @@ begin
     Design.ShowMacroRecorderDialog;
 end;
 
-procedure TProjectForm.MenuItemPortalStudioClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowPortalStudioDialog;
-end;
 
-procedure TProjectForm.MenuItemSensoryPerceptionClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowSensoryPerceptionDialog;
-end;
 
-procedure TProjectForm.MenuItemIvyClimberClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowIvyClimberDialog;
-end;
 
-procedure TProjectForm.MenuItemFootstepDirectorClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowFootstepDirectorDialog;
-end;
 
 procedure TProjectForm.MenuItemGravityFieldClick(Sender: TObject);
 begin
@@ -6708,23 +6452,8 @@ begin
     Design.ShowCloudShadowsDialog;
 end;
 
-procedure TProjectForm.MenuItemTrailStamperClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowTrailStamperDialog;
-end;
 
-procedure TProjectForm.MenuItemCoverPointScannerClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowCoverPointScannerDialog;
-end;
 
-procedure TProjectForm.MenuItemCatenaryCableClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowCatenaryCableDialog;
-end;
 
 procedure TProjectForm.MenuItemPrefabDiffMergeClick(Sender: TObject);
 begin
@@ -6744,47 +6473,12 @@ begin
     Design.ShowAcousticSpaceDialog;
 end;
 
-procedure TProjectForm.MenuItemSuspensionBridgeClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowSuspensionBridgeDialog;
-end;
 
-procedure TProjectForm.MenuItemWorldWaypointClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowWorldWaypointDialog;
-end;
 
-procedure TProjectForm.MenuItemBuoyancyHullClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowBuoyancyHullDialog;
-end;
 
-procedure TProjectForm.MenuItemSpiderwebClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowSpiderwebDialog;
-end;
 
-procedure TProjectForm.MenuItemFoliageTrampleClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowFoliageTrampleDialog;
-end;
 
-procedure TProjectForm.MenuItemInteractScannerClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowInteractScannerDialog;
-end;
 
-procedure TProjectForm.MenuItemSplatterBurstClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowSplatterBurstDialog;
-end;
 
 procedure TProjectForm.MenuItemBudgetTreemapClick(Sender: TObject);
 begin
@@ -6792,59 +6486,14 @@ begin
     Design.ShowBudgetTreemapDialog;
 end;
 
-procedure TProjectForm.MenuItemIcicleOverhangClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowIcicleOverhangDialog;
-end;
 
-procedure TProjectForm.MenuItemQuadrupedGaitClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowQuadrupedGaitDialog;
-end;
 
-procedure TProjectForm.MenuItemZiplineRigClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowZiplineRigDialog;
-end;
 
-procedure TProjectForm.MenuItemFractureVoronoiClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowFractureVoronoiDialog;
-end;
 
-procedure TProjectForm.MenuItemThermalMirageClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowThermalMirageDialog;
-end;
 
-procedure TProjectForm.MenuItemStealthLightGemClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowStealthLightGemDialog;
-end;
 
-procedure TProjectForm.MenuItemGrapplePendulumClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowGrapplePendulumDialog;
-end;
 
-procedure TProjectForm.MenuItemFlameFlickerClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowFlameFlickerDialog;
-end;
 
-procedure TProjectForm.MenuItemCrowdFormationClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowCrowdFormationDialog;
-end;
 
 procedure TProjectForm.MenuItemLodInstancingClick(Sender: TObject);
 begin
@@ -6852,59 +6501,14 @@ begin
     Design.ShowLodInstancingDialog;
 end;
 
-procedure TProjectForm.MenuItemPuddleWetnessClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowPuddleWetnessDialog;
-end;
 
-procedure TProjectForm.MenuItemAvalancheSlideClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowAvalancheSlideDialog;
-end;
 
-procedure TProjectForm.MenuItemMagneticFieldClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowMagneticFieldDialog;
-end;
 
-procedure TProjectForm.MenuItemClimbingHoldClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowClimbingHoldDialog;
-end;
 
-procedure TProjectForm.MenuItemLaserBeamClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowLaserBeamDialog;
-end;
 
-procedure TProjectForm.MenuItemBossArenaClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowBossArenaDialog;
-end;
 
-procedure TProjectForm.MenuItemTurretGimbalClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowTurretGimbalDialog;
-end;
 
-procedure TProjectForm.MenuItemSonarPulseClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowSonarPulseDialog;
-end;
 
-procedure TProjectForm.MenuItemGearLinkageClick(Sender: TObject);
-begin
-  if Design <> nil then
-    Design.ShowGearLinkageDialog;
-end;
 
 procedure TProjectForm.MenuItemShaderComplexityClick(Sender: TObject);
 begin

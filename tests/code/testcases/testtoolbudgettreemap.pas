@@ -115,19 +115,12 @@ var
   ToolsArr: TJSONArray;
   PayloadObj: TJSONObject;
 begin
-  { 1. Verify all 116 studios (Horizons 2-13, Phases 1-396) are registered }
-  AssertEquals(136, TStudioHubManager.StudioCount);
+  { 1. Verify all 100 UE 5.x studios (Horizons 2-11, Phases 1-380) are registered }
+  AssertEquals(100, TStudioHubManager.StudioCount);
   AssertTrue(TStudioHubManager.FindStudioById('ballistic_studio', Entry));
   AssertTrue(TStudioHubManager.FindStudioById('acoustic_space', Entry));
-  AssertTrue(TStudioHubManager.FindStudioById('suspension_bridge', Entry));
-  AssertTrue(TStudioHubManager.FindStudioById('world_waypoint', Entry));
-  AssertTrue(TStudioHubManager.FindStudioById('buoyancy_hull', Entry));
-  AssertTrue(TStudioHubManager.FindStudioById('spiderweb', Entry));
-  AssertTrue(TStudioHubManager.FindStudioById('foliage_trample', Entry));
-  AssertTrue(TStudioHubManager.FindStudioById('interact_scanner', Entry));
-  AssertTrue(TStudioHubManager.FindStudioById('splatter_burst', Entry));
   AssertTrue(TStudioHubManager.FindStudioById('budget_treemap', Entry));
-  AssertEquals(396, Entry.PhaseNumber);
+  AssertEquals(378, Entry.PhaseNumber);
 
   { 2. Verify 21st MCP tool cge_audit_scene_budget over JSON-RPC 2.0 }
   Root := TComponent.Create(nil);
@@ -157,7 +150,7 @@ begin
     InnerJson := GetJSON(InnerText);
     PayloadObj := TJSONObject(InnerJson);
     AssertTrue(PayloadObj.Booleans['ok']);
-    AssertEquals(136, PayloadObj.Integers['studioCatalogCount']);
+    AssertEquals(100, PayloadObj.Integers['studioCatalogCount']);
     AssertEquals(2, PayloadObj.Integers['overBudgetNodeCount']);
     AssertEquals(5, PayloadObj.Arrays['cells'].Count);
   finally

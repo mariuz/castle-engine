@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt, CastleMover2, CastleCameraRigRail, CastleMeshletCluster, CastleTetSoftBody, CastleMassTraffic, CastleSurfaceGi, CastleContextualAnim, CastleTargetingSystem, CastleMutableCharacter, CastleRiverSpline, CastleOccluderFader, CastleGameplayDebugger, CastleWindField, CastleAssetPreloader, CastleSubstrateMaterial, CastleSmartObjectSlots, CastleAeroFoil, CastleCreviceClutter, CastleCameraShake, CastleFireGrid2D, CastleGameplayMessenger, CastleOctahedralImpostor, CastlePoseSnapshot, CastlePortalPair, CastleSensoryPerception, CastleIvyClimber, CastleFootstepDirector, CastleGravityField, CastleCloudShadows, CastleTrailStamper, CastleCoverPointScanner, CastleCatenaryCable, CastleBallisticSolver, CastleAcousticSpace, CastleSuspensionBridge, CastleWorldWaypoint, CastleBuoyancyHull, CastleSpiderweb, CastleFoliageTrample, CastleInteractScanner, CastleSplatterBurst, CastleIcicleOverhang, CastleQuadrupedGait, CastleZiplineRig, CastleFractureVoronoi, CastleThermalMirage, CastleStealthLightGem, CastleGrapplePendulum, CastleFlameFlicker, CastleCrowdFormation, CastlePuddleWetness, CastleAvalancheSlide, CastleMagneticField, CastleClimbingHold, CastleLaserBeam, CastleBossArena, CastleTurretGimbal, CastleSonarPulse, CastleGearLinkage,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit, CastleCommonUiMvvm, CastleHlodBaker, CastleRibbonTrail, CastlePcgSettlement, CastleStateTree, CastleControlRig, CastleSpringArm, CastleErosionBaker, CastleMegaLights, CastleGameplayCue, CastleDataLayers, CastleJiggleBone, CastleSoundscape, CastleChooserTable, CastleGroomHair, CastleTraversalParkour, CastleRuntimeVt, CastleMover2, CastleCameraRigRail, CastleMeshletCluster, CastleTetSoftBody, CastleMassTraffic, CastleSurfaceGi, CastleContextualAnim, CastleTargetingSystem, CastleMutableCharacter, CastleRiverSpline, CastleOccluderFader, CastleGameplayDebugger, CastleWindField, CastleAssetPreloader, CastleSubstrateMaterial, CastleFireGrid2D, CastleGameplayMessenger, CastleOctahedralImpostor, CastlePoseSnapshot, CastleGravityField, CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolSmartObjectSlots, ToolAeroFoil, ToolCreviceClutter, ToolCameraShake, ToolFireGrid2D, ToolGameplayMessenger, ToolOctahedralImpostor, ToolPoseSnapshot, ToolMacroRecorder, ToolPortalStudio, ToolSensoryPerception, ToolIvyClimber, ToolFootstepDirector, ToolGravityField, ToolCloudShadows, ToolTrailStamper, ToolCoverPointScanner, ToolCatenaryCable, ToolPrefabDiffMerge, ToolBallisticStudio, ToolAcousticSpace, ToolSuspensionBridge, ToolWorldWaypoint, ToolBuoyancyHull, ToolSpiderweb, ToolFoliageTrample, ToolInteractScanner, ToolSplatterBurst, ToolBudgetTreemap, ToolIcicleOverhang, ToolQuadrupedGait, ToolZiplineRig, ToolFractureVoronoi, ToolThermalMirage, ToolStealthLightGem, ToolGrapplePendulum, ToolFlameFlicker, ToolCrowdFormation, ToolLodInstancing, ToolPuddleWetness, ToolAvalancheSlide, ToolMagneticField, ToolClimbingHold, ToolLaserBeam, ToolBossArena, ToolTurretGimbal, ToolSonarPulse, ToolGearLinkage, ToolShaderComplexity;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio, ToolCommonUiStudio, ToolHlodStudio, ToolRibbonStudio, ToolSettlementStudio, ToolTelemetryInsights, ToolStateTree, ToolControlRig, ToolSpringArm, ToolErosionStudio, ToolMegaLights, ToolGameplayCue, ToolDataLayers, ToolJiggleBone, ToolSoundscape, ToolRegressionHarness, ToolChooserTable, ToolGroomStudio, ToolTraversalStudio, ToolRvtStudio, ToolMoverStudio, ToolCameraRail, ToolMeshletStudio, ToolTetSoftBody, ToolMassTraffic, ToolLiveCookAuditor, ToolSurfaceGi, ToolContextualAnim, ToolTargetingStudio, ToolMutableStudio, ToolRiverStudio, ToolOccluderFader, ToolGameplayDebugger, ToolWindStudio, ToolPreloadStudio, ToolCollabPresence, ToolSubstrateStudio, ToolFireGrid2D, ToolGameplayMessenger, ToolOctahedralImpostor, ToolPoseSnapshot, ToolMacroRecorder, ToolGravityField, ToolCloudShadows, ToolPrefabDiffMerge, ToolBallisticStudio, ToolAcousticSpace, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -900,14 +900,6 @@ type
       MenuTreeViewItemCollabPresence: TMenuItem;
       ButtonSubstrateStudio: TSpeedButton;
       MenuTreeViewItemSubstrateStudio: TMenuItem;
-      ButtonSmartObjectSlots: TSpeedButton;
-      MenuTreeViewItemSmartObjectSlots: TMenuItem;
-      ButtonAeroFoil: TSpeedButton;
-      MenuTreeViewItemAeroFoil: TMenuItem;
-      ButtonCreviceClutter: TSpeedButton;
-      MenuTreeViewItemCreviceClutter: TMenuItem;
-      ButtonCameraShake: TSpeedButton;
-      MenuTreeViewItemCameraShake: TMenuItem;
       ButtonFireGrid2D: TSpeedButton;
       MenuTreeViewItemFireGrid2D: TMenuItem;
       ButtonGameplayMessenger: TSpeedButton;
@@ -918,84 +910,20 @@ type
       MenuTreeViewItemPoseSnapshot: TMenuItem;
       ButtonMacroRecorder: TSpeedButton;
       MenuTreeViewItemMacroRecorder: TMenuItem;
-      ButtonPortalStudio: TSpeedButton;
-      MenuTreeViewItemPortalStudio: TMenuItem;
-      ButtonSensoryPerception: TSpeedButton;
-      MenuTreeViewItemSensoryPerception: TMenuItem;
-      ButtonIvyClimber: TSpeedButton;
-      MenuTreeViewItemIvyClimber: TMenuItem;
-      ButtonFootstepDirector: TSpeedButton;
-      MenuTreeViewItemFootstepDirector: TMenuItem;
       ButtonGravityField: TSpeedButton;
       MenuTreeViewItemGravityField: TMenuItem;
       ButtonCloudShadows: TSpeedButton;
       MenuTreeViewItemCloudShadows: TMenuItem;
-      ButtonTrailStamper: TSpeedButton;
-      MenuTreeViewItemTrailStamper: TMenuItem;
-      ButtonCoverPointScanner: TSpeedButton;
-      MenuTreeViewItemCoverPointScanner: TMenuItem;
-      ButtonCatenaryCable: TSpeedButton;
-      MenuTreeViewItemCatenaryCable: TMenuItem;
       ButtonPrefabDiffMerge: TSpeedButton;
       MenuTreeViewItemPrefabDiffMerge: TMenuItem;
       ButtonBallisticStudio: TSpeedButton;
       MenuTreeViewItemBallisticStudio: TMenuItem;
       ButtonAcousticSpace: TSpeedButton;
       MenuTreeViewItemAcousticSpace: TMenuItem;
-      ButtonSuspensionBridge: TSpeedButton;
-      MenuTreeViewItemSuspensionBridge: TMenuItem;
-      ButtonWorldWaypoint: TSpeedButton;
-      MenuTreeViewItemWorldWaypoint: TMenuItem;
-      ButtonBuoyancyHull: TSpeedButton;
-      MenuTreeViewItemBuoyancyHull: TMenuItem;
-      ButtonSpiderweb: TSpeedButton;
-      MenuTreeViewItemSpiderweb: TMenuItem;
-      ButtonFoliageTrample: TSpeedButton;
-      MenuTreeViewItemFoliageTrample: TMenuItem;
-      ButtonInteractScanner: TSpeedButton;
-      MenuTreeViewItemInteractScanner: TMenuItem;
-      ButtonSplatterBurst: TSpeedButton;
-      MenuTreeViewItemSplatterBurst: TMenuItem;
       ButtonBudgetTreemap: TSpeedButton;
       MenuTreeViewItemBudgetTreemap: TMenuItem;
-      ButtonIcicleOverhang: TSpeedButton;
-      MenuTreeViewItemIcicleOverhang: TMenuItem;
-      ButtonQuadrupedGait: TSpeedButton;
-      MenuTreeViewItemQuadrupedGait: TMenuItem;
-      ButtonZiplineRig: TSpeedButton;
-      MenuTreeViewItemZiplineRig: TMenuItem;
-      ButtonFractureVoronoi: TSpeedButton;
-      MenuTreeViewItemFractureVoronoi: TMenuItem;
-      ButtonThermalMirage: TSpeedButton;
-      MenuTreeViewItemThermalMirage: TMenuItem;
-      ButtonStealthLightGem: TSpeedButton;
-      MenuTreeViewItemStealthLightGem: TMenuItem;
-      ButtonGrapplePendulum: TSpeedButton;
-      MenuTreeViewItemGrapplePendulum: TMenuItem;
-      ButtonFlameFlicker: TSpeedButton;
-      MenuTreeViewItemFlameFlicker: TMenuItem;
-      ButtonCrowdFormation: TSpeedButton;
-      MenuTreeViewItemCrowdFormation: TMenuItem;
       ButtonLodInstancing: TSpeedButton;
       MenuTreeViewItemLodInstancing: TMenuItem;
-      ButtonPuddleWetness: TSpeedButton;
-      MenuTreeViewItemPuddleWetness: TMenuItem;
-      ButtonAvalancheSlide: TSpeedButton;
-      MenuTreeViewItemAvalancheSlide: TMenuItem;
-      ButtonMagneticField: TSpeedButton;
-      MenuTreeViewItemMagneticField: TMenuItem;
-      ButtonClimbingHold: TSpeedButton;
-      MenuTreeViewItemClimbingHold: TMenuItem;
-      ButtonLaserBeam: TSpeedButton;
-      MenuTreeViewItemLaserBeam: TMenuItem;
-      ButtonBossArena: TSpeedButton;
-      MenuTreeViewItemBossArena: TMenuItem;
-      ButtonTurretGimbal: TSpeedButton;
-      MenuTreeViewItemTurretGimbal: TMenuItem;
-      ButtonSonarPulse: TSpeedButton;
-      MenuTreeViewItemSonarPulse: TMenuItem;
-      ButtonGearLinkage: TSpeedButton;
-      MenuTreeViewItemGearLinkage: TMenuItem;
       ButtonShaderComplexity: TSpeedButton;
       MenuTreeViewItemShaderComplexity: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
@@ -1595,14 +1523,6 @@ type
     procedure MenuTreeViewItemCollabPresenceClick(Sender: TObject);
     procedure ButtonSubstrateStudioClick(Sender: TObject);
     procedure MenuTreeViewItemSubstrateStudioClick(Sender: TObject);
-    procedure ButtonSmartObjectSlotsClick(Sender: TObject);
-    procedure MenuTreeViewItemSmartObjectSlotsClick(Sender: TObject);
-    procedure ButtonAeroFoilClick(Sender: TObject);
-    procedure MenuTreeViewItemAeroFoilClick(Sender: TObject);
-    procedure ButtonCreviceClutterClick(Sender: TObject);
-    procedure MenuTreeViewItemCreviceClutterClick(Sender: TObject);
-    procedure ButtonCameraShakeClick(Sender: TObject);
-    procedure MenuTreeViewItemCameraShakeClick(Sender: TObject);
     procedure ButtonFireGrid2DClick(Sender: TObject);
     procedure MenuTreeViewItemFireGrid2DClick(Sender: TObject);
     procedure ButtonGameplayMessengerClick(Sender: TObject);
@@ -1613,84 +1533,20 @@ type
     procedure MenuTreeViewItemPoseSnapshotClick(Sender: TObject);
     procedure ButtonMacroRecorderClick(Sender: TObject);
     procedure MenuTreeViewItemMacroRecorderClick(Sender: TObject);
-    procedure ButtonPortalStudioClick(Sender: TObject);
-    procedure MenuTreeViewItemPortalStudioClick(Sender: TObject);
-    procedure ButtonSensoryPerceptionClick(Sender: TObject);
-    procedure MenuTreeViewItemSensoryPerceptionClick(Sender: TObject);
-    procedure ButtonIvyClimberClick(Sender: TObject);
-    procedure MenuTreeViewItemIvyClimberClick(Sender: TObject);
-    procedure ButtonFootstepDirectorClick(Sender: TObject);
-    procedure MenuTreeViewItemFootstepDirectorClick(Sender: TObject);
     procedure ButtonGravityFieldClick(Sender: TObject);
     procedure MenuTreeViewItemGravityFieldClick(Sender: TObject);
     procedure ButtonCloudShadowsClick(Sender: TObject);
     procedure MenuTreeViewItemCloudShadowsClick(Sender: TObject);
-    procedure ButtonTrailStamperClick(Sender: TObject);
-    procedure MenuTreeViewItemTrailStamperClick(Sender: TObject);
-    procedure ButtonCoverPointScannerClick(Sender: TObject);
-    procedure MenuTreeViewItemCoverPointScannerClick(Sender: TObject);
-    procedure ButtonCatenaryCableClick(Sender: TObject);
-    procedure MenuTreeViewItemCatenaryCableClick(Sender: TObject);
     procedure ButtonPrefabDiffMergeClick(Sender: TObject);
     procedure MenuTreeViewItemPrefabDiffMergeClick(Sender: TObject);
     procedure ButtonBallisticStudioClick(Sender: TObject);
     procedure MenuTreeViewItemBallisticStudioClick(Sender: TObject);
     procedure ButtonAcousticSpaceClick(Sender: TObject);
     procedure MenuTreeViewItemAcousticSpaceClick(Sender: TObject);
-    procedure ButtonSuspensionBridgeClick(Sender: TObject);
-    procedure MenuTreeViewItemSuspensionBridgeClick(Sender: TObject);
-    procedure ButtonWorldWaypointClick(Sender: TObject);
-    procedure MenuTreeViewItemWorldWaypointClick(Sender: TObject);
-    procedure ButtonBuoyancyHullClick(Sender: TObject);
-    procedure MenuTreeViewItemBuoyancyHullClick(Sender: TObject);
-    procedure ButtonSpiderwebClick(Sender: TObject);
-    procedure MenuTreeViewItemSpiderwebClick(Sender: TObject);
-    procedure ButtonFoliageTrampleClick(Sender: TObject);
-    procedure MenuTreeViewItemFoliageTrampleClick(Sender: TObject);
-    procedure ButtonInteractScannerClick(Sender: TObject);
-    procedure MenuTreeViewItemInteractScannerClick(Sender: TObject);
-    procedure ButtonSplatterBurstClick(Sender: TObject);
-    procedure MenuTreeViewItemSplatterBurstClick(Sender: TObject);
     procedure ButtonBudgetTreemapClick(Sender: TObject);
     procedure MenuTreeViewItemBudgetTreemapClick(Sender: TObject);
-    procedure ButtonIcicleOverhangClick(Sender: TObject);
-    procedure MenuTreeViewItemIcicleOverhangClick(Sender: TObject);
-    procedure ButtonQuadrupedGaitClick(Sender: TObject);
-    procedure MenuTreeViewItemQuadrupedGaitClick(Sender: TObject);
-    procedure ButtonZiplineRigClick(Sender: TObject);
-    procedure MenuTreeViewItemZiplineRigClick(Sender: TObject);
-    procedure ButtonFractureVoronoiClick(Sender: TObject);
-    procedure MenuTreeViewItemFractureVoronoiClick(Sender: TObject);
-    procedure ButtonThermalMirageClick(Sender: TObject);
-    procedure MenuTreeViewItemThermalMirageClick(Sender: TObject);
-    procedure ButtonStealthLightGemClick(Sender: TObject);
-    procedure MenuTreeViewItemStealthLightGemClick(Sender: TObject);
-    procedure ButtonGrapplePendulumClick(Sender: TObject);
-    procedure MenuTreeViewItemGrapplePendulumClick(Sender: TObject);
-    procedure ButtonFlameFlickerClick(Sender: TObject);
-    procedure MenuTreeViewItemFlameFlickerClick(Sender: TObject);
-    procedure ButtonCrowdFormationClick(Sender: TObject);
-    procedure MenuTreeViewItemCrowdFormationClick(Sender: TObject);
     procedure ButtonLodInstancingClick(Sender: TObject);
     procedure MenuTreeViewItemLodInstancingClick(Sender: TObject);
-    procedure ButtonPuddleWetnessClick(Sender: TObject);
-    procedure MenuTreeViewItemPuddleWetnessClick(Sender: TObject);
-    procedure ButtonAvalancheSlideClick(Sender: TObject);
-    procedure MenuTreeViewItemAvalancheSlideClick(Sender: TObject);
-    procedure ButtonMagneticFieldClick(Sender: TObject);
-    procedure MenuTreeViewItemMagneticFieldClick(Sender: TObject);
-    procedure ButtonClimbingHoldClick(Sender: TObject);
-    procedure MenuTreeViewItemClimbingHoldClick(Sender: TObject);
-    procedure ButtonLaserBeamClick(Sender: TObject);
-    procedure MenuTreeViewItemLaserBeamClick(Sender: TObject);
-    procedure ButtonBossArenaClick(Sender: TObject);
-    procedure MenuTreeViewItemBossArenaClick(Sender: TObject);
-    procedure ButtonTurretGimbalClick(Sender: TObject);
-    procedure MenuTreeViewItemTurretGimbalClick(Sender: TObject);
-    procedure ButtonSonarPulseClick(Sender: TObject);
-    procedure MenuTreeViewItemSonarPulseClick(Sender: TObject);
-    procedure ButtonGearLinkageClick(Sender: TObject);
-    procedure MenuTreeViewItemGearLinkageClick(Sender: TObject);
     procedure ButtonShaderComplexityClick(Sender: TObject);
     procedure MenuTreeViewItemShaderComplexityClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
@@ -3211,54 +3067,18 @@ type
     procedure ShowPreloadStudioDialog;
     procedure ShowCollabPresenceDialog;
     procedure ShowSubstrateStudioDialog;
-    procedure ShowSmartObjectSlotsDialog;
-    procedure ShowAeroFoilDialog;
-    procedure ShowCreviceClutterDialog;
-    procedure ShowCameraShakeDialog;
     procedure ShowFireGrid2DDialog;
     procedure ShowGameplayMessengerDialog;
     procedure ShowOctahedralImpostorDialog;
     procedure ShowPoseSnapshotDialog;
     procedure ShowMacroRecorderDialog;
-    procedure ShowPortalStudioDialog;
-    procedure ShowSensoryPerceptionDialog;
-    procedure ShowIvyClimberDialog;
-    procedure ShowFootstepDirectorDialog;
     procedure ShowGravityFieldDialog;
     procedure ShowCloudShadowsDialog;
-    procedure ShowTrailStamperDialog;
-    procedure ShowCoverPointScannerDialog;
-    procedure ShowCatenaryCableDialog;
     procedure ShowPrefabDiffMergeDialog;
     procedure ShowBallisticStudioDialog;
     procedure ShowAcousticSpaceDialog;
-    procedure ShowSuspensionBridgeDialog;
-    procedure ShowWorldWaypointDialog;
-    procedure ShowBuoyancyHullDialog;
-    procedure ShowSpiderwebDialog;
-    procedure ShowFoliageTrampleDialog;
-    procedure ShowInteractScannerDialog;
-    procedure ShowSplatterBurstDialog;
     procedure ShowBudgetTreemapDialog;
-    procedure ShowIcicleOverhangDialog;
-    procedure ShowQuadrupedGaitDialog;
-    procedure ShowZiplineRigDialog;
-    procedure ShowFractureVoronoiDialog;
-    procedure ShowThermalMirageDialog;
-    procedure ShowStealthLightGemDialog;
-    procedure ShowGrapplePendulumDialog;
-    procedure ShowFlameFlickerDialog;
-    procedure ShowCrowdFormationDialog;
     procedure ShowLodInstancingDialog;
-    procedure ShowPuddleWetnessDialog;
-    procedure ShowAvalancheSlideDialog;
-    procedure ShowMagneticFieldDialog;
-    procedure ShowClimbingHoldDialog;
-    procedure ShowLaserBeamDialog;
-    procedure ShowBossArenaDialog;
-    procedure ShowTurretGimbalDialog;
-    procedure ShowSonarPulseDialog;
-    procedure ShowGearLinkageDialog;
     procedure ShowShaderComplexityDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
@@ -3281,7 +3101,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormSmartObjectSlots, FormAeroFoil, FormCreviceClutter, FormCameraShake, FormFireGrid2D, FormGameplayMessenger, FormOctahedralImpostor, FormPoseSnapshot, FormMacroRecorder, FormPortalStudio, FormSensoryPerception, FormIvyClimber, FormFootstepDirector, FormGravityField, FormCloudShadows, FormTrailStamper, FormCoverPointScanner, FormCatenaryCable, FormPrefabDiffMerge, FormBallisticStudio, FormAcousticSpace, FormSuspensionBridge, FormWorldWaypoint, FormBuoyancyHull, FormSpiderweb, FormFoliageTrample, FormInteractScanner, FormSplatterBurst, FormBudgetTreemap, FormIcicleOverhang, FormQuadrupedGait, FormZiplineRig, FormFractureVoronoi, FormThermalMirage, FormStealthLightGem, FormGrapplePendulum, FormFlameFlicker, FormCrowdFormation, FormLodInstancing, FormPuddleWetness, FormAvalancheSlide, FormMagneticField, FormClimbingHold, FormLaserBeam, FormBossArena, FormTurretGimbal, FormSonarPulse, FormGearLinkage, FormShaderComplexity, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, FormCommonUiStudio, FormHlodStudio, FormRibbonStudio, FormSettlementStudio, FormTelemetryInsights, FormStateTree, FormControlRig, FormSpringArm, FormErosionStudio, FormMegaLights, FormGameplayCue, FormDataLayers, FormJiggleBone, FormSoundscape, FormRegressionHarness, FormChooserTable, FormGroomStudio, FormTraversalStudio, FormRvtStudio, FormMoverStudio, FormCameraRail, FormMeshletStudio, FormTetSoftBody, FormMassTraffic, FormLiveCookAuditor, FormSurfaceGiStudio, FormContextualAnim, FormTargetingStudio, FormMutableStudio, FormRiverStudio, FormOccluderFader, FormGameplayDebugger, FormWindStudio, FormPreloadStudio, FormCollabPresence, FormSubstrateStudio, FormFireGrid2D, FormGameplayMessenger, FormOctahedralImpostor, FormPoseSnapshot, FormMacroRecorder, FormGravityField, FormCloudShadows, FormPrefabDiffMerge, FormBallisticStudio, FormAcousticSpace, FormBudgetTreemap, FormLodInstancing, FormShaderComplexity, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -8526,65 +8346,9 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonSubstrateStudio,
       PanelMiddleTop.GetControlIndex(ButtonCollabPresence) + 1);
 
-  ButtonSmartObjectSlots := TSpeedButton.Create(Self);
-  ButtonSmartObjectSlots.Caption := 'SmartQ';
-  ButtonSmartObjectSlots.Hint := 'Open Multi-Slot SmartObject Queue & Cooldown Studio.' + NL +
-    'Configure multi-slot Claim/Use/Release stations, role tags, cooldowns & FIFO wait-queues.';
-  ButtonSmartObjectSlots.ShowHint := true;
-  ButtonSmartObjectSlots.AutoSize := true;
-  ButtonSmartObjectSlots.Constraints.MinHeight := 33;
-  ButtonSmartObjectSlots.Constraints.MinWidth := 62;
-  ButtonSmartObjectSlots.BorderSpacing.Left := 2;
-  ButtonSmartObjectSlots.OnClick := @ButtonSmartObjectSlotsClick;
-  ButtonSmartObjectSlots.Parent := PanelMiddleTop;
-  if ButtonSubstrateStudio.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonSmartObjectSlots,
-      PanelMiddleTop.GetControlIndex(ButtonSubstrateStudio) + 1);
 
-  ButtonAeroFoil := TSpeedButton.Create(Self);
-  ButtonAeroFoil.Caption := 'AeroFoil';
-  ButtonAeroFoil.Hint := 'Open Aerodynamic Wing/Sail Lift-Drag & Stall Studio.' + NL +
-    'Configure Prandtl CL/CD polars, critical stall separation & thermal updraft soaring.';
-  ButtonAeroFoil.ShowHint := true;
-  ButtonAeroFoil.AutoSize := true;
-  ButtonAeroFoil.Constraints.MinHeight := 33;
-  ButtonAeroFoil.Constraints.MinWidth := 62;
-  ButtonAeroFoil.BorderSpacing.Left := 2;
-  ButtonAeroFoil.OnClick := @ButtonAeroFoilClick;
-  ButtonAeroFoil.Parent := PanelMiddleTop;
-  if ButtonSmartObjectSlots.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonAeroFoil,
-      PanelMiddleTop.GetControlIndex(ButtonSmartObjectSlots) + 1);
 
-  ButtonCreviceClutter := TSpeedButton.Create(Self);
-  ButtonCreviceClutter.Caption := 'Crevice';
-  ButtonCreviceClutter.Hint := 'Open Wall-Crevice & Seam Micro-Clutter Studio.' + NL +
-    'Bake 8-compass WorldRay wall-floor seam & L-corner rubble, autumn leaf & pebble skirts.';
-  ButtonCreviceClutter.ShowHint := true;
-  ButtonCreviceClutter.AutoSize := true;
-  ButtonCreviceClutter.Constraints.MinHeight := 33;
-  ButtonCreviceClutter.Constraints.MinWidth := 62;
-  ButtonCreviceClutter.BorderSpacing.Left := 2;
-  ButtonCreviceClutter.OnClick := @ButtonCreviceClutterClick;
-  ButtonCreviceClutter.Parent := PanelMiddleTop;
-  if ButtonAeroFoil.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonCreviceClutter,
-      PanelMiddleTop.GetControlIndex(ButtonAeroFoil) + 1);
 
-  ButtonCameraShake := TSpeedButton.Create(Self);
-  ButtonCameraShake.Caption := 'CamShake';
-  ButtonCameraShake.Hint := 'Open Cinematic Camera Shake, Recoil & FOV Kick Studio.' + NL +
-    'Configure Trauma^2 Perlin harmonics, directional muzzle recoil, FOV punch & accessibility scale.';
-  ButtonCameraShake.ShowHint := true;
-  ButtonCameraShake.AutoSize := true;
-  ButtonCameraShake.Constraints.MinHeight := 33;
-  ButtonCameraShake.Constraints.MinWidth := 62;
-  ButtonCameraShake.BorderSpacing.Left := 2;
-  ButtonCameraShake.OnClick := @ButtonCameraShakeClick;
-  ButtonCameraShake.Parent := PanelMiddleTop;
-  if ButtonCreviceClutter.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonCameraShake,
-      PanelMiddleTop.GetControlIndex(ButtonCreviceClutter) + 1);
 
   ButtonFireGrid2D := TSpeedButton.Create(Self);
   ButtonFireGrid2D.Caption := 'Fire2D';
@@ -8597,9 +8361,9 @@ begin
   ButtonFireGrid2D.BorderSpacing.Left := 2;
   ButtonFireGrid2D.OnClick := @ButtonFireGrid2DClick;
   ButtonFireGrid2D.Parent := PanelMiddleTop;
-  if ButtonCameraShake.Parent = PanelMiddleTop then
+  if ButtonSubstrateStudio.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonFireGrid2D,
-      PanelMiddleTop.GetControlIndex(ButtonCameraShake) + 1);
+      PanelMiddleTop.GetControlIndex(ButtonSubstrateStudio) + 1);
 
   ButtonGameplayMessenger := TSpeedButton.Create(Self);
   ButtonGameplayMessenger.Caption := 'MsgBus';
@@ -8661,65 +8425,9 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonMacroRecorder,
       PanelMiddleTop.GetControlIndex(ButtonPoseSnapshot) + 1);
 
-  ButtonPortalStudio := TSpeedButton.Create(Self);
-  ButtonPortalStudio.Caption := 'Portal';
-  ButtonPortalStudio.Hint := 'Open Planar Portal & Seamless Mirror Studio.' + NL +
-    'Configure linked SE(3) portal pairs, Lengyel oblique clip planes & seamless crossing hysteresis.';
-  ButtonPortalStudio.ShowHint := true;
-  ButtonPortalStudio.AutoSize := true;
-  ButtonPortalStudio.Constraints.MinHeight := 33;
-  ButtonPortalStudio.Constraints.MinWidth := 58;
-  ButtonPortalStudio.BorderSpacing.Left := 2;
-  ButtonPortalStudio.OnClick := @ButtonPortalStudioClick;
-  ButtonPortalStudio.Parent := PanelMiddleTop;
-  if ButtonMacroRecorder.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonPortalStudio,
-      PanelMiddleTop.GetControlIndex(ButtonMacroRecorder) + 1);
 
-  ButtonSensoryPerception := TSpeedButton.Create(Self);
-  ButtonSensoryPerception.Caption := 'Sense';
-  ButtonSensoryPerception.Hint := 'Open AI Sensory Perception Studio.' + NL +
-    'Evaluate foveal/peripheral WorldRay sight cones, wall-muffled dB hearing & scent trails.';
-  ButtonSensoryPerception.ShowHint := true;
-  ButtonSensoryPerception.AutoSize := true;
-  ButtonSensoryPerception.Constraints.MinHeight := 33;
-  ButtonSensoryPerception.Constraints.MinWidth := 58;
-  ButtonSensoryPerception.BorderSpacing.Left := 2;
-  ButtonSensoryPerception.OnClick := @ButtonSensoryPerceptionClick;
-  ButtonSensoryPerception.Parent := PanelMiddleTop;
-  if ButtonPortalStudio.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonSensoryPerception,
-      PanelMiddleTop.GetControlIndex(ButtonPortalStudio) + 1);
 
-  ButtonIvyClimber := TSpeedButton.Create(Self);
-  ButtonIvyClimber.Caption := 'Ivy';
-  ButtonIvyClimber.Hint := 'Open Procedural Ivy & Vine Climber Studio.' + NL +
-    'Grow WorldRay wall-clinging ivy, crimson creepers & cave roots over solid masonry.';
-  ButtonIvyClimber.ShowHint := true;
-  ButtonIvyClimber.AutoSize := true;
-  ButtonIvyClimber.Constraints.MinHeight := 33;
-  ButtonIvyClimber.Constraints.MinWidth := 54;
-  ButtonIvyClimber.BorderSpacing.Left := 2;
-  ButtonIvyClimber.OnClick := @ButtonIvyClimberClick;
-  ButtonIvyClimber.Parent := PanelMiddleTop;
-  if ButtonSensoryPerception.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonIvyClimber,
-      PanelMiddleTop.GetControlIndex(ButtonSensoryPerception) + 1);
 
-  ButtonFootstepDirector := TSpeedButton.Create(Self);
-  ButtonFootstepDirector.Caption := 'Footstep';
-  ButtonFootstepDirector.Hint := 'Open Skeletal Footstep & Surface Decal Studio.' + NL +
-    'Inspect stride-phase boot strikes, WorldRay surface matching & acoustic splash/dust scaling.';
-  ButtonFootstepDirector.ShowHint := true;
-  ButtonFootstepDirector.AutoSize := true;
-  ButtonFootstepDirector.Constraints.MinHeight := 33;
-  ButtonFootstepDirector.Constraints.MinWidth := 64;
-  ButtonFootstepDirector.BorderSpacing.Left := 2;
-  ButtonFootstepDirector.OnClick := @ButtonFootstepDirectorClick;
-  ButtonFootstepDirector.Parent := PanelMiddleTop;
-  if ButtonIvyClimber.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonFootstepDirector,
-      PanelMiddleTop.GetControlIndex(ButtonIvyClimber) + 1);
 
   ButtonGravityField := TSpeedButton.Create(Self);
   ButtonGravityField.Caption := 'Gravity';
@@ -8732,9 +8440,9 @@ begin
   ButtonGravityField.BorderSpacing.Left := 2;
   ButtonGravityField.OnClick := @ButtonGravityFieldClick;
   ButtonGravityField.Parent := PanelMiddleTop;
-  if ButtonFootstepDirector.Parent = PanelMiddleTop then
+  if ButtonMacroRecorder.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonGravityField,
-      PanelMiddleTop.GetControlIndex(ButtonFootstepDirector) + 1);
+      PanelMiddleTop.GetControlIndex(ButtonMacroRecorder) + 1);
 
   ButtonCloudShadows := TSpeedButton.Create(Self);
   ButtonCloudShadows.Caption := 'Clouds';
@@ -8751,50 +8459,8 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonCloudShadows,
       PanelMiddleTop.GetControlIndex(ButtonGravityField) + 1);
 
-  ButtonTrailStamper := TSpeedButton.Create(Self);
-  ButtonTrailStamper.Caption := 'SnowTrk';
-  ButtonTrailStamper.Hint := 'Open Interactive Snow, Mud & Sand Trail Stamper Studio.' + NL +
-    'Carve persistent boot/wheel furrows with raised rim berms & gradual snowfall refill.';
-  ButtonTrailStamper.ShowHint := true;
-  ButtonTrailStamper.AutoSize := true;
-  ButtonTrailStamper.Constraints.MinHeight := 33;
-  ButtonTrailStamper.Constraints.MinWidth := 62;
-  ButtonTrailStamper.BorderSpacing.Left := 2;
-  ButtonTrailStamper.OnClick := @ButtonTrailStamperClick;
-  ButtonTrailStamper.Parent := PanelMiddleTop;
-  if ButtonCloudShadows.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonTrailStamper,
-      PanelMiddleTop.GetControlIndex(ButtonCloudShadows) + 1);
 
-  ButtonCoverPointScanner := TSpeedButton.Create(Self);
-  ButtonCoverPointScanner.Caption := 'CoverAI';
-  ButtonCoverPointScanner.Hint := 'Open Tactical Cover Point Scanner & Flanking Studio.' + NL +
-    'Bake WorldRay waist crouch-peek & full corner-lean cover points and score multi-threat crossfire.';
-  ButtonCoverPointScanner.ShowHint := true;
-  ButtonCoverPointScanner.AutoSize := true;
-  ButtonCoverPointScanner.Constraints.MinHeight := 33;
-  ButtonCoverPointScanner.Constraints.MinWidth := 62;
-  ButtonCoverPointScanner.BorderSpacing.Left := 2;
-  ButtonCoverPointScanner.OnClick := @ButtonCoverPointScannerClick;
-  ButtonCoverPointScanner.Parent := PanelMiddleTop;
-  if ButtonTrailStamper.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonCoverPointScanner,
-      PanelMiddleTop.GetControlIndex(ButtonTrailStamper) + 1);
 
-  ButtonCatenaryCable := TSpeedButton.Create(Self);
-  ButtonCatenaryCable.Caption := 'Cable';
-  ButtonCatenaryCable.Hint := 'Open Procedural Catenary Cable & Lantern Garland Studio.' + NL +
-    'Solve exact hyperbolic cosh powerlines, wind pendulum sway & arc-length lantern attachments.';
-  ButtonCatenaryCable.ShowHint := true;
-  ButtonCatenaryCable.AutoSize := true;
-  ButtonCatenaryCable.Constraints.MinHeight := 33;
-  ButtonCatenaryCable.Constraints.MinWidth := 62;
-  ButtonCatenaryCable.BorderSpacing.Left := 2;
-  ButtonCatenaryCable.OnClick := @ButtonCatenaryCableClick;
-  ButtonCatenaryCable.Parent := PanelMiddleTop;
-  if ButtonCoverPointScanner.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonCatenaryCable,
-      PanelMiddleTop.GetControlIndex(ButtonCoverPointScanner) + 1);
 
   ButtonPrefabDiffMerge := TSpeedButton.Create(Self);
   ButtonPrefabDiffMerge.Caption := 'Merge3';
@@ -8807,9 +8473,9 @@ begin
   ButtonPrefabDiffMerge.BorderSpacing.Left := 2;
   ButtonPrefabDiffMerge.OnClick := @ButtonPrefabDiffMergeClick;
   ButtonPrefabDiffMerge.Parent := PanelMiddleTop;
-  if ButtonCatenaryCable.Parent = PanelMiddleTop then
+  if ButtonCloudShadows.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonPrefabDiffMerge,
-      PanelMiddleTop.GetControlIndex(ButtonCatenaryCable) + 1);
+      PanelMiddleTop.GetControlIndex(ButtonCloudShadows) + 1);
 
   ButtonBallisticStudio := TSpeedButton.Create(Self);
   ButtonBallisticStudio.Caption := 'Ballistic';
@@ -8841,110 +8507,12 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonAcousticSpace,
       PanelMiddleTop.GetControlIndex(ButtonBallisticStudio) + 1);
 
-  ButtonSuspensionBridge := TSpeedButton.Create(Self);
-  ButtonSuspensionBridge.Caption := 'Bridge';
-  ButtonSuspensionBridge.Hint := 'Procedural Rope Suspension Bridge & Live-Load Deflection Studio' + NL +
-    'Solve coupled cable sag, point-load plank depression, roll tilt & broken-slat gaps';
-  ButtonSuspensionBridge.ShowHint := true;
-  ButtonSuspensionBridge.AutoSize := true;
-  ButtonSuspensionBridge.Constraints.MinHeight := 33;
-  ButtonSuspensionBridge.Constraints.MinWidth := 62;
-  ButtonSuspensionBridge.BorderSpacing.Left := 2;
-  ButtonSuspensionBridge.OnClick := @ButtonSuspensionBridgeClick;
-  ButtonSuspensionBridge.Parent := PanelMiddleTop;
-  if ButtonAcousticSpace.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonSuspensionBridge,
-      PanelMiddleTop.GetControlIndex(ButtonAcousticSpace) + 1);
 
-  ButtonWorldWaypoint := TSpeedButton.Create(Self);
-  ButtonWorldWaypoint.Caption := 'Waypoint';
-  ButtonWorldWaypoint.Hint := 'Diegetic 3D World Waypoint, Offscreen Edge & X-Ray Occlusion Studio' + NL +
-    'Project 3D objectives to HUD with hemisphere-safe offscreen clamping & wall occlusion';
-  ButtonWorldWaypoint.ShowHint := true;
-  ButtonWorldWaypoint.AutoSize := true;
-  ButtonWorldWaypoint.Constraints.MinHeight := 33;
-  ButtonWorldWaypoint.Constraints.MinWidth := 62;
-  ButtonWorldWaypoint.BorderSpacing.Left := 2;
-  ButtonWorldWaypoint.OnClick := @ButtonWorldWaypointClick;
-  ButtonWorldWaypoint.Parent := PanelMiddleTop;
-  if ButtonSuspensionBridge.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonWorldWaypoint,
-      PanelMiddleTop.GetControlIndex(ButtonSuspensionBridge) + 1);
 
-  ButtonBuoyancyHull := TSpeedButton.Create(Self);
-  ButtonBuoyancyHull.Caption := 'Buoyancy';
-  ButtonBuoyancyHull.Hint := 'Multi-Pontoon Buoyancy Hydrostatics & Wave Righting-Torque Studio' + NL +
-    'Simulate Archimedes spherical-cap pontoon buoyancy, wave heave & righting torque';
-  ButtonBuoyancyHull.ShowHint := true;
-  ButtonBuoyancyHull.AutoSize := true;
-  ButtonBuoyancyHull.Constraints.MinHeight := 33;
-  ButtonBuoyancyHull.Constraints.MinWidth := 62;
-  ButtonBuoyancyHull.BorderSpacing.Left := 2;
-  ButtonBuoyancyHull.OnClick := @ButtonBuoyancyHullClick;
-  ButtonBuoyancyHull.Parent := PanelMiddleTop;
-  if ButtonWorldWaypoint.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonBuoyancyHull,
-      PanelMiddleTop.GetControlIndex(ButtonWorldWaypoint) + 1);
 
-  ButtonSpiderweb := TSpeedButton.Create(Self);
-  ButtonSpiderweb.Caption := 'Cobweb';
-  ButtonSpiderweb.Hint := 'Procedural Spiderweb, Radial Wall Mooring & Dewdrop Silk Studio' + NL +
-    'Weave WorldRay wall-anchored orb webs, sagged spirals, torn crypt sectors & dewdrops';
-  ButtonSpiderweb.ShowHint := true;
-  ButtonSpiderweb.AutoSize := true;
-  ButtonSpiderweb.Constraints.MinHeight := 33;
-  ButtonSpiderweb.Constraints.MinWidth := 62;
-  ButtonSpiderweb.BorderSpacing.Left := 2;
-  ButtonSpiderweb.OnClick := @ButtonSpiderwebClick;
-  ButtonSpiderweb.Parent := PanelMiddleTop;
-  if ButtonBuoyancyHull.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonSpiderweb,
-      PanelMiddleTop.GetControlIndex(ButtonBuoyancyHull) + 1);
 
-  ButtonFoliageTrample := TSpeedButton.Create(Self);
-  ButtonFoliageTrample.Caption := 'Trample';
-  ButtonFoliageTrample.Hint := 'Dynamic Foliage/Grass Trample, Shockwave Flatten & Spring-Back Studio' + NL +
-    'Simulate 2D stalk tilt parting, radial blast flatten & Hookean elastic recovery';
-  ButtonFoliageTrample.ShowHint := true;
-  ButtonFoliageTrample.AutoSize := true;
-  ButtonFoliageTrample.Constraints.MinHeight := 33;
-  ButtonFoliageTrample.Constraints.MinWidth := 62;
-  ButtonFoliageTrample.BorderSpacing.Left := 2;
-  ButtonFoliageTrample.OnClick := @ButtonFoliageTrampleClick;
-  ButtonFoliageTrample.Parent := PanelMiddleTop;
-  if ButtonSpiderweb.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonFoliageTrample,
-      PanelMiddleTop.GetControlIndex(ButtonSpiderweb) + 1);
 
-  ButtonInteractScanner := TSpeedButton.Create(Self);
-  ButtonInteractScanner.Caption := 'Interact';
-  ButtonInteractScanner.Hint := 'Gameplay Interaction Focus Scanner & Hold-Progress Ring Studio' + NL +
-    'Score gaze/proximity interactables, reject through-wall exploits & test hold decay';
-  ButtonInteractScanner.ShowHint := true;
-  ButtonInteractScanner.AutoSize := true;
-  ButtonInteractScanner.Constraints.MinHeight := 33;
-  ButtonInteractScanner.Constraints.MinWidth := 62;
-  ButtonInteractScanner.BorderSpacing.Left := 2;
-  ButtonInteractScanner.OnClick := @ButtonInteractScannerClick;
-  ButtonInteractScanner.Parent := PanelMiddleTop;
-  if ButtonFoliageTrample.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonInteractScanner,
-      PanelMiddleTop.GetControlIndex(ButtonFoliageTrample) + 1);
 
-  ButtonSplatterBurst := TSpeedButton.Create(Self);
-  ButtonSplatterBurst.Caption := 'Splatter';
-  ButtonSplatterBurst.Hint := 'Procedural Decal Splatter Burst & Grazing Streak Elongation Studio' + NL +
-    'Emit WorldRay droplet cones with grazing streak stretch, LRU ring cap & evaporation';
-  ButtonSplatterBurst.ShowHint := true;
-  ButtonSplatterBurst.AutoSize := true;
-  ButtonSplatterBurst.Constraints.MinHeight := 33;
-  ButtonSplatterBurst.Constraints.MinWidth := 62;
-  ButtonSplatterBurst.BorderSpacing.Left := 2;
-  ButtonSplatterBurst.OnClick := @ButtonSplatterBurstClick;
-  ButtonSplatterBurst.Parent := PanelMiddleTop;
-  if ButtonInteractScanner.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonSplatterBurst,
-      PanelMiddleTop.GetControlIndex(ButtonInteractScanner) + 1);
 
   ButtonBudgetTreemap := TSpeedButton.Create(Self);
   ButtonBudgetTreemap.Caption := 'Treemap';
@@ -8957,148 +8525,22 @@ begin
   ButtonBudgetTreemap.BorderSpacing.Left := 2;
   ButtonBudgetTreemap.OnClick := @ButtonBudgetTreemapClick;
   ButtonBudgetTreemap.Parent := PanelMiddleTop;
-  if ButtonSplatterBurst.Parent = PanelMiddleTop then
+  if ButtonAcousticSpace.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonBudgetTreemap,
-      PanelMiddleTop.GetControlIndex(ButtonSplatterBurst) + 1);
+      PanelMiddleTop.GetControlIndex(ButtonAcousticSpace) + 1);
 
-  ButtonIcicleOverhang := TSpeedButton.Create(Self);
-  ButtonIcicleOverhang.Caption := 'Icicle';
-  ButtonIcicleOverhang.Hint := 'Procedural Icicle, Stalactite & Cave Drip Overhang Studio' + NL +
-    'Scan ceiling overhangs via WorldRay and grow tapered icicles + paired stalagmites';
-  ButtonIcicleOverhang.ShowHint := true;
-  ButtonIcicleOverhang.AutoSize := true;
-  ButtonIcicleOverhang.Constraints.MinHeight := 33;
-  ButtonIcicleOverhang.Constraints.MinWidth := 62;
-  ButtonIcicleOverhang.BorderSpacing.Left := 2;
-  ButtonIcicleOverhang.OnClick := @ButtonIcicleOverhangClick;
-  ButtonIcicleOverhang.Parent := PanelMiddleTop;
-  if ButtonBudgetTreemap.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonIcicleOverhang,
-      PanelMiddleTop.GetControlIndex(ButtonBudgetTreemap) + 1);
 
-  ButtonQuadrupedGait := TSpeedButton.Create(Self);
-  ButtonQuadrupedGait.Caption := 'QuadGait';
-  ButtonQuadrupedGait.Hint := 'Multi-Leg Quadruped, Hexapod & Arachnid Gait Phase Studio' + NL +
-    'Coordinate 4/6/8-leg trot/tripod/octopod gaits, WorldRay foot planting & body tilt';
-  ButtonQuadrupedGait.ShowHint := true;
-  ButtonQuadrupedGait.AutoSize := true;
-  ButtonQuadrupedGait.Constraints.MinHeight := 33;
-  ButtonQuadrupedGait.Constraints.MinWidth := 62;
-  ButtonQuadrupedGait.BorderSpacing.Left := 2;
-  ButtonQuadrupedGait.OnClick := @ButtonQuadrupedGaitClick;
-  ButtonQuadrupedGait.Parent := PanelMiddleTop;
-  if ButtonIcicleOverhang.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonQuadrupedGait,
-      PanelMiddleTop.GetControlIndex(ButtonIcicleOverhang) + 1);
 
-  ButtonZiplineRig := TSpeedButton.Create(Self);
-  ButtonZiplineRig.Caption := 'Zipline';
-  ButtonZiplineRig.Hint := 'Procedural Zipline, Pulley Acceleration & Vault Launch Studio' + NL +
-    'Simulate sloped cable rider sag, pulley gravity acceleration, hand-brake & vault hop';
-  ButtonZiplineRig.ShowHint := true;
-  ButtonZiplineRig.AutoSize := true;
-  ButtonZiplineRig.Constraints.MinHeight := 33;
-  ButtonZiplineRig.Constraints.MinWidth := 62;
-  ButtonZiplineRig.BorderSpacing.Left := 2;
-  ButtonZiplineRig.OnClick := @ButtonZiplineRigClick;
-  ButtonZiplineRig.Parent := PanelMiddleTop;
-  if ButtonQuadrupedGait.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonZiplineRig,
-      PanelMiddleTop.GetControlIndex(ButtonQuadrupedGait) + 1);
 
-  ButtonFractureVoronoi := TSpeedButton.Create(Self);
-  ButtonFractureVoronoi.Caption := 'Voronoi';
-  ButtonFractureVoronoi.Hint := 'Voronoi Destruction Fracture & BFS Ground-Support Collapse Studio' + NL +
-    'Partition walls into 3D Voronoi shards, shatter bonds & collapse unsupported islands';
-  ButtonFractureVoronoi.ShowHint := true;
-  ButtonFractureVoronoi.AutoSize := true;
-  ButtonFractureVoronoi.Constraints.MinHeight := 33;
-  ButtonFractureVoronoi.Constraints.MinWidth := 62;
-  ButtonFractureVoronoi.BorderSpacing.Left := 2;
-  ButtonFractureVoronoi.OnClick := @ButtonFractureVoronoiClick;
-  ButtonFractureVoronoi.Parent := PanelMiddleTop;
-  if ButtonZiplineRig.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonFractureVoronoi,
-      PanelMiddleTop.GetControlIndex(ButtonZiplineRig) + 1);
 
-  ButtonThermalMirage := TSpeedButton.Create(Self);
-  ButtonThermalMirage.Caption := 'Mirage';
-  ButtonThermalMirage.Hint := 'Heat-Haze Mirage, Thermal Convection Plume & Underwater Caustics Studio' + NL +
-    'Simulate grazing inferior desert mirage, Boussinesq shimmer & reef caustics';
-  ButtonThermalMirage.ShowHint := true;
-  ButtonThermalMirage.AutoSize := true;
-  ButtonThermalMirage.Constraints.MinHeight := 33;
-  ButtonThermalMirage.Constraints.MinWidth := 62;
-  ButtonThermalMirage.BorderSpacing.Left := 2;
-  ButtonThermalMirage.OnClick := @ButtonThermalMirageClick;
-  ButtonThermalMirage.Parent := PanelMiddleTop;
-  if ButtonFractureVoronoi.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonThermalMirage,
-      PanelMiddleTop.GetControlIndex(ButtonFractureVoronoi) + 1);
 
-  ButtonStealthLightGem := TSpeedButton.Create(Self);
-  ButtonStealthLightGem.Caption := 'LightGem';
-  ButtonStealthLightGem.Hint := 'Tactical Stealth Light-Gem, WorldRay Torch Occlusion & Backlight Silhouette Studio' + NL +
-    'Evaluate multi-torch shadow occlusion, guard backlight silhouettes & stance concealment';
-  ButtonStealthLightGem.ShowHint := true;
-  ButtonStealthLightGem.AutoSize := true;
-  ButtonStealthLightGem.Constraints.MinHeight := 33;
-  ButtonStealthLightGem.Constraints.MinWidth := 62;
-  ButtonStealthLightGem.BorderSpacing.Left := 2;
-  ButtonStealthLightGem.OnClick := @ButtonStealthLightGemClick;
-  ButtonStealthLightGem.Parent := PanelMiddleTop;
-  if ButtonThermalMirage.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonStealthLightGem,
-      PanelMiddleTop.GetControlIndex(ButtonThermalMirage) + 1);
 
-  ButtonGrapplePendulum := TSpeedButton.Create(Self);
-  ButtonGrapplePendulum.Caption := 'Grapple';
-  ButtonGrapplePendulum.Hint := 'Grappling Hook & Vine 3D Spherical Pendulum Swing, Winch Reel & Apex Release Studio' + NL +
-    'Simulate WorldRay overhead hook lock, taut-rope pendulum arc, winch reel & apex boost';
-  ButtonGrapplePendulum.ShowHint := true;
-  ButtonGrapplePendulum.AutoSize := true;
-  ButtonGrapplePendulum.Constraints.MinHeight := 33;
-  ButtonGrapplePendulum.Constraints.MinWidth := 62;
-  ButtonGrapplePendulum.BorderSpacing.Left := 2;
-  ButtonGrapplePendulum.OnClick := @ButtonGrapplePendulumClick;
-  ButtonGrapplePendulum.Parent := PanelMiddleTop;
-  if ButtonStealthLightGem.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonGrapplePendulum,
-      PanelMiddleTop.GetControlIndex(ButtonStealthLightGem) + 1);
 
-  ButtonFlameFlicker := TSpeedButton.Create(Self);
-  ButtonFlameFlicker.Caption := 'Torch';
-  ButtonFlameFlicker.Hint := 'Procedural Torch & Campfire Blackbody Flicker, Wind Blowout & Wall Soot Studio' + NL +
-    'Simulate 1800K..2900K Planckian flicker, wind draft tilt, gust blowout & WorldRay soot';
-  ButtonFlameFlicker.ShowHint := true;
-  ButtonFlameFlicker.AutoSize := true;
-  ButtonFlameFlicker.Constraints.MinHeight := 33;
-  ButtonFlameFlicker.Constraints.MinWidth := 62;
-  ButtonFlameFlicker.BorderSpacing.Left := 2;
-  ButtonFlameFlicker.OnClick := @ButtonFlameFlickerClick;
-  ButtonFlameFlicker.Parent := PanelMiddleTop;
-  if ButtonGrapplePendulum.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonFlameFlicker,
-      PanelMiddleTop.GetControlIndex(ButtonGrapplePendulum) + 1);
 
-  ButtonCrowdFormation := TSpeedButton.Create(Self);
-  ButtonCrowdFormation.Caption := 'Squad';
-  ButtonCrowdFormation.Hint := 'Tactical Squad & Crowd Formation (Wedge, Phalanx, Circle, Column & Obstacle Split) Studio' + NL +
-    'Solve 1..64 unit tactical slots with downward WorldRay ground snap & boulder split-around';
-  ButtonCrowdFormation.ShowHint := true;
-  ButtonCrowdFormation.AutoSize := true;
-  ButtonCrowdFormation.Constraints.MinHeight := 33;
-  ButtonCrowdFormation.Constraints.MinWidth := 62;
-  ButtonCrowdFormation.BorderSpacing.Left := 2;
-  ButtonCrowdFormation.OnClick := @ButtonCrowdFormationClick;
-  ButtonCrowdFormation.Parent := PanelMiddleTop;
-  if ButtonFlameFlicker.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonCrowdFormation,
-      PanelMiddleTop.GetControlIndex(ButtonFlameFlicker) + 1);
 
   ButtonLodInstancing := TSpeedButton.Create(Self);
   ButtonLodInstancing.Caption := 'AutoLOD';
-  ButtonLodInstancing.Hint := 'Automated LOD Chain & GPU Draw-Call Instancing Optimizer (126-Studio Hub / 22 MCP)' + NL +
+  ButtonLodInstancing.Hint := 'Automated LOD Chain & GPU Draw-Call Instancing Optimizer (100-Studio Hub / 22 MCP)' + NL +
     'Cluster repeated meshes into GPU-instanced batches & synthesize 4-tier hysteresis LOD chains';
   ButtonLodInstancing.ShowHint := true;
   ButtonLodInstancing.AutoSize := true;
@@ -9107,148 +8549,22 @@ begin
   ButtonLodInstancing.BorderSpacing.Left := 2;
   ButtonLodInstancing.OnClick := @ButtonLodInstancingClick;
   ButtonLodInstancing.Parent := PanelMiddleTop;
-  if ButtonCrowdFormation.Parent = PanelMiddleTop then
+  if ButtonBudgetTreemap.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonLodInstancing,
-      PanelMiddleTop.GetControlIndex(ButtonCrowdFormation) + 1);
+      PanelMiddleTop.GetControlIndex(ButtonBudgetTreemap) + 1);
 
-  ButtonPuddleWetness := TSpeedButton.Create(Self);
-  ButtonPuddleWetness.Caption := 'Puddles';
-  ButtonPuddleWetness.Hint := 'Procedural Rain Puddle, WorldRay Roof Shelter, Porous Wetness & Ripple Studio' + NL +
-    'Simulate depression pooling, dry roof/bridge shelter, porous darkening & footstep ripples';
-  ButtonPuddleWetness.ShowHint := true;
-  ButtonPuddleWetness.AutoSize := true;
-  ButtonPuddleWetness.Constraints.MinHeight := 33;
-  ButtonPuddleWetness.Constraints.MinWidth := 62;
-  ButtonPuddleWetness.BorderSpacing.Left := 2;
-  ButtonPuddleWetness.OnClick := @ButtonPuddleWetnessClick;
-  ButtonPuddleWetness.Parent := PanelMiddleTop;
-  if ButtonLodInstancing.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonPuddleWetness,
-      PanelMiddleTop.GetControlIndex(ButtonLodInstancing) + 1);
 
-  ButtonAvalancheSlide := TSpeedButton.Create(Self);
-  ButtonAvalancheSlide.Caption := 'Rockslide';
-  ButtonAvalancheSlide.Hint := 'Granular Rockslide, Talus Scree Cone & Angle-of-Repose Avalanche Studio' + NL +
-    'Simulate mass-conserving Mohr-Coulomb avalanches, talus cones & deflection berms';
-  ButtonAvalancheSlide.ShowHint := true;
-  ButtonAvalancheSlide.AutoSize := true;
-  ButtonAvalancheSlide.Constraints.MinHeight := 33;
-  ButtonAvalancheSlide.Constraints.MinWidth := 62;
-  ButtonAvalancheSlide.BorderSpacing.Left := 2;
-  ButtonAvalancheSlide.OnClick := @ButtonAvalancheSlideClick;
-  ButtonAvalancheSlide.Parent := PanelMiddleTop;
-  if ButtonPuddleWetness.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonAvalancheSlide,
-      PanelMiddleTop.GetControlIndex(ButtonPuddleWetness) + 1);
 
-  ButtonMagneticField := TSpeedButton.Create(Self);
-  ButtonMagneticField.Caption := 'Magnet';
-  ButtonMagneticField.Hint := '3D Magnetic Dipole, Ferromagnetic Snap, Mag-Boots & Eddy-Current Brake Studio' + NL +
-    'Evaluate 3D dipole B-fields, attract/repel forces, zero-G mag-boots & Lenz eddy braking';
-  ButtonMagneticField.ShowHint := true;
-  ButtonMagneticField.AutoSize := true;
-  ButtonMagneticField.Constraints.MinHeight := 33;
-  ButtonMagneticField.Constraints.MinWidth := 62;
-  ButtonMagneticField.BorderSpacing.Left := 2;
-  ButtonMagneticField.OnClick := @ButtonMagneticFieldClick;
-  ButtonMagneticField.Parent := PanelMiddleTop;
-  if ButtonAvalancheSlide.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonMagneticField,
-      PanelMiddleTop.GetControlIndex(ButtonAvalancheSlide) + 1);
 
-  ButtonClimbingHold := TSpeedButton.Create(Self);
-  ButtonClimbingHold.Caption := 'FreeClimb';
-  ButtonClimbingHold.Hint := 'Procedural Free-Climbing Hold Scanner (WorldRay Ledge Graph & Stamina) Studio' + NL +
-    'Scan cliff handholds via WorldRay, build limb reach graphs & compute overhang stamina drain';
-  ButtonClimbingHold.ShowHint := true;
-  ButtonClimbingHold.AutoSize := true;
-  ButtonClimbingHold.Constraints.MinHeight := 33;
-  ButtonClimbingHold.Constraints.MinWidth := 62;
-  ButtonClimbingHold.BorderSpacing.Left := 2;
-  ButtonClimbingHold.OnClick := @ButtonClimbingHoldClick;
-  ButtonClimbingHold.Parent := PanelMiddleTop;
-  if ButtonMagneticField.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonClimbingHold,
-      PanelMiddleTop.GetControlIndex(ButtonMagneticField) + 1);
 
-  ButtonLaserBeam := TSpeedButton.Create(Self);
-  ButtonLaserBeam.Caption := 'Laser';
-  ButtonLaserBeam.Hint := 'Multi-Bounce Optical Laser, Mirror Reflection, Snell Prism & Cutoff Gate Studio' + NL +
-    'Trace multi-bounce WorldRay lasers across mirrors, Snell prisms & solid beam-break blockers';
-  ButtonLaserBeam.ShowHint := true;
-  ButtonLaserBeam.AutoSize := true;
-  ButtonLaserBeam.Constraints.MinHeight := 33;
-  ButtonLaserBeam.Constraints.MinWidth := 62;
-  ButtonLaserBeam.BorderSpacing.Left := 2;
-  ButtonLaserBeam.OnClick := @ButtonLaserBeamClick;
-  ButtonLaserBeam.Parent := PanelMiddleTop;
-  if ButtonClimbingHold.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonLaserBeam,
-      PanelMiddleTop.GetControlIndex(ButtonClimbingHold) + 1);
 
-  ButtonBossArena := TSpeedButton.Create(Self);
-  ButtonBossArena.Caption := 'Hazards';
-  ButtonBossArena.Hint := 'Tactical Boss Telegraph & AoE Hazard Zone (Pizza-Cone, Donut, Jump Shock-Ring) Studio' + NL +
-    'Evaluate conic cleaves, safe-eye donuts, jumpable shock-rings & WorldRay pillar shelter';
-  ButtonBossArena.ShowHint := true;
-  ButtonBossArena.AutoSize := true;
-  ButtonBossArena.Constraints.MinHeight := 33;
-  ButtonBossArena.Constraints.MinWidth := 62;
-  ButtonBossArena.BorderSpacing.Left := 2;
-  ButtonBossArena.OnClick := @ButtonBossArenaClick;
-  ButtonBossArena.Parent := PanelMiddleTop;
-  if ButtonLaserBeam.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonBossArena,
-      PanelMiddleTop.GetControlIndex(ButtonLaserBeam) + 1);
 
-  ButtonTurretGimbal := TSpeedButton.Create(Self);
-  ButtonTurretGimbal.Caption := 'Turret';
-  ButtonTurretGimbal.Hint := 'Dual-Axis Gimbal Turret, Slew-Rate Servo, Barrel Recoil & Overheat Vent Studio' + NL +
-    'Simulate bounded yaw/pitch servo slew, critically-damped recoil & thermal vent lockout';
-  ButtonTurretGimbal.ShowHint := true;
-  ButtonTurretGimbal.AutoSize := true;
-  ButtonTurretGimbal.Constraints.MinHeight := 33;
-  ButtonTurretGimbal.Constraints.MinWidth := 62;
-  ButtonTurretGimbal.BorderSpacing.Left := 2;
-  ButtonTurretGimbal.OnClick := @ButtonTurretGimbalClick;
-  ButtonTurretGimbal.Parent := PanelMiddleTop;
-  if ButtonBossArena.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonTurretGimbal,
-      PanelMiddleTop.GetControlIndex(ButtonBossArena) + 1);
 
-  ButtonSonarPulse := TSpeedButton.Create(Self);
-  ButtonSonarPulse.Caption := 'Sonar';
-  ButtonSonarPulse.Hint := '3D Echolocation & Active Sonar Pulse (Spherical Wavefront & Doppler) Studio' + NL +
-    'Simulate finite-speed sonar pings, two-way echo arrival, reflectivity & Doppler shift';
-  ButtonSonarPulse.ShowHint := true;
-  ButtonSonarPulse.AutoSize := true;
-  ButtonSonarPulse.Constraints.MinHeight := 33;
-  ButtonSonarPulse.Constraints.MinWidth := 62;
-  ButtonSonarPulse.BorderSpacing.Left := 2;
-  ButtonSonarPulse.OnClick := @ButtonSonarPulseClick;
-  ButtonSonarPulse.Parent := PanelMiddleTop;
-  if ButtonTurretGimbal.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonSonarPulse,
-      PanelMiddleTop.GetControlIndex(ButtonTurretGimbal) + 1);
 
-  ButtonGearLinkage := TSpeedButton.Create(Self);
-  ButtonGearLinkage.Caption := 'Gears';
-  ButtonGearLinkage.Hint := 'Mechanical Gear Train, Rack-and-Pinion, Belt Pulley & Jam Detection Studio' + NL +
-    'Solve meshing gear tooth ratios, torque multiplication, linear racks & odd-cycle jams';
-  ButtonGearLinkage.ShowHint := true;
-  ButtonGearLinkage.AutoSize := true;
-  ButtonGearLinkage.Constraints.MinHeight := 33;
-  ButtonGearLinkage.Constraints.MinWidth := 62;
-  ButtonGearLinkage.BorderSpacing.Left := 2;
-  ButtonGearLinkage.OnClick := @ButtonGearLinkageClick;
-  ButtonGearLinkage.Parent := PanelMiddleTop;
-  if ButtonSonarPulse.Parent = PanelMiddleTop then
-    PanelMiddleTop.SetControlIndex(ButtonGearLinkage,
-      PanelMiddleTop.GetControlIndex(ButtonSonarPulse) + 1);
 
   ButtonShaderComplexity := TSpeedButton.Create(Self);
   ButtonShaderComplexity.Caption := 'Overdraw';
-  ButtonShaderComplexity.Hint := 'Viewport Overdraw, Transparency Stacking & Shader ALU Auditor (136 Studios / 23 MCP)' + NL +
+  ButtonShaderComplexity.Hint := 'Viewport Overdraw, Transparency Stacking & Shader ALU Auditor (100 UE Studios / 23 MCP)' + NL +
     'Audit 32x18 screen-tile translucent overdraw, fragment ALU cost & cutout remediation';
   ButtonShaderComplexity.ShowHint := true;
   ButtonShaderComplexity.AutoSize := true;
@@ -9257,9 +8573,9 @@ begin
   ButtonShaderComplexity.BorderSpacing.Left := 2;
   ButtonShaderComplexity.OnClick := @ButtonShaderComplexityClick;
   ButtonShaderComplexity.Parent := PanelMiddleTop;
-  if ButtonGearLinkage.Parent = PanelMiddleTop then
+  if ButtonLodInstancing.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonShaderComplexity,
-      PanelMiddleTop.GetControlIndex(ButtonGearLinkage) + 1);
+      PanelMiddleTop.GetControlIndex(ButtonLodInstancing) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -12521,25 +11837,9 @@ begin
   MenuTreeViewItemSubstrateStudio.OnClick := @MenuTreeViewItemSubstrateStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSubstrateStudio);
 
-  MenuTreeViewItemSmartObjectSlots := TMenuItem.Create(Self);
-  MenuTreeViewItemSmartObjectSlots.Caption := 'Multi-Slot SmartObject Queue & Cooldown Studio...';
-  MenuTreeViewItemSmartObjectSlots.OnClick := @MenuTreeViewItemSmartObjectSlotsClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemSmartObjectSlots);
 
-  MenuTreeViewItemAeroFoil := TMenuItem.Create(Self);
-  MenuTreeViewItemAeroFoil.Caption := 'Aerodynamic Wing/Sail Lift-Drag & Stall Studio...';
-  MenuTreeViewItemAeroFoil.OnClick := @MenuTreeViewItemAeroFoilClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemAeroFoil);
 
-  MenuTreeViewItemCreviceClutter := TMenuItem.Create(Self);
-  MenuTreeViewItemCreviceClutter.Caption := 'Wall-Crevice & Seam Micro-Clutter Studio...';
-  MenuTreeViewItemCreviceClutter.OnClick := @MenuTreeViewItemCreviceClutterClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemCreviceClutter);
 
-  MenuTreeViewItemCameraShake := TMenuItem.Create(Self);
-  MenuTreeViewItemCameraShake.Caption := 'Cinematic Camera Shake, Recoil & FOV Kick Studio...';
-  MenuTreeViewItemCameraShake.OnClick := @MenuTreeViewItemCameraShakeClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemCameraShake);
 
   MenuTreeViewItemFireGrid2D := TMenuItem.Create(Self);
   MenuTreeViewItemFireGrid2D.Caption := 'Niagara Grid2D Cellular Fire Spread Studio...';
@@ -12561,22 +11861,6 @@ begin
   MenuTreeViewItemMacroRecorder.Caption := 'Editor Action Macro Recorder & 96-Studio Hub...';
   MenuTreeViewItemMacroRecorder.OnClick := @MenuTreeViewItemMacroRecorderClick;
   MenuTreeView.Items.Add(MenuTreeViewItemMacroRecorder);
-  MenuTreeViewItemPortalStudio := TMenuItem.Create(Self);
-  MenuTreeViewItemPortalStudio.Caption := 'Planar Portal & Seamless Mirror Studio...';
-  MenuTreeViewItemPortalStudio.OnClick := @MenuTreeViewItemPortalStudioClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemPortalStudio);
-  MenuTreeViewItemSensoryPerception := TMenuItem.Create(Self);
-  MenuTreeViewItemSensoryPerception.Caption := 'AI Sensory Perception Studio...';
-  MenuTreeViewItemSensoryPerception.OnClick := @MenuTreeViewItemSensoryPerceptionClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemSensoryPerception);
-  MenuTreeViewItemIvyClimber := TMenuItem.Create(Self);
-  MenuTreeViewItemIvyClimber.Caption := 'Procedural Ivy & Vine Climber Studio...';
-  MenuTreeViewItemIvyClimber.OnClick := @MenuTreeViewItemIvyClimberClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemIvyClimber);
-  MenuTreeViewItemFootstepDirector := TMenuItem.Create(Self);
-  MenuTreeViewItemFootstepDirector.Caption := 'Skeletal Footstep & Surface Decal Studio...';
-  MenuTreeViewItemFootstepDirector.OnClick := @MenuTreeViewItemFootstepDirectorClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemFootstepDirector);
 
   MenuTreeViewItemGravityField := TMenuItem.Create(Self);
   MenuTreeViewItemGravityField.Caption := 'Dynamic Gravity Well & Planetary Walk Studio...';
@@ -12588,20 +11872,8 @@ begin
   MenuTreeViewItemCloudShadows.OnClick := @MenuTreeViewItemCloudShadowsClick;
   MenuTreeView.Items.Add(MenuTreeViewItemCloudShadows);
 
-  MenuTreeViewItemTrailStamper := TMenuItem.Create(Self);
-  MenuTreeViewItemTrailStamper.Caption := 'Interactive Snow, Mud & Sand Trail Stamper Studio...';
-  MenuTreeViewItemTrailStamper.OnClick := @MenuTreeViewItemTrailStamperClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemTrailStamper);
 
-  MenuTreeViewItemCoverPointScanner := TMenuItem.Create(Self);
-  MenuTreeViewItemCoverPointScanner.Caption := 'Tactical Cover Point Scanner & Flanking Studio...';
-  MenuTreeViewItemCoverPointScanner.OnClick := @MenuTreeViewItemCoverPointScannerClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemCoverPointScanner);
 
-  MenuTreeViewItemCatenaryCable := TMenuItem.Create(Self);
-  MenuTreeViewItemCatenaryCable.Caption := 'Procedural Catenary Cable & Lantern Garland Studio...';
-  MenuTreeViewItemCatenaryCable.OnClick := @MenuTreeViewItemCatenaryCableClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemCatenaryCable);
 
   MenuTreeViewItemPrefabDiffMerge := TMenuItem.Create(Self);
   MenuTreeViewItemPrefabDiffMerge.Caption := 'Three-Way Scene & Prefab Diff/Merge & 106-Studio Hub...';
@@ -12618,143 +11890,43 @@ begin
   MenuTreeViewItemAcousticSpace.OnClick := @MenuTreeViewItemAcousticSpaceClick;
   MenuTreeView.Items.Add(MenuTreeViewItemAcousticSpace);
 
-  MenuTreeViewItemSuspensionBridge := TMenuItem.Create(Self);
-  MenuTreeViewItemSuspensionBridge.Caption := 'Procedural Rope Suspension Bridge & Live-Load Studio...';
-  MenuTreeViewItemSuspensionBridge.OnClick := @MenuTreeViewItemSuspensionBridgeClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemSuspensionBridge);
 
-  MenuTreeViewItemWorldWaypoint := TMenuItem.Create(Self);
-  MenuTreeViewItemWorldWaypoint.Caption := 'Diegetic 3D World Waypoint & Offscreen HUD Studio...';
-  MenuTreeViewItemWorldWaypoint.OnClick := @MenuTreeViewItemWorldWaypointClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemWorldWaypoint);
 
-  MenuTreeViewItemBuoyancyHull := TMenuItem.Create(Self);
-  MenuTreeViewItemBuoyancyHull.Caption := 'Multi-Pontoon Buoyancy Hydrostatics & Wave Torque Studio...';
-  MenuTreeViewItemBuoyancyHull.OnClick := @MenuTreeViewItemBuoyancyHullClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemBuoyancyHull);
 
-  MenuTreeViewItemSpiderweb := TMenuItem.Create(Self);
-  MenuTreeViewItemSpiderweb.Caption := 'Procedural Spiderweb, Wall Mooring & Dewdrop Silk Studio...';
-  MenuTreeViewItemSpiderweb.OnClick := @MenuTreeViewItemSpiderwebClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemSpiderweb);
 
-  MenuTreeViewItemFoliageTrample := TMenuItem.Create(Self);
-  MenuTreeViewItemFoliageTrample.Caption := 'Dynamic Foliage Trample, Blast Flatten & Spring-Back Studio...';
-  MenuTreeViewItemFoliageTrample.OnClick := @MenuTreeViewItemFoliageTrampleClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemFoliageTrample);
 
-  MenuTreeViewItemInteractScanner := TMenuItem.Create(Self);
-  MenuTreeViewItemInteractScanner.Caption := 'Gameplay Interaction Focus Scanner & Hold-Ring Studio...';
-  MenuTreeViewItemInteractScanner.OnClick := @MenuTreeViewItemInteractScannerClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemInteractScanner);
 
-  MenuTreeViewItemSplatterBurst := TMenuItem.Create(Self);
-  MenuTreeViewItemSplatterBurst.Caption := 'Procedural Decal Splatter Burst & Grazing Streak Studio...';
-  MenuTreeViewItemSplatterBurst.OnClick := @MenuTreeViewItemSplatterBurstClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemSplatterBurst);
 
   MenuTreeViewItemBudgetTreemap := TMenuItem.Create(Self);
   MenuTreeViewItemBudgetTreemap.Caption := 'Squarified Scene Budget Treemap & 116-Studio Hub...';
   MenuTreeViewItemBudgetTreemap.OnClick := @MenuTreeViewItemBudgetTreemapClick;
   MenuTreeView.Items.Add(MenuTreeViewItemBudgetTreemap);
 
-  MenuTreeViewItemIcicleOverhang := TMenuItem.Create(Self);
-  MenuTreeViewItemIcicleOverhang.Caption := 'Procedural Icicle, Stalactite & Overhang Studio...';
-  MenuTreeViewItemIcicleOverhang.OnClick := @MenuTreeViewItemIcicleOverhangClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemIcicleOverhang);
 
-  MenuTreeViewItemQuadrupedGait := TMenuItem.Create(Self);
-  MenuTreeViewItemQuadrupedGait.Caption := 'Multi-Leg Quadruped, Hexapod & Spider Gait Studio...';
-  MenuTreeViewItemQuadrupedGait.OnClick := @MenuTreeViewItemQuadrupedGaitClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemQuadrupedGait);
 
-  MenuTreeViewItemZiplineRig := TMenuItem.Create(Self);
-  MenuTreeViewItemZiplineRig.Caption := 'Procedural Zipline, Pulley Acceleration & Vault Studio...';
-  MenuTreeViewItemZiplineRig.OnClick := @MenuTreeViewItemZiplineRigClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemZiplineRig);
 
-  MenuTreeViewItemFractureVoronoi := TMenuItem.Create(Self);
-  MenuTreeViewItemFractureVoronoi.Caption := 'Voronoi Destruction Fracture & BFS Collapse Studio...';
-  MenuTreeViewItemFractureVoronoi.OnClick := @MenuTreeViewItemFractureVoronoiClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemFractureVoronoi);
 
-  MenuTreeViewItemThermalMirage := TMenuItem.Create(Self);
-  MenuTreeViewItemThermalMirage.Caption := 'Heat-Haze Mirage, Thermal Plume & Caustics Studio...';
-  MenuTreeViewItemThermalMirage.OnClick := @MenuTreeViewItemThermalMirageClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemThermalMirage);
 
-  MenuTreeViewItemStealthLightGem := TMenuItem.Create(Self);
-  MenuTreeViewItemStealthLightGem.Caption := 'Tactical Stealth Light-Gem & Backlight Silhouette Studio...';
-  MenuTreeViewItemStealthLightGem.OnClick := @MenuTreeViewItemStealthLightGemClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemStealthLightGem);
 
-  MenuTreeViewItemGrapplePendulum := TMenuItem.Create(Self);
-  MenuTreeViewItemGrapplePendulum.Caption := 'Grappling Hook Pendulum Swing, Winch Reel & Apex Jump Studio...';
-  MenuTreeViewItemGrapplePendulum.OnClick := @MenuTreeViewItemGrapplePendulumClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemGrapplePendulum);
 
-  MenuTreeViewItemFlameFlicker := TMenuItem.Create(Self);
-  MenuTreeViewItemFlameFlicker.Caption := 'Procedural Torch Blackbody Flicker, Wind Blowout & Soot Studio...';
-  MenuTreeViewItemFlameFlicker.OnClick := @MenuTreeViewItemFlameFlickerClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemFlameFlicker);
 
-  MenuTreeViewItemCrowdFormation := TMenuItem.Create(Self);
-  MenuTreeViewItemCrowdFormation.Caption := 'Tactical Squad Formation (Wedge, Phalanx, Shield-Circle) Studio...';
-  MenuTreeViewItemCrowdFormation.OnClick := @MenuTreeViewItemCrowdFormationClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemCrowdFormation);
 
   MenuTreeViewItemLodInstancing := TMenuItem.Create(Self);
-  MenuTreeViewItemLodInstancing.Caption := 'Automated LOD Chain & GPU Instancing Optimizer (126 Studios)...';
+  MenuTreeViewItemLodInstancing.Caption := 'Automated LOD Chain & GPU Instancing Optimizer (100 UE Studios)...';
   MenuTreeViewItemLodInstancing.OnClick := @MenuTreeViewItemLodInstancingClick;
   MenuTreeView.Items.Add(MenuTreeViewItemLodInstancing);
 
-  MenuTreeViewItemPuddleWetness := TMenuItem.Create(Self);
-  MenuTreeViewItemPuddleWetness.Caption := 'Procedural Rain Puddle, Roof Shelter & Splash Ripple Studio...';
-  MenuTreeViewItemPuddleWetness.OnClick := @MenuTreeViewItemPuddleWetnessClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemPuddleWetness);
 
-  MenuTreeViewItemAvalancheSlide := TMenuItem.Create(Self);
-  MenuTreeViewItemAvalancheSlide.Caption := 'Granular Rockslide, Talus Scree & Avalanche Runout Studio...';
-  MenuTreeViewItemAvalancheSlide.OnClick := @MenuTreeViewItemAvalancheSlideClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemAvalancheSlide);
 
-  MenuTreeViewItemMagneticField := TMenuItem.Create(Self);
-  MenuTreeViewItemMagneticField.Caption := '3D Magnetic Dipole, Mag-Boots & Eddy-Current Brake Studio...';
-  MenuTreeViewItemMagneticField.OnClick := @MenuTreeViewItemMagneticFieldClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemMagneticField);
 
-  MenuTreeViewItemClimbingHold := TMenuItem.Create(Self);
-  MenuTreeViewItemClimbingHold.Caption := 'Free-Climbing Hold Scanner, Reach Graph & Overhang Stamina Studio...';
-  MenuTreeViewItemClimbingHold.OnClick := @MenuTreeViewItemClimbingHoldClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemClimbingHold);
 
-  MenuTreeViewItemLaserBeam := TMenuItem.Create(Self);
-  MenuTreeViewItemLaserBeam.Caption := 'Multi-Bounce Optical Laser, Mirror/Prism & Cutoff Gate Studio...';
-  MenuTreeViewItemLaserBeam.OnClick := @MenuTreeViewItemLaserBeamClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemLaserBeam);
 
-  MenuTreeViewItemBossArena := TMenuItem.Create(Self);
-  MenuTreeViewItemBossArena.Caption := 'Boss Telegraph & AoE Hazard (Cone, Donut, Shock-Ring) Studio...';
-  MenuTreeViewItemBossArena.OnClick := @MenuTreeViewItemBossArenaClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemBossArena);
 
-  MenuTreeViewItemTurretGimbal := TMenuItem.Create(Self);
-  MenuTreeViewItemTurretGimbal.Caption := 'Dual-Axis Gimbal Turret, Slew Servo, Recoil & Overheat Studio...';
-  MenuTreeViewItemTurretGimbal.OnClick := @MenuTreeViewItemTurretGimbalClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemTurretGimbal);
 
-  MenuTreeViewItemSonarPulse := TMenuItem.Create(Self);
-  MenuTreeViewItemSonarPulse.Caption := '3D Echolocation & Active Sonar Pulse (Wavefront & Doppler) Studio...';
-  MenuTreeViewItemSonarPulse.OnClick := @MenuTreeViewItemSonarPulseClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemSonarPulse);
 
-  MenuTreeViewItemGearLinkage := TMenuItem.Create(Self);
-  MenuTreeViewItemGearLinkage.Caption := 'Mechanical Gear Train, Rack-and-Pinion & Clockwork Studio...';
-  MenuTreeViewItemGearLinkage.OnClick := @MenuTreeViewItemGearLinkageClick;
-  MenuTreeView.Items.Add(MenuTreeViewItemGearLinkage);
 
   MenuTreeViewItemShaderComplexity := TMenuItem.Create(Self);
-  MenuTreeViewItemShaderComplexity.Caption := 'Viewport Overdraw & Shader ALU Complexity Auditor (136 Studios)...';
+  MenuTreeViewItemShaderComplexity.Caption := 'Viewport Overdraw & Shader ALU Complexity Auditor (100 UE Studios)...';
   MenuTreeViewItemShaderComplexity.OnClick := @MenuTreeViewItemShaderComplexityClick;
   MenuTreeView.Items.Add(MenuTreeViewItemShaderComplexity);
 
@@ -18147,14 +17319,6 @@ var
         Suffix := Suffix + ' ' + TCastleAssetPreloadQueue(NodeObj).PreloadSummaryBadge
       else if NodeObj is TCastleSubstrateMaterial then
         Suffix := Suffix + ' ' + TCastleSubstrateMaterial(NodeObj).SubstrateSummaryBadge
-      else if NodeObj is TCastleMultiSlotSmartObject then
-        Suffix := Suffix + ' ' + TCastleMultiSlotSmartObject(NodeObj).SmartObjectSummaryBadge
-      else if NodeObj is TCastleAeroFoilBehavior then
-        Suffix := Suffix + ' ' + TCastleAeroFoilBehavior(NodeObj).AeroSummaryBadge
-      else if NodeObj is TCastleCreviceClutterVolume then
-        Suffix := Suffix + ' ' + TCastleCreviceClutterVolume(NodeObj).CreviceSummaryBadge
-      else if NodeObj is TCastleCameraShakeDirector then
-        Suffix := Suffix + ' ' + TCastleCameraShakeDirector(NodeObj).ShakeSummaryBadge
       else if NodeObj is TCastleFireSpreadGrid then
         Suffix := Suffix + ' ' + TCastleFireSpreadGrid(NodeObj).FireSummaryBadge
       else if NodeObj is TCastleGameplayMessenger then
@@ -18163,78 +17327,14 @@ var
         Suffix := Suffix + ' ' + TCastleOctahedralImpostor(NodeObj).ImpostorSummaryBadge
       else if NodeObj is TCastlePoseSnapshotTrail then
         Suffix := Suffix + ' ' + TCastlePoseSnapshotTrail(NodeObj).PoseSummaryBadge
-      else if NodeObj is TCastlePortalGateway then
-        Suffix := Suffix + ' ' + TCastlePortalGateway(NodeObj).PortalSummaryBadge
-      else if NodeObj is TCastleSensoryPerception then
-        Suffix := Suffix + ' ' + TCastleSensoryPerception(NodeObj).SensorySummaryBadge
-      else if NodeObj is TCastleIvyClimber then
-        Suffix := Suffix + ' ' + TCastleIvyClimber(NodeObj).IvySummaryBadge
-      else if NodeObj is TCastleFootstepDirector then
-        Suffix := Suffix + ' ' + TCastleFootstepDirector(NodeObj).FootstepSummaryBadge
       else if NodeObj is TCastleGravityField then
         Suffix := Suffix + ' ' + TCastleGravityField(NodeObj).GravitySummaryBadge
       else if NodeObj is TCastleCloudShadowProjector then
         Suffix := Suffix + ' ' + TCastleCloudShadowProjector(NodeObj).CloudSummaryBadge
-      else if NodeObj is TCastleTrailStamper then
-        Suffix := Suffix + ' ' + TCastleTrailStamper(NodeObj).TrailSummaryBadge
-      else if NodeObj is TCastleCoverPointScanner then
-        Suffix := Suffix + ' ' + TCastleCoverPointScanner(NodeObj).CoverSummaryBadge
-      else if NodeObj is TCastleCatenaryCable then
-        Suffix := Suffix + ' ' + TCastleCatenaryCable(NodeObj).CableSummaryBadge
       else if NodeObj is TCastleBallisticLauncher then
         Suffix := Suffix + ' ' + TCastleBallisticLauncher(NodeObj).BallisticSummaryBadge
       else if NodeObj is TCastleAcousticProbe then
         Suffix := Suffix + ' ' + TCastleAcousticProbe(NodeObj).AcousticSummaryBadge
-      else if NodeObj is TCastleSuspensionBridge then
-        Suffix := Suffix + ' ' + TCastleSuspensionBridge(NodeObj).BridgeSummaryBadge
-      else if NodeObj is TCastleWorldWaypoint then
-        Suffix := Suffix + ' ' + TCastleWorldWaypoint(NodeObj).WaypointSummaryBadge
-      else if NodeObj is TCastleBuoyancyHull then
-        Suffix := Suffix + ' ' + TCastleBuoyancyHull(NodeObj).BuoyancySummaryBadge
-      else if NodeObj is TCastleSpiderwebGenerator then
-        Suffix := Suffix + ' ' + TCastleSpiderwebGenerator(NodeObj).SpiderwebSummaryBadge
-      else if NodeObj is TCastleFoliageTrampleField then
-        Suffix := Suffix + ' ' + TCastleFoliageTrampleField(NodeObj).TrampleSummaryBadge
-      else if NodeObj is TCastleInteractScanner then
-        Suffix := Suffix + ' ' + TCastleInteractScanner(NodeObj).InteractSummaryBadge
-      else if NodeObj is TCastleSplatterBurst then
-        Suffix := Suffix + ' ' + TCastleSplatterBurst(NodeObj).SplatterSummaryBadge
-      else if NodeObj is TCastleIcicleOverhang then
-        Suffix := Suffix + ' ' + TCastleIcicleOverhang(NodeObj).IcicleSummaryBadge
-      else if NodeObj is TCastleMultiLegGaitRig then
-        Suffix := Suffix + ' ' + TCastleMultiLegGaitRig(NodeObj).GaitSummaryBadge
-      else if NodeObj is TCastleZiplineRig then
-        Suffix := Suffix + ' ' + TCastleZiplineRig(NodeObj).ZiplineSummaryBadge
-      else if NodeObj is TCastleVoronoiFractureVolume then
-        Suffix := Suffix + ' ' + TCastleVoronoiFractureVolume(NodeObj).FractureSummaryBadge
-      else if NodeObj is TCastleThermalMirageVolume then
-        Suffix := Suffix + ' ' + TCastleThermalMirageVolume(NodeObj).MirageSummaryBadge
-      else if NodeObj is TCastleStealthLightGem then
-        Suffix := Suffix + ' ' + TCastleStealthLightGem(NodeObj).LightGemSummaryBadge
-      else if NodeObj is TCastleGrapplePendulum then
-        Suffix := Suffix + ' ' + TCastleGrapplePendulum(NodeObj).GrappleSummaryBadge
-      else if NodeObj is TCastleFlameFlickerRig then
-        Suffix := Suffix + ' ' + TCastleFlameFlickerRig(NodeObj).FlameSummaryBadge
-      else if NodeObj is TCastleCrowdFormation then
-        Suffix := Suffix + ' ' + TCastleCrowdFormation(NodeObj).FormationSummaryBadge
-      else if NodeObj is TCastlePuddleWetnessField then
-        Suffix := Suffix + ' ' + TCastlePuddleWetnessField(NodeObj).PuddleSummaryBadge
-      else if NodeObj is TCastleAvalancheSlide then
-        Suffix := Suffix + ' ' + TCastleAvalancheSlide(NodeObj).AvalancheSummaryBadge
-      else if NodeObj is TCastleMagneticField then
-        Suffix := Suffix + ' ' + TCastleMagneticField(NodeObj).MagnetSummaryBadge
-      else if NodeObj is TCastleClimbingHoldScanner then
-        Suffix := Suffix + ' ' + TCastleClimbingHoldScanner(NodeObj).ClimbSummaryBadge
-      else if NodeObj is TCastleLaserBeamRig then
-        Suffix := Suffix + ' ' + TCastleLaserBeamRig(NodeObj).LaserSummaryBadge
-      else if NodeObj is TCastleBossHazardDirector then
-        Suffix := Suffix + ' ' + TCastleBossHazardDirector(NodeObj).HazardSummaryBadge
-      else if NodeObj is TCastleTurretGimbal then
-        Suffix := Suffix + ' ' + TCastleTurretGimbal(NodeObj).TurretSummaryBadge
-      else if NodeObj is TCastleSonarPulse then
-        Suffix := Suffix + ' ' + TCastleSonarPulse(NodeObj).SonarSummaryBadge
-      else if NodeObj is TCastleGearLinkage then
-        Suffix := Suffix + ' ' + TCastleGearLinkage(NodeObj).GearSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -58516,54 +57616,18 @@ begin
   else if SameText(AStudioId, 'preload_studio') then ShowPreloadStudioDialog
   else if SameText(AStudioId, 'collab_presence') then ShowCollabPresenceDialog
   else if SameText(AStudioId, 'substrate_studio') then ShowSubstrateStudioDialog
-  else if SameText(AStudioId, 'smart_object_slots') then ShowSmartObjectSlotsDialog
-  else if SameText(AStudioId, 'aero_foil') then ShowAeroFoilDialog
-  else if SameText(AStudioId, 'crevice_clutter') then ShowCreviceClutterDialog
-  else if SameText(AStudioId, 'camera_shake') then ShowCameraShakeDialog
   else if SameText(AStudioId, 'fire_grid_2d') then ShowFireGrid2DDialog
   else if SameText(AStudioId, 'gameplay_messenger') then ShowGameplayMessengerDialog
   else if SameText(AStudioId, 'octahedral_impostor') then ShowOctahedralImpostorDialog
   else if SameText(AStudioId, 'pose_snapshot') then ShowPoseSnapshotDialog
   else if SameText(AStudioId, 'macro_recorder') then ShowMacroRecorderDialog
-  else if SameText(AStudioId, 'portal_studio') then ShowPortalStudioDialog
-  else if SameText(AStudioId, 'sensory_perception') then ShowSensoryPerceptionDialog
-  else if SameText(AStudioId, 'ivy_climber') then ShowIvyClimberDialog
-  else if SameText(AStudioId, 'footstep_director') then ShowFootstepDirectorDialog
   else if SameText(AStudioId, 'gravity_field') then ShowGravityFieldDialog
   else if SameText(AStudioId, 'cloud_shadows') then ShowCloudShadowsDialog
-  else if SameText(AStudioId, 'trail_stamper') then ShowTrailStamperDialog
-  else if SameText(AStudioId, 'cover_point_scanner') then ShowCoverPointScannerDialog
-  else if SameText(AStudioId, 'catenary_cable') then ShowCatenaryCableDialog
   else if SameText(AStudioId, 'prefab_diff_merge') then ShowPrefabDiffMergeDialog
   else if SameText(AStudioId, 'ballistic_studio') then ShowBallisticStudioDialog
   else if SameText(AStudioId, 'acoustic_space') then ShowAcousticSpaceDialog
-  else if SameText(AStudioId, 'suspension_bridge') then ShowSuspensionBridgeDialog
-  else if SameText(AStudioId, 'world_waypoint') then ShowWorldWaypointDialog
-  else if SameText(AStudioId, 'buoyancy_hull') then ShowBuoyancyHullDialog
-  else if SameText(AStudioId, 'spiderweb') then ShowSpiderwebDialog
-  else if SameText(AStudioId, 'foliage_trample') then ShowFoliageTrampleDialog
-  else if SameText(AStudioId, 'interact_scanner') then ShowInteractScannerDialog
-  else if SameText(AStudioId, 'splatter_burst') then ShowSplatterBurstDialog
   else if SameText(AStudioId, 'budget_treemap') then ShowBudgetTreemapDialog
-  else if SameText(AStudioId, 'icicle_overhang') then ShowIcicleOverhangDialog
-  else if SameText(AStudioId, 'quadruped_gait') then ShowQuadrupedGaitDialog
-  else if SameText(AStudioId, 'zipline_rig') then ShowZiplineRigDialog
-  else if SameText(AStudioId, 'fracture_voronoi') then ShowFractureVoronoiDialog
-  else if SameText(AStudioId, 'thermal_mirage') then ShowThermalMirageDialog
-  else if SameText(AStudioId, 'stealth_light_gem') then ShowStealthLightGemDialog
-  else if SameText(AStudioId, 'grapple_pendulum') then ShowGrapplePendulumDialog
-  else if SameText(AStudioId, 'flame_flicker') then ShowFlameFlickerDialog
-  else if SameText(AStudioId, 'crowd_formation') then ShowCrowdFormationDialog
   else if SameText(AStudioId, 'lod_instancing') then ShowLodInstancingDialog
-  else if SameText(AStudioId, 'puddle_wetness') then ShowPuddleWetnessDialog
-  else if SameText(AStudioId, 'avalanche_slide') then ShowAvalancheSlideDialog
-  else if SameText(AStudioId, 'magnetic_field') then ShowMagneticFieldDialog
-  else if SameText(AStudioId, 'climbing_hold') then ShowClimbingHoldDialog
-  else if SameText(AStudioId, 'laser_beam') then ShowLaserBeamDialog
-  else if SameText(AStudioId, 'boss_arena') then ShowBossArenaDialog
-  else if SameText(AStudioId, 'turret_gimbal') then ShowTurretGimbalDialog
-  else if SameText(AStudioId, 'sonar_pulse') then ShowSonarPulseDialog
-  else if SameText(AStudioId, 'gear_linkage') then ShowGearLinkageDialog
   else if SameText(AStudioId, 'shader_complexity') then ShowShaderComplexityDialog
   else
     Result := False;
@@ -59973,113 +59037,9 @@ begin
   ShowSubstrateStudioDialog;
 end;
 
-procedure TDesignFrame.ShowSmartObjectSlotsDialog;
-var
-  Dlg: TSmartObjectSlotsForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TSmartObjectSlotsForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonSmartObjectSlotsClick(Sender: TObject);
-begin
-  ShowSmartObjectSlotsDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemSmartObjectSlotsClick(Sender: TObject);
-begin
-  ShowSmartObjectSlotsDialog;
-end;
 
-procedure TDesignFrame.ShowAeroFoilDialog;
-var
-  Dlg: TAeroFoilForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TAeroFoilForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonAeroFoilClick(Sender: TObject);
-begin
-  ShowAeroFoilDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemAeroFoilClick(Sender: TObject);
-begin
-  ShowAeroFoilDialog;
-end;
-
-procedure TDesignFrame.ShowCreviceClutterDialog;
-var
-  Dlg: TCreviceClutterForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TCreviceClutterForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonCreviceClutterClick(Sender: TObject);
-begin
-  ShowCreviceClutterDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemCreviceClutterClick(Sender: TObject);
-begin
-  ShowCreviceClutterDialog;
-end;
-
-procedure TDesignFrame.ShowCameraShakeDialog;
-var
-  Dlg: TCameraShakeForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TCameraShakeForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonCameraShakeClick(Sender: TObject);
-begin
-  ShowCameraShakeDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemCameraShakeClick(Sender: TObject);
-begin
-  ShowCameraShakeDialog;
-end;
 
 procedure TDesignFrame.ShowFireGrid2DDialog;
 var
@@ -60216,113 +59176,9 @@ begin
   ShowMacroRecorderDialog;
 end;
 
-procedure TDesignFrame.ShowPortalStudioDialog;
-var
-  Dlg: TPortalStudioForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TPortalStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonPortalStudioClick(Sender: TObject);
-begin
-  ShowPortalStudioDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemPortalStudioClick(Sender: TObject);
-begin
-  ShowPortalStudioDialog;
-end;
 
-procedure TDesignFrame.ShowSensoryPerceptionDialog;
-var
-  Dlg: TSensoryPerceptionForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TSensoryPerceptionForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonSensoryPerceptionClick(Sender: TObject);
-begin
-  ShowSensoryPerceptionDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemSensoryPerceptionClick(Sender: TObject);
-begin
-  ShowSensoryPerceptionDialog;
-end;
-
-procedure TDesignFrame.ShowIvyClimberDialog;
-var
-  Dlg: TIvyClimberForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TIvyClimberForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonIvyClimberClick(Sender: TObject);
-begin
-  ShowIvyClimberDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemIvyClimberClick(Sender: TObject);
-begin
-  ShowIvyClimberDialog;
-end;
-
-procedure TDesignFrame.ShowFootstepDirectorDialog;
-var
-  Dlg: TFootstepDirectorForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TFootstepDirectorForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonFootstepDirectorClick(Sender: TObject);
-begin
-  ShowFootstepDirectorDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemFootstepDirectorClick(Sender: TObject);
-begin
-  ShowFootstepDirectorDialog;
-end;
 
 procedure TDesignFrame.ShowGravityFieldDialog;
 var
@@ -60378,86 +59234,8 @@ begin
   ShowCloudShadowsDialog;
 end;
 
-procedure TDesignFrame.ShowTrailStamperDialog;
-var
-  Dlg: TTrailStamperForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TTrailStamperForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonTrailStamperClick(Sender: TObject);
-begin
-  ShowTrailStamperDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemTrailStamperClick(Sender: TObject);
-begin
-  ShowTrailStamperDialog;
-end;
-
-procedure TDesignFrame.ShowCoverPointScannerDialog;
-var
-  Dlg: TCoverPointScannerForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TCoverPointScannerForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonCoverPointScannerClick(Sender: TObject);
-begin
-  ShowCoverPointScannerDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemCoverPointScannerClick(Sender: TObject);
-begin
-  ShowCoverPointScannerDialog;
-end;
-
-procedure TDesignFrame.ShowCatenaryCableDialog;
-var
-  Dlg: TCatenaryCableForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TCatenaryCableForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonCatenaryCableClick(Sender: TObject);
-begin
-  ShowCatenaryCableDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemCatenaryCableClick(Sender: TObject);
-begin
-  ShowCatenaryCableDialog;
-end;
 
 procedure TDesignFrame.ShowPrefabDiffMergeDialog;
 var
@@ -60540,194 +59318,12 @@ begin
   ShowAcousticSpaceDialog;
 end;
 
-procedure TDesignFrame.ShowSuspensionBridgeDialog;
-var
-  Dlg: TSuspensionBridgeForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TSuspensionBridgeForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonSuspensionBridgeClick(Sender: TObject);
-begin
-  ShowSuspensionBridgeDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemSuspensionBridgeClick(Sender: TObject);
-begin
-  ShowSuspensionBridgeDialog;
-end;
 
-procedure TDesignFrame.ShowWorldWaypointDialog;
-var
-  Dlg: TWorldWaypointForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TWorldWaypointForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonWorldWaypointClick(Sender: TObject);
-begin
-  ShowWorldWaypointDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemWorldWaypointClick(Sender: TObject);
-begin
-  ShowWorldWaypointDialog;
-end;
 
-procedure TDesignFrame.ShowBuoyancyHullDialog;
-var
-  Dlg: TBuoyancyHullForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TBuoyancyHullForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonBuoyancyHullClick(Sender: TObject);
-begin
-  ShowBuoyancyHullDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemBuoyancyHullClick(Sender: TObject);
-begin
-  ShowBuoyancyHullDialog;
-end;
-
-procedure TDesignFrame.ShowSpiderwebDialog;
-var
-  Dlg: TSpiderwebForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TSpiderwebForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonSpiderwebClick(Sender: TObject);
-begin
-  ShowSpiderwebDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemSpiderwebClick(Sender: TObject);
-begin
-  ShowSpiderwebDialog;
-end;
-
-procedure TDesignFrame.ShowFoliageTrampleDialog;
-var
-  Dlg: TFoliageTrampleForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TFoliageTrampleForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonFoliageTrampleClick(Sender: TObject);
-begin
-  ShowFoliageTrampleDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemFoliageTrampleClick(Sender: TObject);
-begin
-  ShowFoliageTrampleDialog;
-end;
-
-procedure TDesignFrame.ShowInteractScannerDialog;
-var
-  Dlg: TInteractScannerForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TInteractScannerForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonInteractScannerClick(Sender: TObject);
-begin
-  ShowInteractScannerDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemInteractScannerClick(Sender: TObject);
-begin
-  ShowInteractScannerDialog;
-end;
-
-procedure TDesignFrame.ShowSplatterBurstDialog;
-var
-  Dlg: TSplatterBurstForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TSplatterBurstForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonSplatterBurstClick(Sender: TObject);
-begin
-  ShowSplatterBurstDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemSplatterBurstClick(Sender: TObject);
-begin
-  ShowSplatterBurstDialog;
-end;
 
 procedure TDesignFrame.ShowBudgetTreemapDialog;
 var
@@ -60756,248 +59352,14 @@ begin
   ShowBudgetTreemapDialog;
 end;
 
-procedure TDesignFrame.ShowIcicleOverhangDialog;
-var
-  Dlg: TIcicleOverhangForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TIcicleOverhangForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonIcicleOverhangClick(Sender: TObject);
-begin
-  ShowIcicleOverhangDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemIcicleOverhangClick(Sender: TObject);
-begin
-  ShowIcicleOverhangDialog;
-end;
 
-procedure TDesignFrame.ShowQuadrupedGaitDialog;
-var
-  Dlg: TQuadrupedGaitForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TQuadrupedGaitForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonQuadrupedGaitClick(Sender: TObject);
-begin
-  ShowQuadrupedGaitDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemQuadrupedGaitClick(Sender: TObject);
-begin
-  ShowQuadrupedGaitDialog;
-end;
 
-procedure TDesignFrame.ShowZiplineRigDialog;
-var
-  Dlg: TZiplineRigForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TZiplineRigForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonZiplineRigClick(Sender: TObject);
-begin
-  ShowZiplineRigDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemZiplineRigClick(Sender: TObject);
-begin
-  ShowZiplineRigDialog;
-end;
-
-procedure TDesignFrame.ShowFractureVoronoiDialog;
-var
-  Dlg: TFractureVoronoiForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TFractureVoronoiForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonFractureVoronoiClick(Sender: TObject);
-begin
-  ShowFractureVoronoiDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemFractureVoronoiClick(Sender: TObject);
-begin
-  ShowFractureVoronoiDialog;
-end;
-
-procedure TDesignFrame.ShowThermalMirageDialog;
-var
-  Dlg: TThermalMirageForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TThermalMirageForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonThermalMirageClick(Sender: TObject);
-begin
-  ShowThermalMirageDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemThermalMirageClick(Sender: TObject);
-begin
-  ShowThermalMirageDialog;
-end;
-
-procedure TDesignFrame.ShowStealthLightGemDialog;
-var
-  Dlg: TStealthLightGemForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TStealthLightGemForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonStealthLightGemClick(Sender: TObject);
-begin
-  ShowStealthLightGemDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemStealthLightGemClick(Sender: TObject);
-begin
-  ShowStealthLightGemDialog;
-end;
-
-procedure TDesignFrame.ShowGrapplePendulumDialog;
-var
-  Dlg: TGrapplePendulumForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TGrapplePendulumForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonGrapplePendulumClick(Sender: TObject);
-begin
-  ShowGrapplePendulumDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemGrapplePendulumClick(Sender: TObject);
-begin
-  ShowGrapplePendulumDialog;
-end;
-
-procedure TDesignFrame.ShowFlameFlickerDialog;
-var
-  Dlg: TFlameFlickerForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TFlameFlickerForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonFlameFlickerClick(Sender: TObject);
-begin
-  ShowFlameFlickerDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemFlameFlickerClick(Sender: TObject);
-begin
-  ShowFlameFlickerDialog;
-end;
-
-procedure TDesignFrame.ShowCrowdFormationDialog;
-var
-  Dlg: TCrowdFormationForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TCrowdFormationForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonCrowdFormationClick(Sender: TObject);
-begin
-  ShowCrowdFormationDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemCrowdFormationClick(Sender: TObject);
-begin
-  ShowCrowdFormationDialog;
-end;
 
 procedure TDesignFrame.ShowLodInstancingDialog;
 var
@@ -61026,248 +59388,14 @@ begin
   ShowLodInstancingDialog;
 end;
 
-procedure TDesignFrame.ShowPuddleWetnessDialog;
-var
-  Dlg: TPuddleWetnessForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TPuddleWetnessForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonPuddleWetnessClick(Sender: TObject);
-begin
-  ShowPuddleWetnessDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemPuddleWetnessClick(Sender: TObject);
-begin
-  ShowPuddleWetnessDialog;
-end;
 
-procedure TDesignFrame.ShowAvalancheSlideDialog;
-var
-  Dlg: TAvalancheSlideForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TAvalancheSlideForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonAvalancheSlideClick(Sender: TObject);
-begin
-  ShowAvalancheSlideDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemAvalancheSlideClick(Sender: TObject);
-begin
-  ShowAvalancheSlideDialog;
-end;
 
-procedure TDesignFrame.ShowMagneticFieldDialog;
-var
-  Dlg: TMagneticFieldForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TMagneticFieldForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
 
-procedure TDesignFrame.ButtonMagneticFieldClick(Sender: TObject);
-begin
-  ShowMagneticFieldDialog;
-end;
 
-procedure TDesignFrame.MenuTreeViewItemMagneticFieldClick(Sender: TObject);
-begin
-  ShowMagneticFieldDialog;
-end;
-
-procedure TDesignFrame.ShowClimbingHoldDialog;
-var
-  Dlg: TClimbingHoldForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TClimbingHoldForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonClimbingHoldClick(Sender: TObject);
-begin
-  ShowClimbingHoldDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemClimbingHoldClick(Sender: TObject);
-begin
-  ShowClimbingHoldDialog;
-end;
-
-procedure TDesignFrame.ShowLaserBeamDialog;
-var
-  Dlg: TLaserBeamForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TLaserBeamForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonLaserBeamClick(Sender: TObject);
-begin
-  ShowLaserBeamDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemLaserBeamClick(Sender: TObject);
-begin
-  ShowLaserBeamDialog;
-end;
-
-procedure TDesignFrame.ShowBossArenaDialog;
-var
-  Dlg: TBossArenaForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TBossArenaForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonBossArenaClick(Sender: TObject);
-begin
-  ShowBossArenaDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemBossArenaClick(Sender: TObject);
-begin
-  ShowBossArenaDialog;
-end;
-
-procedure TDesignFrame.ShowTurretGimbalDialog;
-var
-  Dlg: TTurretGimbalForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TTurretGimbalForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonTurretGimbalClick(Sender: TObject);
-begin
-  ShowTurretGimbalDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemTurretGimbalClick(Sender: TObject);
-begin
-  ShowTurretGimbalDialog;
-end;
-
-procedure TDesignFrame.ShowSonarPulseDialog;
-var
-  Dlg: TSonarPulseForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TSonarPulseForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonSonarPulseClick(Sender: TObject);
-begin
-  ShowSonarPulseDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemSonarPulseClick(Sender: TObject);
-begin
-  ShowSonarPulseDialog;
-end;
-
-procedure TDesignFrame.ShowGearLinkageDialog;
-var
-  Dlg: TGearLinkageForm;
-begin
-  if FDesignRoot = nil then
-    Exit;
-  Dlg := TGearLinkageForm.CreateStudio(Self, FDesignRoot, DesignOwner,
-    @NprStudioModifiedCallback,
-    @SequencerRefreshViewportCallback);
-  try
-    Dlg.ShowModal;
-    UpdateDesign;
-  finally
-    FreeAndNil(Dlg);
-  end;
-end;
-
-procedure TDesignFrame.ButtonGearLinkageClick(Sender: TObject);
-begin
-  ShowGearLinkageDialog;
-end;
-
-procedure TDesignFrame.MenuTreeViewItemGearLinkageClick(Sender: TObject);
-begin
-  ShowGearLinkageDialog;
-end;
 
 procedure TDesignFrame.ShowShaderComplexityDialog;
 var

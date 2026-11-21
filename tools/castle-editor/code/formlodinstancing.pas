@@ -66,7 +66,7 @@ begin
   FDesignOwner := ADesignOwner;
   FOnModified := AOnModified;
   FOnRefresh := AOnRefresh;
-  Caption := 'Automated LOD Chain & GPU Draw-Call Instancing Optimizer (126 Studios / 22 MCP)';
+  Caption := 'Automated LOD Chain & GPU Draw-Call Instancing Optimizer (100 UE Studios / 22 MCP)';
   Position := poScreenCenter;
   Width := 800;
   Height := 580;

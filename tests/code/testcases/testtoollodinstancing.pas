@@ -95,10 +95,8 @@ end;
 
 procedure TTestToolLodInstancing.TestUnified126StudioHubCatalogAnd22ndMcpOptimizeLodInstancingTool;
 const
-  Horizon14Ids: array[0..9] of String = (
-    'icicle_overhang', 'quadruped_gait', 'zipline_rig', 'fracture_voronoi',
-    'thermal_mirage', 'stealth_light_gem', 'grapple_pendulum', 'flame_flicker',
-    'crowd_formation', 'lod_instancing'
+  Horizon11OptIds: array[0..2] of String = (
+    'budget_treemap', 'lod_instancing', 'shader_complexity'
   );
 var
   Root: TComponent;
@@ -111,12 +109,13 @@ var
   ToolsArr: TJSONArray;
   PayloadObj: TJSONObject;
 begin
-  { 1. Verify all 126 studios (Horizons 2-14, Phases 1-406) are registered }
-  AssertEquals(136, TStudioHubManager.StudioCount);
-  for I := 0 to High(Horizon14Ids) do
-    AssertTrue('Missing Horizon 14 studio: ' + Horizon14Ids[I],
-      TStudioHubManager.FindStudioById(Horizon14Ids[I], Entry));
-  AssertEquals(406, Entry.PhaseNumber);
+  { 1. Verify all 100 UE 5.x studios (Horizons 2-11, Phases 1-380) are registered }
+  AssertEquals(100, TStudioHubManager.StudioCount);
+  for I := 0 to High(Horizon11OptIds) do
+    AssertTrue('Missing UE optimization studio: ' + Horizon11OptIds[I],
+      TStudioHubManager.FindStudioById(Horizon11OptIds[I], Entry));
+  AssertTrue(TStudioHubManager.FindStudioById('lod_instancing', Entry));
+  AssertEquals(379, Entry.PhaseNumber);
 
   { 2. Verify 22nd MCP tool cge_optimize_lod_instancing over JSON-RPC 2.0 }
   Root := TComponent.Create(nil);
@@ -147,7 +146,7 @@ begin
     InnerJson := GetJSON(InnerText);
     PayloadObj := TJSONObject(InnerJson);
     AssertTrue(PayloadObj.Booleans['ok']);
-    AssertEquals(136, PayloadObj.Integers['studioCatalogCount']);
+    AssertEquals(100, PayloadObj.Integers['studioCatalogCount']);
     AssertEquals(19, PayloadObj.Integers['baselineDrawCalls']);
     AssertEquals(3, PayloadObj.Integers['optimizedDrawCalls']);
     AssertEquals(16, PayloadObj.Integers['savedDrawCalls']);

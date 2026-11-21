@@ -99,10 +99,12 @@ end;
 
 procedure TTestToolShaderComplexity.TestUnified136StudioHubCatalogAnd23rdMcpAuditOverdrawShadersTool;
 const
-  Horizon15Ids: array[0..9] of String = (
-    'puddle_wetness', 'avalanche_slide', 'magnetic_field', 'climbing_hold',
-    'laser_beam', 'boss_arena', 'turret_gimbal', 'sonar_pulse',
-    'gear_linkage', 'shader_complexity'
+  Horizon11UeIds: array[0..13] of String = (
+    'substrate_studio', 'fire_grid_2d', 'gameplay_messenger',
+    'octahedral_impostor', 'pose_snapshot', 'macro_recorder',
+    'gravity_field', 'cloud_shadows', 'prefab_diff_merge',
+    'ballistic_studio', 'acoustic_space', 'budget_treemap',
+    'lod_instancing', 'shader_complexity'
   );
 var
   Root: TComponent;
@@ -115,12 +117,12 @@ var
   ToolsArr: TJSONArray;
   PayloadObj: TJSONObject;
 begin
-  { 1. Verify all 136 studios (Horizons 2-15, Phases 1-416) are registered }
-  AssertEquals(136, TStudioHubManager.StudioCount);
-  for I := 0 to High(Horizon15Ids) do
-    AssertTrue('Missing Horizon 15 studio: ' + Horizon15Ids[I],
-      TStudioHubManager.FindStudioById(Horizon15Ids[I], Entry));
-  AssertEquals(416, Entry.PhaseNumber);
+  { 1. Verify all 100 UE 5.x studios (Horizons 2-11, Phases 1-380) are registered }
+  AssertEquals(100, TStudioHubManager.StudioCount);
+  for I := 0 to High(Horizon11UeIds) do
+    AssertTrue('Missing Horizon 11 UE studio: ' + Horizon11UeIds[I],
+      TStudioHubManager.FindStudioById(Horizon11UeIds[I], Entry));
+  AssertEquals(380, Entry.PhaseNumber);
 
   { 2. Verify 23rd MCP tool cge_audit_overdraw_shaders over JSON-RPC 2.0 }
   Root := TComponent.Create(nil);
@@ -151,7 +153,7 @@ begin
     InnerJson := GetJSON(InnerText);
     PayloadObj := TJSONObject(InnerJson);
     AssertTrue(PayloadObj.Booleans['ok']);
-    AssertEquals(136, PayloadObj.Integers['studioCatalogCount']);
+    AssertEquals(100, PayloadObj.Integers['studioCatalogCount']);
     AssertEquals(6, PayloadObj.Integers['peakTranslucentOverdraw']);
     AssertEquals(576, PayloadObj.Integers['peakTileAluInstructions']);
     AssertTrue(PayloadObj.Integers['hotspotTileCount'] > 15);

@@ -131,21 +131,9 @@ uses
   CastleSurfaceGi, CastleContextualAnim, CastleTargetingSystem,
   CastleMutableCharacter, CastleRiverSpline, CastleOccluderFader,
   CastleGameplayDebugger, CastleWindField, CastleAssetPreloader,
-  CastleSubstrateMaterial, CastleSmartObjectSlots, CastleAeroFoil,
-  CastleCreviceClutter, CastleCameraShake, CastleFireGrid2D,
-  CastleGameplayMessenger, CastleOctahedralImpostor, CastlePoseSnapshot,
-  CastlePortalPair, CastleSensoryPerception, CastleIvyClimber,
-  CastleFootstepDirector, CastleGravityField, CastleCloudShadows,
-  CastleTrailStamper, CastleCoverPointScanner, CastleCatenaryCable,
-  CastleBallisticSolver, CastleAcousticSpace, CastleSuspensionBridge,
-  CastleWorldWaypoint, CastleBuoyancyHull, CastleSpiderweb,
-  CastleFoliageTrample, CastleInteractScanner, CastleSplatterBurst,
-  CastleIcicleOverhang, CastleQuadrupedGait, CastleZiplineRig,
-  CastleFractureVoronoi, CastleThermalMirage, CastleStealthLightGem,
-  CastleGrapplePendulum, CastleFlameFlicker, CastleCrowdFormation,
-  CastlePuddleWetness, CastleAvalancheSlide, CastleMagneticField,
-  CastleClimbingHold, CastleLaserBeam, CastleBossArena,
-  CastleTurretGimbal, CastleSonarPulse, CastleGearLinkage;
+  CastleSubstrateMaterial, CastleFireGrid2D, CastleGameplayMessenger,
+  CastleOctahedralImpostor, CastlePoseSnapshot, CastleGravityField,
+  CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -506,164 +494,48 @@ begin
     shcPerformanceQaDeploy, 366, 'multi user collaborative presence subtree lock conflict ancestor descendant lease heartbeat',
     'Hierarchical ancestor/descendant subtree reservation locks, lease heartbeats & 86-Studio Hub.');
 
-  { Horizon 11 (Phases 367-376 — UE 6.0+ Substrate Slabs, SmartObject Queues, Aero Foil, Crevice Clutter, Camera Shake/Recoil, Grid2D Fire Spread, Gameplay Message Bus, Octahedral Impostors, Pose Snapshot Trails & Editor Macro Recorder, +10 -> 96 studios) }
+  { Horizon 11 (Phases 367-380 — UE 5.x Substrate, Niagara Grid2D, GameplayMessageBus, ImpostorBaker, FPoseSnapshot, Custom Gravity, Cloud Shadows, Projectile Ballistics, Project Acoustics & Editor Optimization/Diff/Macro Tools -> 100 UE Studios & 23 MCP Tools) }
   Reg('substrate_studio', 'Substrate Multi-Slab Layered Material Mixer & Energy Studio', 'Substr',
     shcMaterialsVfxLighting, 367, 'substrate multi slab layered material clear coat dust water transmittance fresnel energy conservation',
     'Multi-slab vertical Fresnel/Beer-Lambert material mixer with strict energy conservation.');
-  Reg('smart_object_slots', 'Multi-Slot SmartObject Claiming, FIFO Queue & Lockout Studio', 'SmartQ',
-    shcCharactersAiGas, 368, 'smart object multi slot claiming fifo wait queue preemption lockout bench anvil',
-    'Capacity-bounded multi-slot workstation claiming with FIFO wait-queue & per-slot lockouts.');
-  Reg('aero_foil', 'Aerodynamic Wing / Sail Foil Polar, Stall & Thermal Updraft Studio', 'AeroFoil',
-    shcWorldEnvironment, 369, 'aerodynamic wing sail glider foil lift drag polar angle of attack critical stall thermal updraft',
-    'Real-time C_L/C_D angle-of-attack wing/sail solver with post-stall drop & thermal columns.');
-  Reg('crevice_clutter', 'Procedural Wall-Crevice & Seam Micro-Clutter Skirt Studio', 'Crevice',
-    shcArchitecturePcg, 370, 'wall crevice seam corner floor skirt micro clutter pebbles moss rubble worldray',
-    'WorldRay floor-wall concave corner & crevice detector scattering pebbles, moss & debris skirts.');
-  Reg('camera_shake', 'Cinematic Camera Shake Envelope, Recoil & FOV Kickback Studio', 'CamShake',
-    shcCinematicsAudioInput, 371, 'camera shake trauma perlin directional weapon recoil recovery fov kickback accessibility',
-    'Trauma^2 shake envelopes, damped spring weapon recoil, FOV kickback & 0% accessibility toggle.');
   Reg('fire_grid_2d', 'Niagara Grid2D Cellular Fire Spread, Wind Front & Rain Studio', 'Fire2D',
-    shcMaterialsVfxLighting, 372, 'niagara grid2d fire spread combustion cellular downwind flame stone firebreak rain douse ash',
+    shcMaterialsVfxLighting, 368, 'niagara grid2d fire spread combustion cellular downwind flame stone firebreak rain douse ash',
     '2D fuel/temperature cellular fire propagation with wind advection, firebreaks & rain douse.');
   Reg('gameplay_messenger', 'Gameplay Message Bus & Squad Bark Priority Preemption Studio', 'MsgBus',
-    shcCharactersAiGas, 373, 'gameplay message bus pub sub hierarchical tag squad radio bark priority preemption antispam',
+    shcCharactersAiGas, 369, 'gameplay message bus pub sub hierarchical tag squad radio bark priority preemption antispam',
     'Dot-boundary GameplayTag pub/sub router & squad voice bark arbiter with emergency preemption.');
   Reg('octahedral_impostor', 'Octahedral Billboard Impostor Atlas & 3-View Blend Studio', 'Impostor',
-    shcMaterialsVfxLighting, 374, 'octahedral billboard impostor hemi uv atlas 3 view barycentric simplex lod card',
+    shcMaterialsVfxLighting, 370, 'octahedral billboard impostor hemi uv atlas 3 view barycentric simplex lod card',
     'Bijective upper-hemisphere octahedral UV projection & 3-tile barycentric LOD card blending.');
   Reg('pose_snapshot', 'Skeletal Pose Snapshot, Dash Ghost Trail & Statue Freeze Studio', 'PoseSnap',
-    shcCharactersAiGas, 375, 'pose snapshot skeletal dash ghost afterimage trail ring buffer alpha decay petrified statue',
+    shcCharactersAiGas, 371, 'pose snapshot skeletal dash ghost afterimage trail ring buffer alpha decay petrified statue',
     'Zero-allocation ring-buffer dash ghost silhouettes, spectral decay & petrified statue freeze.');
-  Reg('macro_recorder', 'Editor Action Macro Recorder & 96-Studio Hub Studio', 'Macro',
-    shcPerformanceQaDeploy, 376, 'editor action macro recorder batch transform replay parameterized json 96 studio hub mcp',
-    'Multi-step filtered transform macro recording, JSON export/import, replay & 96-Studio Hub.');
-
-  { Horizon 12 (Phases 377-386 — Planar Portals, AI Sensory Perception, Procedural Ivy Climber, Footstep Director, Dynamic Gravity, Cloud Shadows, Snow/Mud Trail Stamper, Tactical Cover Scanner, Catenary Cables & 3-Way Scene Diff/Merge, +10 -> 106 studios) }
-  Reg('portal_studio', 'Planar Portal & Seamless Mirror Oblique Teleport Studio', 'Portal',
-    shcWorldEnvironment, 377, 'planar portal doorway mirror oblique frustum clip plane teleport turnaround lockout',
-    'SE(3) 180-degree doorway turnaround portals, planar mirrors & Lengyel oblique clip planes.');
-  Reg('sensory_perception', 'AI Sensory Perception Sight, Hearing & Scent Studio', 'Sense',
-    shcCharactersAiGas, 378, 'ai sensory perception foveal peripheral sight worldray wall muffled hearing decibel scent',
-    'Dual-cone foveal/peripheral sight occlusion, wall-muffled dB hearing & olfactory scent trails.');
-  Reg('ivy_climber', 'Procedural Ivy, Vine & Root Surface Climber Studio', 'Ivy',
-    shcArchitecturePcg, 379, 'procedural ivy vine creeper root climber thigmotropism phototropism masonry wall leaf',
-    'WorldRay thigmotropic botanical tendril growth, lateral branching & leaf clusters.');
-  Reg('footstep_director', 'Skeletal Footstep Decal, Splash & Acoustic Surface Studio', 'Footstep',
-    shcCinematicsAudioInput, 380, 'skeletal footstep gait phase boot print decal snow puddle metal acoustic surface splash',
-    'Alternating Left/Right stride crossings, WorldRay surface lookup & speed/armor audio scaling.');
-  Reg('gravity_field', 'Dynamic Gravity Well, Planetary Walk & Ringworld Tube Studio', 'Gravity',
-    shcWorldEnvironment, 381, 'dynamic gravity well spherical planet walk hollow cylinder ringworld ceiling slerp priority',
-    'Spherical planetoid attractors, O''Neill spinning cylinder interiors & antipodal-safe Up slerp.');
-  Reg('cloud_shadows', '2.5D Atmospheric Cloud Shadow & Crepuscular God-Ray Studio', 'Clouds',
-    shcMaterialsVfxLighting, 382, 'atmospheric cloud shadow scroller wind dual octave solar offset mie crepuscular god ray',
+  Reg('macro_recorder', 'Editor Action Macro Recorder & 19th MCP Tool Studio', 'Macro',
+    shcPerformanceQaDeploy, 372, 'editor action macro recorder batch transform replay parameterized json studio hub mcp',
+    'Multi-step filtered transform macro recording, JSON export/import, replay & 19th MCP tool.');
+  Reg('gravity_field', 'UE 5.4 Custom Directional & Planetary Gravity Studio', 'Gravity',
+    shcWorldEnvironment, 373, 'dynamic custom gravity direction spherical planet walk hollow cylinder up vector slerp priority',
+    'Custom directional & spherical gravity volumes with priority zones and antipodal-safe Up slerp.');
+  Reg('cloud_shadows', 'Volumetric Cloud Shadow & Crepuscular Light-Shaft Studio', 'Clouds',
+    shcMaterialsVfxLighting, 374, 'atmospheric volumetric cloud shadow scroller wind dual octave solar offset mie crepuscular god ray',
     'Solar-offset wind-advected dual-octave cloud transmittance & Henyey-Greenstein light shafts.');
-  Reg('trail_stamper', 'Interactive Snow, Mud & Sand Deformation Trail Studio', 'SnowTrk',
-    shcWorldEnvironment, 383, 'snow mud sand deformation trail stamper furrow rut rim berm compaction weather refill',
-    'Persistent 2D depression & raised collar berm grid with bilinear normals & snowfall refill.');
-  Reg('cover_point_scanner', 'Tactical Cover Point Scanner, Peek/Lean & Crossfire Studio', 'CoverAI',
-    shcCharactersAiGas, 384, 'tactical cover scanner waist crouch peek standing pillar corner lean flank crossfire',
-    'Automated WorldRay waist over-peek & pillar corner-lean baking with multi-threat crossfire.');
-  Reg('catenary_cable', 'Procedural Catenary Cable, Powerline Sag & Lantern Studio', 'Cable',
-    shcArchitecturePcg, 385, 'catenary cable powerline hyperbolic cosh sag pendulum sway lantern garland insulator',
-    'Exact hyperbolic cosine sag solver, lateral wind sway & arc-length lantern attachments.');
-  Reg('prefab_diff_merge', 'Three-Way Scene & Prefab Diff/Merge & 106-Studio Hub', 'Merge3',
-    shcPerformanceQaDeploy, 386, 'three way scene prefab diff merge ancestor ours theirs conflict resolution 106 studio hub',
-    'Structural 3-way Ancestor/Ours/Theirs JSON merge, conflict policies & 106-Studio Hub / 20 MCP.');
-
-  { Horizon 13 (Phases 387-396): 10 Studios -> 116 Total }
-  Reg('ballistic_studio', 'Ballistic Trajectory, Drag, Magnus Drift & Ricochet Studio', 'Ballistic',
-    shcCharactersAiGas, 387, 'ballistic projectile trajectory quadratic drag crosswind magnus spin grazing ricochet penetration lead',
+  Reg('prefab_diff_merge', 'Three-Way Scene & Prefab Diff/Merge & 20th MCP Tool', 'Merge3',
+    shcPerformanceQaDeploy, 375, 'three way scene prefab diff merge ancestor ours theirs conflict resolution studio hub',
+    'Structural 3-way Ancestor/Ours/Theirs JSON merge, conflict policies & 20th MCP tool.');
+  Reg('ballistic_studio', 'Projectile Movement, Drag, Magnus Drift & Lead Solver Studio', 'Ballistic',
+    shcCharactersAiGas, 376, 'projectile movement ballistic trajectory quadratic drag crosswind magnus spin grazing ricochet penetration lead',
     'Sub-stepped drag + wind + Magnus flight, WorldRay grazing ricochets, cover penetration & lead.');
-  Reg('acoustic_space', 'Acoustic Raytraced Reverb (Sabine/Eyring RT60) & Diffraction Studio', 'Acoustic',
-    shcCinematicsAudioInput, 388, 'acoustic raytraced reverb sabine eyring rt60 predelay sky leak doorway portal diffraction lpf',
+  Reg('acoustic_space', 'Project Acoustics Raytraced Reverb (RT60) & Diffraction Studio', 'Acoustic',
+    shcCinematicsAudioInput, 377, 'project acoustics raytraced reverb sabine eyring rt60 predelay sky leak doorway portal diffraction lpf',
     'Fibonacci-sphere WorldRay room volume/absorption RT60 & Kurze-Anderson doorway diffraction LPF.');
-  Reg('suspension_bridge', 'Procedural Rope Suspension Bridge & Live-Load Deflection Studio', 'Bridge',
-    shcArchitecturePcg, 389, 'procedural rope chain suspension bridge green function live load depression roll broken plank',
-    'Taut-cable Green''s-function point-load depression, lateral roll tilt & broken-slat chasm gaps.');
-  Reg('world_waypoint', 'Diegetic 3D World Waypoint, Offscreen Edge & X-Ray Studio', 'Waypoint',
-    shcCinematicsAudioInput, 390, 'diegetic 3d world waypoint hud projection hemisphere safe offscreen edge clamp xray wall ads',
-    'Perspective HUD projection, behind-camera hemisphere-safe edge clamping & WorldRay wall occlusion.');
-  Reg('buoyancy_hull', 'Multi-Pontoon Buoyancy Hydrostatics & Wave Righting-Torque Studio', 'Buoyancy',
-    shcWorldEnvironment, 391, 'multi pontoon archimedes buoyancy spherical cap wave heave metacentric pitch roll righting torque',
-    'Exact spherical-cap pontoon buoyancy, traveling wave sampling & damped heave/roll equilibrium.');
-  Reg('spiderweb', 'Procedural Spiderweb, Wall-Anchor Raycast & Dewdrop Silk Studio', 'Cobweb',
-    shcArchitecturePcg, 392, 'procedural orb weaver spiderweb cobweb radial worldray wall anchor spiral sag torn dewdrop',
-    'Radial WorldRay wall mooring, sagged power-law capture spirals, torn crypt sectors & dewdrops.');
-  Reg('foliage_trample', 'Dynamic Foliage Trample, Shockwave Flatten & Spring-Back Studio', 'Trample',
-    shcWorldEnvironment, 393, 'dynamic foliage grass wheat trample 2d bend field shockwave blast flatten hookean spring back',
-    '2D stalk bend-vector parting, radial shockwave flatten & Hookean damped elastic recovery.');
-  Reg('interact_scanner', 'Gameplay Interaction Focus Scanner & Hold-Progress Ring Studio', 'Interact',
-    shcCharactersAiGas, 394, 'gameplay interaction focus scanner gaze proximity cone worldray wall gate timed hold decay',
-    'Weighted gaze/proximity scoring, WorldRay closed-door/wall rejection & hold-to-interact decay.');
-  Reg('splatter_burst', 'Procedural Decal Splatter Burst & Grazing Streak Studio', 'Splatter',
-    shcMaterialsVfxLighting, 395, 'procedural decal splatter cone burst worldray grazing streak elongation lru ring evaporation',
-    'Seeded WorldRay droplet cones, grazing-angle streak stretch, LRU ring cap & evaporation fade.');
-  Reg('budget_treemap', 'Squarified Scene Budget Treemap & 116-Studio Hub / 21st MCP', 'Treemap',
-    shcPerformanceQaDeploy, 396, 'squarified scene memory triangle budget treemap bruls huizing van wijk outlier 116 studio hub',
+  Reg('budget_treemap', 'Asset Size Map Squarified Budget Treemap & 21st MCP Tool', 'Treemap',
+    shcPerformanceQaDeploy, 378, 'size map squarified scene memory triangle budget treemap bruls huizing van wijk outlier studio hub',
     'Bruls-Huizing-van Wijk squarified scene memory/triangle treemap, outlier hints & 21st MCP tool.');
-
-  { Horizon 14 (Phases 397-406) }
-  Reg('icicle_overhang', 'Procedural Icicle, Stalactite & Cave Drip Overhang Studio', 'Icicle',
-    shcArchitecturePcg, 397, 'procedural icicle stalactite stalagmite cave overhang worldray ceiling drip stefan taper',
-    'Upward WorldRay overhang probing, downward floor clearance & paired meltwater stalagmites.');
-  Reg('quadruped_gait', 'Multi-Leg Quadruped, Hexapod & Spider Gait Phase Studio', 'QuadGait',
-    shcCharactersAiGas, 398, 'multi leg quadruped hexapod octopod spider gait hildebrand tripod parabolic swing terrain tilt',
-    '4/6/8-leg Hildebrand phase scheduler, parabolic swing lift, WorldRay foot-plant & body tilt.');
-  Reg('zipline_rig', 'Procedural Zipline, Pulley Gravity Acceleration & Vault Studio', 'Zipline',
-    shcCharactersAiGas, 399, 'procedural zipline pulley trolley cable sag downhill gravity hand brake arrestor vault launch',
-    'Rider-loaded cable sag, tangential pulley gravity/drag/brake kinematics & momentum vault.');
-  Reg('fracture_voronoi', 'Voronoi Destruction Fracture & BFS Collapse Studio', 'Voronoi',
-    shcArchitecturePcg, 400, 'voronoi fracture destruction shard cell cutter bond graph bfs ground support floating collapse',
-    'Volume-conserving 3D Voronoi cells, facet tensile bonds & BFS floating-island collapse.');
-  Reg('thermal_mirage', 'Heat-Haze Mirage, Thermal Plume & Underwater Caustics Studio', 'Mirage',
-    shcMaterialsVfxLighting, 401, 'heat haze desert inferior mirage edlen boussinesq thermal plume underwater coral caustics',
-    'Edlen grazing inferior desert mirage, Boussinesq convection shimmer & reef caustic cusps.');
-  Reg('stealth_light_gem', 'Tactical Stealth Light-Gem & Backlight Silhouette Studio', 'LightGem',
-    shcCharactersAiGas, 402, 'tactical stealth thief light gem worldray torch shadow occlusion backlight silhouette crouch',
-    'Multi-torch WorldRay shadow occlusion, guard-sightline backlight silhouette & stance scale.');
-  Reg('grapple_pendulum', 'Grappling Hook Pendulum Swing, Winch Reel & Apex Jump Studio', 'Grapple',
-    shcCharactersAiGas, 403, 'grappling hook vine 3d spherical pendulum swing taut slack freefall motorized winch apex jump',
-    'WorldRay overhead hook lock, unilateral 3D spherical pendulum arc, winch reel & apex boost.');
-  Reg('flame_flicker', 'Procedural Torch Blackbody Flicker, Wind Blowout & Soot Studio', 'Torch',
-    shcMaterialsVfxLighting, 404, 'procedural torch sconce campfire planckian blackbody kelvin flicker wind gust blowout soot',
-    '1800K..2900K Planckian blackbody shift, wind-draft tilt, gust blowout & WorldRay wall soot.');
-  Reg('crowd_formation', 'Tactical Squad Formation (Wedge, Phalanx, Shield-Circle) Studio', 'Squad',
-    shcCharactersAiGas, 405, 'tactical squad crowd formation wedge phalanx vip shield circle column worldray boulder split',
-    '1..64 unit Wedge/Phalanx/Shield-Circle/Column solver, WorldRay ground snap & boulder split.');
-  Reg('lod_instancing', 'Automated LOD Chain & GPU Instancing Optimizer (126 Studios / 22 MCP)', 'AutoLOD',
-    shcPerformanceQaDeploy, 406, 'automated lod chain qem hysteresis gpu draw call instancing batch optimizer 126 studio hub',
+  Reg('lod_instancing', 'Automated LOD Chain & GPU Instancing Optimizer (22nd MCP)', 'AutoLOD',
+    shcPerformanceQaDeploy, 379, 'actor merging automated lod chain qem hysteresis gpu draw call instancing batch optimizer studio hub',
     'GPU draw-call instancing batch clustering, 4-tier hysteresis LOD chains & 22nd MCP tool.');
-
-  { Horizon 15 (Phases 407-416) }
-  Reg('puddle_wetness', 'Procedural Rain Puddle, Roof Shelter & Splash Ripple Studio', 'Puddle',
-    shcWorldEnvironment, 407, 'procedural rain puddle wetness worldray roof shelter overhang porosity drainage splash ripple',
-    'WorldRay roof shelter mask, topographic basin accumulation, PBR roughness/albedo darkening & ripples.');
-  Reg('avalanche_slide', 'Granular Rockslide, Talus Scree & Angle-of-Repose Studio', 'Scree',
-    shcWorldEnvironment, 408, 'granular rockslide avalanche talus scree cone coulomb angle of repose boulder sorting terrain',
-    'Coulomb angle-of-repose mass-conserving cellular avalanche, talus cone arrest & boulder sorting.');
-  Reg('magnetic_field', '3D Magnetic Dipole, Mag-Boots & Eddy-Current Brake Studio', 'Magnet',
-    shcWorldEnvironment, 409, '3d magnetic dipole attraction repulsion ferromagnetic mag boots eddy current damping brake',
-    '1/r^4 dipole force-gradient attraction/repulsion, WorldRay mag-boot lock & Lenz eddy-current brake.');
-  Reg('climbing_hold', 'Procedural Free-Climbing Hold Scanner & Dyno Reach Studio', 'Climb',
-    shcCharactersAiGas, 410, 'procedural free climbing boulder hold scanner worldray ledge lip bfs dyno leap overhang stamina',
-    'WorldRay ledge lip/clearance hold extraction, BFS reachability graph, Dyno leaps & overhang stamina.');
-  Reg('laser_beam', 'Multi-Bounce Optical Laser, Prism Snell/TIR & Gate Studio', 'Laser',
-    shcMaterialsVfxLighting, 411, 'multi bounce optical laser mirror reflection snell prism refraction tir cutoff receiver gate',
-    'Multi-bounce WorldRay specular reflection, Snell refraction/TIR, Beer-Lambert attenuation & gate.');
-  Reg('boss_arena', 'Tactical Boss Telegraph & AoE Hazard Zone Studio', 'BossAoE',
-    shcCharactersAiGas, 412, 'tactical boss arena telegraph pizza cone safe eye donut charge lane jump shock ring windup',
-    'Windup->Active->Recovery boss telegraphs: Pizza-Cone, Safe-Eye Donut, Charge Lane & Jump Shock-Ring.');
-  Reg('turret_gimbal', 'Dual-Axis Gimbal Turret, Slew Servo & Recoil/Heat Studio', 'Turret',
-    shcCharactersAiGas, 413, 'dual axis gimbal turret yaw pitch slew servo ballistic lead recoil spring overheat lockout',
-    'Azimuth/elevation servo limits, iterative ballistic lead, critically-damped recoil & thermal vent.');
-  Reg('sonar_pulse', '3D Echolocation & Active Sonar Pulse Wavefront Studio', 'Sonar',
-    shcCinematicsAudioInput, 414, '3d echolocation active sonar submarine pulse worldray wavefront two way echo doppler shift',
-    'Expanding spherical WorldRay sonar ping, two-way echo delay, inverse-4th return & radial Doppler.');
-  Reg('gear_linkage', 'Mechanical Gear Train, Rack-and-Pinion & Clockwork Studio', 'Gears',
-    shcArchitecturePcg, 415, 'mechanical gear train spur tooth ratio rack and pinion belt pulley worm shaft odd cycle jam',
-    'BFS kinematic gear/rack/belt/shaft solver, inverse tooth-count ratios & odd-cycle jam detection.');
-  Reg('shader_complexity', 'Viewport Overdraw & Shader ALU Complexity Auditor (136 Studios / 23 MCP)', 'Overdraw',
-    shcPerformanceQaDeploy, 416, 'viewport overdraw transparency alpha stacking early z fragment shader alu hotspot 136 studio hub',
+  Reg('shader_complexity', 'Viewport Overdraw & Shader ALU Complexity Auditor (100 UE Studios / 23 MCP)', 'Overdraw',
+    shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot 100 studio hub',
     '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
 end;
 
@@ -954,62 +826,17 @@ var
         Inc(OpenBugPinCount);
     end;
 
-    { Horizon 11 Subsystems }
+    { Horizon 11 UE 5.x Subsystems }
     if (C is TCastleSubstrateMaterial) or (C is TCastleFireSpreadGrid) or
-       (C is TCastleOctahedralImpostor) then
+       (C is TCastleOctahedralImpostor) or (C is TCastleCloudShadowProjector) then
       BumpSub(shcMaterialsVfxLighting);
-    if (C is TCastleMultiSlotSmartObject) or (C is TCastleGameplayMessenger) or
-       (C is TCastlePoseSnapshotTrail) then
+    if (C is TCastleGameplayMessenger) or (C is TCastlePoseSnapshotTrail) or
+       (C is TCastleBallisticLauncher) then
       BumpSub(shcCharactersAiGas);
-    if C is TCastleAeroFoilBehavior then BumpSub(shcWorldEnvironment);
-    if C is TCastleCreviceClutterVolume then BumpSub(shcArchitecturePcg);
-    if C is TCastleCameraShakeDirector then BumpSub(shcCinematicsAudioInput);
-
-    { Horizon 12 Subsystems }
-    if (C is TCastlePortalGateway) or (C is TCastleGravityField) or
-       (C is TCastleTrailStamper) then
+    if C is TCastleGravityField then
       BumpSub(shcWorldEnvironment);
-    if C is TCastleCloudShadowProjector then BumpSub(shcMaterialsVfxLighting);
-    if (C is TCastleIvyClimber) or (C is TCastleCatenaryCable) then
-      BumpSub(shcArchitecturePcg);
-    if (C is TCastleSensoryPerception) or (C is TCastleCoverPointScanner) then
-      BumpSub(shcCharactersAiGas);
-    if C is TCastleFootstepDirector then BumpSub(shcCinematicsAudioInput);
-
-    { Horizon 13 Subsystems }
-    if (C is TCastleBallisticLauncher) or (C is TCastleInteractScanner) then
-      BumpSub(shcCharactersAiGas);
-    if C is TCastleAcousticProbe then BumpSub(shcCinematicsAudioInput);
-    if (C is TCastleSuspensionBridge) or (C is TCastleSpiderwebGenerator) then
-      BumpSub(shcArchitecturePcg);
-    if C is TCastleWorldWaypoint then BumpSub(shcCinematicsAudioInput);
-    if (C is TCastleBuoyancyHull) or (C is TCastleFoliageTrampleField) then
-      BumpSub(shcWorldEnvironment);
-    if C is TCastleSplatterBurst then BumpSub(shcMaterialsVfxLighting);
-
-    { Horizon 14 Subsystems }
-    if (C is TCastleIcicleOverhang) or (C is TCastleVoronoiFractureVolume) then
-      BumpSub(shcArchitecturePcg);
-    if (C is TCastleMultiLegGaitRig) or (C is TCastleZiplineRig) or
-       (C is TCastleStealthLightGem) or (C is TCastleGrapplePendulum) or
-       (C is TCastleCrowdFormation) then
-      BumpSub(shcCharactersAiGas);
-    if (C is TCastleThermalMirageVolume) or (C is TCastleFlameFlickerRig) then
-      BumpSub(shcMaterialsVfxLighting);
-
-    { Horizon 15 Subsystems }
-    if (C is TCastlePuddleWetnessField) or (C is TCastleAvalancheSlide) or
-       (C is TCastleMagneticField) then
-      BumpSub(shcWorldEnvironment);
-    if (C is TCastleClimbingHoldScanner) or (C is TCastleBossHazardDirector) or
-       (C is TCastleTurretGimbal) then
-      BumpSub(shcCharactersAiGas);
-    if C is TCastleLaserBeamRig then
-      BumpSub(shcMaterialsVfxLighting);
-    if C is TCastleSonarPulse then
+    if C is TCastleAcousticProbe then
       BumpSub(shcCinematicsAudioInput);
-    if C is TCastleGearLinkage then
-      BumpSub(shcArchitecturePcg);
   end;
 
   procedure Traverse(const C: TComponent);

@@ -66,7 +66,7 @@ begin
   FDesignOwner := ADesignOwner;
   FOnModified := AOnModified;
   FOnRefresh := AOnRefresh;
-  Caption := 'Viewport Overdraw & Shader ALU Complexity Auditor (136 Studios / 23 MCP)';
+  Caption := 'Viewport Overdraw & Shader ALU Complexity Auditor (100 UE Studios / 23 MCP)';
   Position := poScreenCenter;
   Width := 800;
   Height := 580;
