@@ -60,7 +60,7 @@ This is the same license as used by Lazarus LCL and FPC RTL.
 See https://castle-engine.io/license for details.
 "/>
     <Version Major="6" Minor="93" Release="1"/>
-    <Files Count="1228">
+    <Files Count="1229">
       <Item1>
         <Filename Value="../../src/audio/castleinternalabstractsoundbackend.pas"/>
         <UnitName Value="CastleInternalAbstractSoundBackend"/>
@@ -4944,8 +4944,8 @@ See https://castle-engine.io/license for details.
         <UnitName Value="CastleInternalMediaPlayerSoundBackend"/>
       </Item1213>
       <Item1214>
-        <Filename Value="../../src/fonts/castleinternalfreetypeh_pascal.inc"/>
-        <Type Value="Include"/>
+        <Filename Value="../../src/fonts/castleinternalfreetypehpascal.pas"/>
+        <UnitName Value="CastleInternalFreeTypeHPascal"/>
       </Item1214>
       <Item1215>
         <Filename Value="../../src/fonts/castleinternalglyphrasterizer.pas"/>
@@ -5003,6 +5003,10 @@ See https://castle-engine.io/license for details.
         <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkanwsi.pas"/>
         <UnitName Value="CastleInternalVulkanWSI"/>
       </Item1228>
+      <Item1229>
+        <Filename Value="../../src/scene/load/x3dloadinternalsvg.pas"/>
+        <UnitName Value="X3DLoadInternalSvg"/>
+      </Item1229>
     </Files>
     <CompatibilityMode Value="True"/>
     <RequiredPkgs Count="1">
