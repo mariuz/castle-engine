@@ -240,6 +240,7 @@ uses
   TestToolLaserBeam,
   TestToolBossArena,
   TestToolTurretGimbal,
+  TestToolSonarPulse,
   TestCastleVulkanRHI;
 
 implementation

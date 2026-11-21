@@ -403,6 +403,7 @@ contains
   castlelaserbeam in '..\..\src\scene\castlelaserbeam.pas',
   castlebossarena in '..\..\src\scene\castlebossarena.pas',
   castleturretgimbal in '..\..\src\scene\castleturretgimbal.pas',
+  castlesonarpulse in '..\..\src\scene\castlesonarpulse.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

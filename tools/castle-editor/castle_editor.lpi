@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="299">
+    <Units Count="301">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1577,6 +1577,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormTurretGimbal"/>
       </Unit298>
+      <Unit299>
+        <Filename Value="../common-code/toolsonarpulse.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSonarPulse"/>
+      </Unit299>
+      <Unit300>
+        <Filename Value="code/formsonarpulse.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSonarPulse"/>
+      </Unit300>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

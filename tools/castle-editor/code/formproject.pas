@@ -727,6 +727,7 @@ type
       MenuItemLaserBeam: TMenuItem;
       MenuItemBossArena: TMenuItem;
       MenuItemTurretGimbal: TMenuItem;
+      MenuItemSonarPulse: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -874,6 +875,7 @@ type
     procedure MenuItemLaserBeamClick(Sender: TObject);
     procedure MenuItemBossArenaClick(Sender: TObject);
     procedure MenuItemTurretGimbalClick(Sender: TObject);
+    procedure MenuItemSonarPulseClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3133,6 +3135,11 @@ begin
   MenuItemTurretGimbal.Caption := 'Dual-Axis Gimbal Turret, Slew Servo, Recoil & Overheat Studio...';
   MenuItemTurretGimbal.OnClick := @MenuItemTurretGimbalClick;
   MenuItemDesign.Add(MenuItemTurretGimbal);
+
+  MenuItemSonarPulse := TMenuItem.Create(MenuItemDesign);
+  MenuItemSonarPulse.Caption := '3D Echolocation & Active Sonar Pulse (Wavefront & Doppler) Studio...';
+  MenuItemSonarPulse.OnClick := @MenuItemSonarPulseClick;
+  MenuItemDesign.Add(MenuItemSonarPulse);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6871,6 +6878,12 @@ procedure TProjectForm.MenuItemTurretGimbalClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowTurretGimbalDialog;
+end;
+
+procedure TProjectForm.MenuItemSonarPulseClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSonarPulseDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
