@@ -60,7 +60,7 @@ This is the same license as used by Lazarus LCL and FPC RTL.
 See https://castle-engine.io/license for details.
 "/>
     <Version Major="6" Minor="93" Release="1"/>
-    <Files Count="1340">
+    <Files Count="1341">
       <Item1>
         <Filename Value="../../src/audio/castleinternalabstractsoundbackend.pas"/>
         <UnitName Value="CastleInternalAbstractSoundBackend"/>
@@ -4944,8 +4944,8 @@ See https://castle-engine.io/license for details.
         <UnitName Value="CastleInternalMediaPlayerSoundBackend"/>
       </Item1213>
       <Item1214>
-        <Filename Value="../../src/fonts/castleinternalfreetypeh_pascal.inc"/>
-        <Type Value="Include"/>
+        <Filename Value="../../src/fonts/castleinternalfreetypehpascal.pas"/>
+        <UnitName Value="CastleInternalFreeTypeHPascal"/>
       </Item1214>
       <Item1215>
         <Filename Value="../../src/fonts/castleinternalglyphrasterizer.pas"/>
@@ -4964,493 +4964,497 @@ See https://castle-engine.io/license for details.
         <UnitName Value="CastleLocalNotifications"/>
       </Item1218>
       <Item1219>
-        <Filename Value="../../src/scene/castlenprshader.pas"/>
-        <UnitName Value="CastleNprShader"/>
+        <Filename Value="../../src/scene/load/x3dloadinternalsvg.pas"/>
+        <UnitName Value="X3DLoadInternalSvg"/>
       </Item1219>
       <Item1220>
-        <Filename Value="../../src/scene/castledesignannotations.pas"/>
-        <UnitName Value="CastleDesignAnnotations"/>
+        <Filename Value="../../src/scene/castlenprshader.pas"/>
+        <UnitName Value="CastleNprShader"/>
       </Item1220>
       <Item1221>
-        <Filename Value="../../src/scene/castleprefaboverrides.pas"/>
-        <UnitName Value="CastlePrefabOverrides"/>
+        <Filename Value="../../src/scene/castledesignannotations.pas"/>
+        <UnitName Value="CastleDesignAnnotations"/>
       </Item1221>
       <Item1222>
-        <Filename Value="../../src/scene/castlestreamingzone.pas"/>
-        <UnitName Value="CastleStreamingZone"/>
+        <Filename Value="../../src/scene/castleprefaboverrides.pas"/>
+        <UnitName Value="CastlePrefabOverrides"/>
       </Item1222>
       <Item1223>
-        <Filename Value="../../src/scene/castlesequencer.pas"/>
-        <UnitName Value="CastleSequencer"/>
+        <Filename Value="../../src/scene/castlestreamingzone.pas"/>
+        <UnitName Value="CastleStreamingZone"/>
       </Item1223>
       <Item1224>
-        <Filename Value="../../src/scene/castlestategraph.pas"/>
-        <UnitName Value="CastleStateGraph"/>
+        <Filename Value="../../src/scene/castlesequencer.pas"/>
+        <UnitName Value="CastleSequencer"/>
       </Item1224>
       <Item1225>
-        <Filename Value="../../src/scene/castleparticles.pas"/>
-        <UnitName Value="CastleParticles"/>
+        <Filename Value="../../src/scene/castlestategraph.pas"/>
+        <UnitName Value="CastleStateGraph"/>
       </Item1225>
       <Item1226>
-        <Filename Value="../../src/scene/castlenavnetwork.pas"/>
-        <UnitName Value="CastleNavNetwork"/>
+        <Filename Value="../../src/scene/castleparticles.pas"/>
+        <UnitName Value="CastleParticles"/>
       </Item1226>
       <Item1227>
-        <Filename Value="../../src/scene/castleaudiomixer.pas"/>
-        <UnitName Value="CastleAudioMixer"/>
+        <Filename Value="../../src/scene/castlenavnetwork.pas"/>
+        <UnitName Value="CastleNavNetwork"/>
       </Item1227>
       <Item1228>
-        <Filename Value="../../src/scene/castlepostprocessvolume.pas"/>
-        <UnitName Value="CastlePostProcessVolume"/>
+        <Filename Value="../../src/scene/castleaudiomixer.pas"/>
+        <UnitName Value="CastleAudioMixer"/>
       </Item1228>
       <Item1229>
-        <Filename Value="../../src/scene/castlelocalizationtable.pas"/>
-        <UnitName Value="CastleLocalizationTable"/>
+        <Filename Value="../../src/scene/castlepostprocessvolume.pas"/>
+        <UnitName Value="CastlePostProcessVolume"/>
       </Item1229>
       <Item1230>
-        <Filename Value="../../src/scene/castlevariantset.pas"/>
-        <UnitName Value="CastleVariantSet"/>
+        <Filename Value="../../src/scene/castlelocalizationtable.pas"/>
+        <UnitName Value="CastleLocalizationTable"/>
       </Item1230>
       <Item1231>
-        <Filename Value="../../src/scene/castlesplinepath.pas"/>
-        <UnitName Value="CastleSplinePath"/>
+        <Filename Value="../../src/scene/castlevariantset.pas"/>
+        <UnitName Value="CastleVariantSet"/>
       </Item1231>
       <Item1232>
-        <Filename Value="../../src/scene/castledecalprojector.pas"/>
-        <UnitName Value="CastleDecalProjector"/>
+        <Filename Value="../../src/scene/castlesplinepath.pas"/>
+        <UnitName Value="CastleSplinePath"/>
       </Item1232>
       <Item1233>
-        <Filename Value="../../src/scene/castletimeofdayweather.pas"/>
-        <UnitName Value="CastleTimeOfDayWeather"/>
+        <Filename Value="../../src/scene/castledecalprojector.pas"/>
+        <UnitName Value="CastleDecalProjector"/>
       </Item1233>
       <Item1234>
-        <Filename Value="../../src/scene/castledatatable.pas"/>
-        <UnitName Value="CastleDataTable"/>
+        <Filename Value="../../src/scene/castletimeofdayweather.pas"/>
+        <UnitName Value="CastleTimeOfDayWeather"/>
       </Item1234>
       <Item1235>
-        <Filename Value="../../src/scene/castlemodularsnap.pas"/>
-        <UnitName Value="CastleModularSnap"/>
+        <Filename Value="../../src/scene/castledatatable.pas"/>
+        <UnitName Value="CastleDataTable"/>
       </Item1235>
       <Item1236>
-        <Filename Value="../../src/scene/castledialoguequest.pas"/>
-        <UnitName Value="CastleDialogueQuest"/>
+        <Filename Value="../../src/scene/castlemodularsnap.pas"/>
+        <UnitName Value="CastleModularSnap"/>
       </Item1236>
       <Item1237>
-        <Filename Value="../../src/scene/castlefoliagebiome.pas"/>
-        <UnitName Value="CastleFoliageBiome"/>
+        <Filename Value="../../src/scene/castledialoguequest.pas"/>
+        <UnitName Value="CastleDialogueQuest"/>
       </Item1237>
       <Item1238>
-        <Filename Value="../../src/scene/castleikrig.pas"/>
-        <UnitName Value="CastleIkRig"/>
+        <Filename Value="../../src/scene/castlefoliagebiome.pas"/>
+        <UnitName Value="CastleFoliageBiome"/>
       </Item1238>
       <Item1239>
-        <Filename Value="../../src/scene/castledestructible.pas"/>
-        <UnitName Value="CastleDestructible"/>
+        <Filename Value="../../src/scene/castleikrig.pas"/>
+        <UnitName Value="CastleIkRig"/>
       </Item1239>
       <Item1240>
-        <Filename Value="../../src/scene/castlescalability.pas"/>
-        <UnitName Value="CastleScalability"/>
+        <Filename Value="../../src/scene/castledestructible.pas"/>
+        <UnitName Value="CastleDestructible"/>
       </Item1240>
       <Item1241>
-        <Filename Value="../../src/scene/castlematerialgraph.pas"/>
-        <UnitName Value="CastleMaterialGraph"/>
+        <Filename Value="../../src/scene/castlescalability.pas"/>
+        <UnitName Value="CastleScalability"/>
       </Item1241>
       <Item1242>
-        <Filename Value="../../src/scene/castlewatersystem.pas"/>
-        <UnitName Value="CastleWaterSystem"/>
+        <Filename Value="../../src/scene/castlematerialgraph.pas"/>
+        <UnitName Value="CastleMaterialGraph"/>
       </Item1242>
       <Item1243>
-        <Filename Value="../../src/scene/castlecsgmodeler.pas"/>
-        <UnitName Value="CastleCsgModeler"/>
+        <Filename Value="../../src/scene/castlewatersystem.pas"/>
+        <UnitName Value="CastleWaterSystem"/>
       </Item1243>
       <Item1244>
-        <Filename Value="../../src/scene/castlegameplayability.pas"/>
-        <UnitName Value="CastleGameplayAbility"/>
+        <Filename Value="../../src/scene/castlecsgmodeler.pas"/>
+        <UnitName Value="CastleCsgModeler"/>
       </Item1244>
       <Item1245>
-        <Filename Value="../../src/scene/castleenhancedinput.pas"/>
-        <UnitName Value="CastleEnhancedInput"/>
+        <Filename Value="../../src/scene/castlegameplayability.pas"/>
+        <UnitName Value="CastleGameplayAbility"/>
       </Item1245>
       <Item1246>
-        <Filename Value="../../src/scene/castlevirtualcamera.pas"/>
-        <UnitName Value="CastleVirtualCamera"/>
+        <Filename Value="../../src/scene/castleenhancedinput.pas"/>
+        <UnitName Value="CastleEnhancedInput"/>
       </Item1246>
       <Item1247>
-        <Filename Value="../../src/scene/castleclothrope.pas"/>
-        <UnitName Value="CastleClothRope"/>
+        <Filename Value="../../src/scene/castlevirtualcamera.pas"/>
+        <UnitName Value="CastleVirtualCamera"/>
       </Item1247>
       <Item1248>
-        <Filename Value="../../src/scene/castleutilityai.pas"/>
-        <UnitName Value="CastleUtilityAi"/>
+        <Filename Value="../../src/scene/castleclothrope.pas"/>
+        <UnitName Value="CastleClothRope"/>
       </Item1248>
       <Item1249>
-        <Filename Value="../../src/scene/castlesavereplay.pas"/>
-        <UnitName Value="CastleSaveReplay"/>
+        <Filename Value="../../src/scene/castleutilityai.pas"/>
+        <UnitName Value="CastleUtilityAi"/>
       </Item1249>
       <Item1250>
-        <Filename Value="../../src/scene/castlevehiclesystem.pas"/>
-        <UnitName Value="CastleVehicleSystem"/>
+        <Filename Value="../../src/scene/castlesavereplay.pas"/>
+        <UnitName Value="CastleSaveReplay"/>
       </Item1250>
       <Item1251>
-        <Filename Value="../../src/scene/castleblendmontage.pas"/>
-        <UnitName Value="CastleBlendMontage"/>
+        <Filename Value="../../src/scene/castlevehiclesystem.pas"/>
+        <UnitName Value="CastleVehicleSystem"/>
       </Item1251>
       <Item1252>
-        <Filename Value="../../src/scene/castleeqstactical.pas"/>
-        <UnitName Value="CastleEqsTactical"/>
+        <Filename Value="../../src/scene/castleblendmontage.pas"/>
+        <UnitName Value="CastleBlendMontage"/>
       </Item1252>
       <Item1253>
-        <Filename Value="../../src/scene/castleinventorycraft.pas"/>
-        <UnitName Value="CastleInventoryCraft"/>
+        <Filename Value="../../src/scene/castleeqstactical.pas"/>
+        <UnitName Value="CastleEqsTactical"/>
       </Item1253>
       <Item1254>
-        <Filename Value="../../src/scene/castlenetcodeiris.pas"/>
-        <UnitName Value="CastleNetcodeIris"/>
+        <Filename Value="../../src/scene/castleinventorycraft.pas"/>
+        <UnitName Value="CastleInventoryCraft"/>
       </Item1254>
       <Item1255>
-        <Filename Value="../../src/scene/castlemetasound.pas"/>
-        <UnitName Value="CastleMetaSound"/>
+        <Filename Value="../../src/scene/castlenetcodeiris.pas"/>
+        <UnitName Value="CastleNetcodeIris"/>
       </Item1255>
       <Item1256>
-        <Filename Value="../../src/scene/castletilemap2dplus.pas"/>
-        <UnitName Value="CastleTilemap2DPlus"/>
+        <Filename Value="../../src/scene/castlemetasound.pas"/>
+        <UnitName Value="CastleMetaSound"/>
       </Item1256>
       <Item1257>
-        <Filename Value="../../src/scene/castlevolumetrics.pas"/>
-        <UnitName Value="CastleVolumetrics"/>
+        <Filename Value="../../src/scene/castletilemap2dplus.pas"/>
+        <UnitName Value="CastleTilemap2DPlus"/>
       </Item1257>
       <Item1258>
-        <Filename Value="../../src/scene/castlegeometryscript.pas"/>
-        <UnitName Value="CastleGeometryScript"/>
+        <Filename Value="../../src/scene/castlevolumetrics.pas"/>
+        <UnitName Value="CastleVolumetrics"/>
       </Item1258>
       <Item1259>
-        <Filename Value="../../src/scene/castlemotionmatching.pas"/>
-        <UnitName Value="CastleMotionMatching"/>
+        <Filename Value="../../src/scene/castlegeometryscript.pas"/>
+        <UnitName Value="CastleGeometryScript"/>
       </Item1259>
       <Item1260>
-        <Filename Value="../../src/scene/castlemassentity.pas"/>
-        <UnitName Value="CastleMassEntity"/>
+        <Filename Value="../../src/scene/castlemotionmatching.pas"/>
+        <UnitName Value="CastleMotionMatching"/>
       </Item1260>
       <Item1261>
-        <Filename Value="../../src/scene/castlevoxelterrain.pas"/>
-        <UnitName Value="CastleVoxelTerrain"/>
+        <Filename Value="../../src/scene/castlemassentity.pas"/>
+        <UnitName Value="CastleMassEntity"/>
       </Item1261>
       <Item1262>
-        <Filename Value="../../src/scene/castleshallowfluid.pas"/>
-        <UnitName Value="CastleShallowFluid"/>
+        <Filename Value="../../src/scene/castlevoxelterrain.pas"/>
+        <UnitName Value="CastleVoxelTerrain"/>
       </Item1262>
       <Item1263>
-        <Filename Value="../../src/scene/castleragdollhit.pas"/>
-        <UnitName Value="CastleRagdollHit"/>
+        <Filename Value="../../src/scene/castleshallowfluid.pas"/>
+        <UnitName Value="CastleShallowFluid"/>
       </Item1263>
       <Item1264>
-        <Filename Value="../../src/scene/castlecommonuimvvm.pas"/>
-        <UnitName Value="CastleCommonUiMvvm"/>
+        <Filename Value="../../src/scene/castleragdollhit.pas"/>
+        <UnitName Value="CastleRagdollHit"/>
       </Item1264>
       <Item1265>
-        <Filename Value="../../src/scene/castlehlodbaker.pas"/>
-        <UnitName Value="CastleHlodBaker"/>
+        <Filename Value="../../src/scene/castlecommonuimvvm.pas"/>
+        <UnitName Value="CastleCommonUiMvvm"/>
       </Item1265>
       <Item1266>
-        <Filename Value="../../src/scene/castleribbontrail.pas"/>
-        <UnitName Value="CastleRibbonTrail"/>
+        <Filename Value="../../src/scene/castlehlodbaker.pas"/>
+        <UnitName Value="CastleHlodBaker"/>
       </Item1266>
       <Item1267>
-        <Filename Value="../../src/scene/castlepcgsettlement.pas"/>
-        <UnitName Value="CastlePcgSettlement"/>
+        <Filename Value="../../src/scene/castleribbontrail.pas"/>
+        <UnitName Value="CastleRibbonTrail"/>
       </Item1267>
       <Item1268>
-        <Filename Value="../../src/scene/castlestatetree.pas"/>
-        <UnitName Value="CastleStateTree"/>
+        <Filename Value="../../src/scene/castlepcgsettlement.pas"/>
+        <UnitName Value="CastlePcgSettlement"/>
       </Item1268>
       <Item1269>
-        <Filename Value="../../src/scene/castlecontrolrig.pas"/>
-        <UnitName Value="CastleControlRig"/>
+        <Filename Value="../../src/scene/castlestatetree.pas"/>
+        <UnitName Value="CastleStateTree"/>
       </Item1269>
       <Item1270>
-        <Filename Value="../../src/scene/castlespringarm.pas"/>
-        <UnitName Value="CastleSpringArm"/>
+        <Filename Value="../../src/scene/castlecontrolrig.pas"/>
+        <UnitName Value="CastleControlRig"/>
       </Item1270>
       <Item1271>
-        <Filename Value="../../src/scene/castleerosionbaker.pas"/>
-        <UnitName Value="CastleErosionBaker"/>
+        <Filename Value="../../src/scene/castlespringarm.pas"/>
+        <UnitName Value="CastleSpringArm"/>
       </Item1271>
       <Item1272>
-        <Filename Value="../../src/scene/castlemegalights.pas"/>
-        <UnitName Value="CastleMegaLights"/>
+        <Filename Value="../../src/scene/castleerosionbaker.pas"/>
+        <UnitName Value="CastleErosionBaker"/>
       </Item1272>
       <Item1273>
-        <Filename Value="../../src/scene/castlegameplaycue.pas"/>
-        <UnitName Value="CastleGameplayCue"/>
+        <Filename Value="../../src/scene/castlemegalights.pas"/>
+        <UnitName Value="CastleMegaLights"/>
       </Item1273>
       <Item1274>
-        <Filename Value="../../src/scene/castledatalayers.pas"/>
-        <UnitName Value="CastleDataLayers"/>
+        <Filename Value="../../src/scene/castlegameplaycue.pas"/>
+        <UnitName Value="CastleGameplayCue"/>
       </Item1274>
       <Item1275>
-        <Filename Value="../../src/scene/castlejigglebone.pas"/>
-        <UnitName Value="CastleJiggleBone"/>
+        <Filename Value="../../src/scene/castledatalayers.pas"/>
+        <UnitName Value="CastleDataLayers"/>
       </Item1275>
       <Item1276>
-        <Filename Value="../../src/scene/castlesoundscape.pas"/>
-        <UnitName Value="CastleSoundscape"/>
+        <Filename Value="../../src/scene/castlejigglebone.pas"/>
+        <UnitName Value="CastleJiggleBone"/>
       </Item1276>
       <Item1277>
-        <Filename Value="../../src/scene/castlechoosertable.pas"/>
-        <UnitName Value="CastleChooserTable"/>
+        <Filename Value="../../src/scene/castlesoundscape.pas"/>
+        <UnitName Value="CastleSoundscape"/>
       </Item1277>
       <Item1278>
-        <Filename Value="../../src/scene/castlegroomhair.pas"/>
-        <UnitName Value="CastleGroomHair"/>
+        <Filename Value="../../src/scene/castlechoosertable.pas"/>
+        <UnitName Value="CastleChooserTable"/>
       </Item1278>
       <Item1279>
-        <Filename Value="../../src/scene/castletraversalparkour.pas"/>
-        <UnitName Value="CastleTraversalParkour"/>
+        <Filename Value="../../src/scene/castlegroomhair.pas"/>
+        <UnitName Value="CastleGroomHair"/>
       </Item1279>
       <Item1280>
-        <Filename Value="../../src/scene/castleruntimevt.pas"/>
-        <UnitName Value="CastleRuntimeVt"/>
+        <Filename Value="../../src/scene/castletraversalparkour.pas"/>
+        <UnitName Value="CastleTraversalParkour"/>
       </Item1280>
       <Item1281>
-        <Filename Value="../../src/scene/castlemover2.pas"/>
-        <UnitName Value="CastleMover2"/>
+        <Filename Value="../../src/scene/castleruntimevt.pas"/>
+        <UnitName Value="CastleRuntimeVt"/>
       </Item1281>
       <Item1282>
-        <Filename Value="../../src/scene/castlecamerarigrail.pas"/>
-        <UnitName Value="CastleCameraRigRail"/>
+        <Filename Value="../../src/scene/castlemover2.pas"/>
+        <UnitName Value="CastleMover2"/>
       </Item1282>
       <Item1283>
-        <Filename Value="../../src/scene/castlemeshletcluster.pas"/>
-        <UnitName Value="CastleMeshletCluster"/>
+        <Filename Value="../../src/scene/castlecamerarigrail.pas"/>
+        <UnitName Value="CastleCameraRigRail"/>
       </Item1283>
       <Item1284>
-        <Filename Value="../../src/scene/castletetsoftbody.pas"/>
-        <UnitName Value="CastleTetSoftBody"/>
+        <Filename Value="../../src/scene/castlemeshletcluster.pas"/>
+        <UnitName Value="CastleMeshletCluster"/>
       </Item1284>
       <Item1285>
-        <Filename Value="../../src/scene/castlemasstraffic.pas"/>
-        <UnitName Value="CastleMassTraffic"/>
+        <Filename Value="../../src/scene/castletetsoftbody.pas"/>
+        <UnitName Value="CastleTetSoftBody"/>
       </Item1285>
       <Item1286>
-        <Filename Value="../../src/scene/castlesurfacegi.pas"/>
-        <UnitName Value="CastleSurfaceGi"/>
+        <Filename Value="../../src/scene/castlemasstraffic.pas"/>
+        <UnitName Value="CastleMassTraffic"/>
       </Item1286>
       <Item1287>
-        <Filename Value="../../src/scene/castlecontextualanim.pas"/>
-        <UnitName Value="CastleContextualAnim"/>
+        <Filename Value="../../src/scene/castlesurfacegi.pas"/>
+        <UnitName Value="CastleSurfaceGi"/>
       </Item1287>
       <Item1288>
-        <Filename Value="../../src/scene/castletargetingsystem.pas"/>
-        <UnitName Value="CastleTargetingSystem"/>
+        <Filename Value="../../src/scene/castlecontextualanim.pas"/>
+        <UnitName Value="CastleContextualAnim"/>
       </Item1288>
       <Item1289>
-        <Filename Value="../../src/scene/castlemutablecharacter.pas"/>
-        <UnitName Value="CastleMutableCharacter"/>
+        <Filename Value="../../src/scene/castletargetingsystem.pas"/>
+        <UnitName Value="CastleTargetingSystem"/>
       </Item1289>
       <Item1290>
-        <Filename Value="../../src/scene/castleriverspline.pas"/>
-        <UnitName Value="CastleRiverSpline"/>
+        <Filename Value="../../src/scene/castlemutablecharacter.pas"/>
+        <UnitName Value="CastleMutableCharacter"/>
       </Item1290>
       <Item1291>
-        <Filename Value="../../src/scene/castleoccluderfader.pas"/>
-        <UnitName Value="CastleOccluderFader"/>
+        <Filename Value="../../src/scene/castleriverspline.pas"/>
+        <UnitName Value="CastleRiverSpline"/>
       </Item1291>
       <Item1292>
-        <Filename Value="../../src/scene/castlegameplaydebugger.pas"/>
-        <UnitName Value="CastleGameplayDebugger"/>
+        <Filename Value="../../src/scene/castleoccluderfader.pas"/>
+        <UnitName Value="CastleOccluderFader"/>
       </Item1292>
       <Item1293>
-        <Filename Value="../../src/scene/castlewindfield.pas"/>
-        <UnitName Value="CastleWindField"/>
+        <Filename Value="../../src/scene/castlegameplaydebugger.pas"/>
+        <UnitName Value="CastleGameplayDebugger"/>
       </Item1293>
       <Item1294>
-        <Filename Value="../../src/scene/castleassetpreloader.pas"/>
-        <UnitName Value="CastleAssetPreloader"/>
+        <Filename Value="../../src/scene/castlewindfield.pas"/>
+        <UnitName Value="CastleWindField"/>
       </Item1294>
       <Item1295>
-        <Filename Value="../../src/scene/castlesubstratematerial.pas"/>
-        <UnitName Value="CastleSubstrateMaterial"/>
+        <Filename Value="../../src/scene/castleassetpreloader.pas"/>
+        <UnitName Value="CastleAssetPreloader"/>
       </Item1295>
       <Item1296>
-        <Filename Value="../../src/scene/castlesmartobjectslots.pas"/>
-        <UnitName Value="CastleSmartObjectSlots"/>
+        <Filename Value="../../src/scene/castlesubstratematerial.pas"/>
+        <UnitName Value="CastleSubstrateMaterial"/>
       </Item1296>
       <Item1297>
-        <Filename Value="../../src/scene/castleaerofoil.pas"/>
-        <UnitName Value="CastleAeroFoil"/>
+        <Filename Value="../../src/scene/castlesmartobjectslots.pas"/>
+        <UnitName Value="CastleSmartObjectSlots"/>
       </Item1297>
       <Item1298>
-        <Filename Value="../../src/scene/castlecreviceclutter.pas"/>
-        <UnitName Value="CastleCreviceClutter"/>
+        <Filename Value="../../src/scene/castleaerofoil.pas"/>
+        <UnitName Value="CastleAeroFoil"/>
       </Item1298>
       <Item1299>
-        <Filename Value="../../src/scene/castlecamerashake.pas"/>
-        <UnitName Value="CastleCameraShake"/>
+        <Filename Value="../../src/scene/castlecreviceclutter.pas"/>
+        <UnitName Value="CastleCreviceClutter"/>
       </Item1299>
       <Item1300>
-        <Filename Value="../../src/scene/castlefiregrid2d.pas"/>
-        <UnitName Value="CastleFireGrid2D"/>
+        <Filename Value="../../src/scene/castlecamerashake.pas"/>
+        <UnitName Value="CastleCameraShake"/>
       </Item1300>
       <Item1301>
-        <Filename Value="../../src/scene/castlegameplaymessenger.pas"/>
-        <UnitName Value="CastleGameplayMessenger"/>
+        <Filename Value="../../src/scene/castlefiregrid2d.pas"/>
+        <UnitName Value="CastleFireGrid2D"/>
       </Item1301>
       <Item1302>
-        <Filename Value="../../src/scene/castleoctahedralimpostor.pas"/>
-        <UnitName Value="CastleOctahedralImpostor"/>
+        <Filename Value="../../src/scene/castlegameplaymessenger.pas"/>
+        <UnitName Value="CastleGameplayMessenger"/>
       </Item1302>
       <Item1303>
-        <Filename Value="../../src/scene/castleposesnapshot.pas"/>
-        <UnitName Value="CastlePoseSnapshot"/>
+        <Filename Value="../../src/scene/castleoctahedralimpostor.pas"/>
+        <UnitName Value="CastleOctahedralImpostor"/>
       </Item1303>
       <Item1304>
-        <Filename Value="../../src/scene/castleportalpair.pas"/>
-        <UnitName Value="CastlePortalPair"/>
+        <Filename Value="../../src/scene/castleposesnapshot.pas"/>
+        <UnitName Value="CastlePoseSnapshot"/>
       </Item1304>
       <Item1305>
-        <Filename Value="../../src/scene/castlesensoryperception.pas"/>
-        <UnitName Value="CastleSensoryPerception"/>
+        <Filename Value="../../src/scene/castleportalpair.pas"/>
+        <UnitName Value="CastlePortalPair"/>
       </Item1305>
       <Item1306>
-        <Filename Value="../../src/scene/castleivyclimber.pas"/>
-        <UnitName Value="CastleIvyClimber"/>
+        <Filename Value="../../src/scene/castlesensoryperception.pas"/>
+        <UnitName Value="CastleSensoryPerception"/>
       </Item1306>
       <Item1307>
-        <Filename Value="../../src/base/castleinternalrenderdoc.pas"/>
-        <UnitName Value="CastleInternalRenderDoc"/>
+        <Filename Value="../../src/scene/castleivyclimber.pas"/>
+        <UnitName Value="CastleIvyClimber"/>
       </Item1307>
       <Item1308>
-        <Filename Value="../../src/base_rendering/opengl/castleinternalrhi_opengl.pas"/>
-        <UnitName Value="CastleInternalRHI_OpenGL"/>
+        <Filename Value="../../src/base/castleinternalrenderdoc.pas"/>
+        <UnitName Value="CastleInternalRenderDoc"/>
       </Item1308>
       <Item1309>
-        <Filename Value="../../src/base_rendering/rhi/castleinternalbatch2drhi.pas"/>
-        <UnitName Value="CastleInternalBatch2DRHI"/>
+        <Filename Value="../../src/base_rendering/opengl/castleinternalrhi_opengl.pas"/>
+        <UnitName Value="CastleInternalRHI_OpenGL"/>
       </Item1309>
       <Item1310>
-        <Filename Value="../../src/base_rendering/rhi/castleinternalrhi.pas"/>
-        <UnitName Value="CastleInternalRHI"/>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalbatch2drhi.pas"/>
+        <UnitName Value="CastleInternalBatch2DRHI"/>
       </Item1310>
       <Item1311>
-        <Filename Value="../../src/base_rendering/rhi/castleinternalshaderrhi.pas"/>
-        <UnitName Value="CastleInternalShaderRHI"/>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalrhi.pas"/>
+        <UnitName Value="CastleInternalRHI"/>
       </Item1311>
       <Item1312>
-        <Filename Value="../../src/base_rendering/vulkan/castleinternalrhi_vulkan.pas"/>
-        <UnitName Value="CastleInternalRHI_Vulkan"/>
+        <Filename Value="../../src/base_rendering/rhi/castleinternalshaderrhi.pas"/>
+        <UnitName Value="CastleInternalShaderRHI"/>
       </Item1312>
       <Item1313>
-        <Filename Value="../../src/base_rendering/vulkan/castleinternalshadercompiler.pas"/>
-        <UnitName Value="CastleInternalShaderCompiler"/>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalrhi_vulkan.pas"/>
+        <UnitName Value="CastleInternalRHI_Vulkan"/>
       </Item1313>
       <Item1314>
-        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkan.pas"/>
-        <UnitName Value="CastleInternalVulkan"/>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalshadercompiler.pas"/>
+        <UnitName Value="CastleInternalShaderCompiler"/>
       </Item1314>
       <Item1315>
-        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkanmemory.pas"/>
-        <UnitName Value="CastleInternalVulkanMemory"/>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkan.pas"/>
+        <UnitName Value="CastleInternalVulkan"/>
       </Item1315>
       <Item1316>
-        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkanwsi.pas"/>
-        <UnitName Value="CastleInternalVulkanWSI"/>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkanmemory.pas"/>
+        <UnitName Value="CastleInternalVulkanMemory"/>
       </Item1316>
       <Item1317>
-        <Filename Value="../../src/scene/castlefootstepdirector.pas"/>
-        <UnitName Value="CastleFootstepDirector"/>
+        <Filename Value="../../src/base_rendering/vulkan/castleinternalvulkanwsi.pas"/>
+        <UnitName Value="CastleInternalVulkanWSI"/>
       </Item1317>
       <Item1318>
-        <Filename Value="../../src/scene/castlegravityfield.pas"/>
-        <UnitName Value="CastleGravityField"/>
+        <Filename Value="../../src/scene/castlefootstepdirector.pas"/>
+        <UnitName Value="CastleFootstepDirector"/>
       </Item1318>
       <Item1319>
-        <Filename Value="../../src/scene/castlecloudshadows.pas"/>
-        <UnitName Value="CastleCloudShadows"/>
+        <Filename Value="../../src/scene/castlegravityfield.pas"/>
+        <UnitName Value="CastleGravityField"/>
       </Item1319>
       <Item1320>
-        <Filename Value="../../src/scene/castletrailstamper.pas"/>
-        <UnitName Value="CastleTrailStamper"/>
+        <Filename Value="../../src/scene/castlecloudshadows.pas"/>
+        <UnitName Value="CastleCloudShadows"/>
       </Item1320>
       <Item1321>
-        <Filename Value="../../src/scene/castlecoverpointscanner.pas"/>
-        <UnitName Value="CastleCoverPointScanner"/>
+        <Filename Value="../../src/scene/castletrailstamper.pas"/>
+        <UnitName Value="CastleTrailStamper"/>
       </Item1321>
       <Item1322>
-        <Filename Value="../../src/scene/castlecatenarycable.pas"/>
-        <UnitName Value="CastleCatenaryCable"/>
+        <Filename Value="../../src/scene/castlecoverpointscanner.pas"/>
+        <UnitName Value="CastleCoverPointScanner"/>
       </Item1322>
       <Item1323>
-        <Filename Value="../../src/scene/castleballisticsolver.pas"/>
-        <UnitName Value="CastleBallisticSolver"/>
+        <Filename Value="../../src/scene/castlecatenarycable.pas"/>
+        <UnitName Value="CastleCatenaryCable"/>
       </Item1323>
       <Item1324>
-        <Filename Value="../../src/scene/castleacousticspace.pas"/>
-        <UnitName Value="CastleAcousticSpace"/>
+        <Filename Value="../../src/scene/castleballisticsolver.pas"/>
+        <UnitName Value="CastleBallisticSolver"/>
       </Item1324>
       <Item1325>
-        <Filename Value="../../src/scene/castlesuspensionbridge.pas"/>
-        <UnitName Value="CastleSuspensionBridge"/>
+        <Filename Value="../../src/scene/castleacousticspace.pas"/>
+        <UnitName Value="CastleAcousticSpace"/>
       </Item1325>
       <Item1326>
-        <Filename Value="../../src/scene/castleworldwaypoint.pas"/>
-        <UnitName Value="CastleWorldWaypoint"/>
+        <Filename Value="../../src/scene/castlesuspensionbridge.pas"/>
+        <UnitName Value="CastleSuspensionBridge"/>
       </Item1326>
       <Item1327>
-        <Filename Value="../../src/scene/castlebuoyancyhull.pas"/>
-        <UnitName Value="CastleBuoyancyHull"/>
+        <Filename Value="../../src/scene/castleworldwaypoint.pas"/>
+        <UnitName Value="CastleWorldWaypoint"/>
       </Item1327>
       <Item1328>
-        <Filename Value="../../src/scene/castlespiderweb.pas"/>
-        <UnitName Value="CastleSpiderweb"/>
+        <Filename Value="../../src/scene/castlebuoyancyhull.pas"/>
+        <UnitName Value="CastleBuoyancyHull"/>
       </Item1328>
       <Item1329>
-        <Filename Value="../../src/scene/castlefoliagetrample.pas"/>
-        <UnitName Value="CastleFoliageTrample"/>
+        <Filename Value="../../src/scene/castlespiderweb.pas"/>
+        <UnitName Value="CastleSpiderweb"/>
       </Item1329>
       <Item1330>
-        <Filename Value="../../src/scene/castleinteractscanner.pas"/>
-        <UnitName Value="CastleInteractScanner"/>
+        <Filename Value="../../src/scene/castlefoliagetrample.pas"/>
+        <UnitName Value="CastleFoliageTrample"/>
       </Item1330>
       <Item1331>
-        <Filename Value="../../src/scene/castlesplatterburst.pas"/>
-        <UnitName Value="CastleSplatterBurst"/>
+        <Filename Value="../../src/scene/castleinteractscanner.pas"/>
+        <UnitName Value="CastleInteractScanner"/>
       </Item1331>
       <Item1332>
-        <Filename Value="../../src/scene/castleicicleoverhang.pas"/>
-        <UnitName Value="CastleIcicleOverhang"/>
+        <Filename Value="../../src/scene/castlesplatterburst.pas"/>
+        <UnitName Value="CastleSplatterBurst"/>
       </Item1332>
       <Item1333>
-        <Filename Value="../../src/scene/castlequadrupedgait.pas"/>
-        <UnitName Value="CastleQuadrupedGait"/>
+        <Filename Value="../../src/scene/castleicicleoverhang.pas"/>
+        <UnitName Value="CastleIcicleOverhang"/>
       </Item1333>
       <Item1334>
-        <Filename Value="../../src/scene/castleziplinerig.pas"/>
-        <UnitName Value="CastleZiplineRig"/>
+        <Filename Value="../../src/scene/castlequadrupedgait.pas"/>
+        <UnitName Value="CastleQuadrupedGait"/>
       </Item1334>
       <Item1335>
-        <Filename Value="../../src/scene/castlefracturevoronoi.pas"/>
-        <UnitName Value="CastleFractureVoronoi"/>
+        <Filename Value="../../src/scene/castleziplinerig.pas"/>
+        <UnitName Value="CastleZiplineRig"/>
       </Item1335>
       <Item1336>
-        <Filename Value="../../src/scene/castlethermalmirage.pas"/>
-        <UnitName Value="CastleThermalMirage"/>
+        <Filename Value="../../src/scene/castlefracturevoronoi.pas"/>
+        <UnitName Value="CastleFractureVoronoi"/>
       </Item1336>
       <Item1337>
-        <Filename Value="../../src/scene/castlestealthlightgem.pas"/>
-        <UnitName Value="CastleStealthLightGem"/>
+        <Filename Value="../../src/scene/castlethermalmirage.pas"/>
+        <UnitName Value="CastleThermalMirage"/>
       </Item1337>
       <Item1338>
-        <Filename Value="../../src/scene/castlegrapplependulum.pas"/>
-        <UnitName Value="CastleGrapplePendulum"/>
+        <Filename Value="../../src/scene/castlestealthlightgem.pas"/>
+        <UnitName Value="CastleStealthLightGem"/>
       </Item1338>
       <Item1339>
-        <Filename Value="../../src/scene/castleflameflicker.pas"/>
-        <UnitName Value="CastleFlameFlicker"/>
+        <Filename Value="../../src/scene/castlegrapplependulum.pas"/>
+        <UnitName Value="CastleGrapplePendulum"/>
       </Item1339>
       <Item1340>
+        <Filename Value="../../src/scene/castleflameflicker.pas"/>
+        <UnitName Value="CastleFlameFlicker"/>
+      </Item1340>
+      <Item1341>
         <Filename Value="../../src/scene/castlecrowdformation.pas"/>
         <UnitName Value="CastleCrowdFormation"/>
-      </Item1340>
+      </Item1341>
     </Files>
     <CompatibilityMode Value="True"/>
     <RequiredPkgs Count="1">
