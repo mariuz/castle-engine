@@ -235,6 +235,7 @@ uses
   TestToolLodInstancing,
   TestToolPuddleWetness,
   TestToolAvalancheSlide,
+  TestToolMagneticField,
   TestCastleVulkanRHI;
 
 implementation

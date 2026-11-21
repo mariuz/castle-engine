@@ -722,6 +722,7 @@ type
       MenuItemLodInstancing: TMenuItem;
       MenuItemPuddleWetness: TMenuItem;
       MenuItemAvalancheSlide: TMenuItem;
+      MenuItemMagneticField: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -864,6 +865,7 @@ type
     procedure MenuItemLodInstancingClick(Sender: TObject);
     procedure MenuItemPuddleWetnessClick(Sender: TObject);
     procedure MenuItemAvalancheSlideClick(Sender: TObject);
+    procedure MenuItemMagneticFieldClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3098,6 +3100,11 @@ begin
   MenuItemAvalancheSlide.Caption := 'Granular Rockslide, Talus Scree & Avalanche Runout Studio...';
   MenuItemAvalancheSlide.OnClick := @MenuItemAvalancheSlideClick;
   MenuItemDesign.Add(MenuItemAvalancheSlide);
+
+  MenuItemMagneticField := TMenuItem.Create(MenuItemDesign);
+  MenuItemMagneticField.Caption := '3D Magnetic Dipole, Mag-Boots & Eddy-Current Brake Studio...';
+  MenuItemMagneticField.OnClick := @MenuItemMagneticFieldClick;
+  MenuItemDesign.Add(MenuItemMagneticField);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6806,6 +6813,12 @@ procedure TProjectForm.MenuItemAvalancheSlideClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowAvalancheSlideDialog;
+end;
+
+procedure TProjectForm.MenuItemMagneticFieldClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMagneticFieldDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

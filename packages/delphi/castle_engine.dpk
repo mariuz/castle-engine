@@ -398,6 +398,7 @@ contains
   castlecrowdformation in '..\..\src\scene\castlecrowdformation.pas',
   castlepuddlewetness in '..\..\src\scene\castlepuddlewetness.pas',
   castleavalancheslide in '..\..\src\scene\castleavalancheslide.pas',
+  castlemagneticfield in '..\..\src\scene\castlemagneticfield.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',
