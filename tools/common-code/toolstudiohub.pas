@@ -142,7 +142,10 @@ uses
   CastleFoliageTrample, CastleInteractScanner, CastleSplatterBurst,
   CastleIcicleOverhang, CastleQuadrupedGait, CastleZiplineRig,
   CastleFractureVoronoi, CastleThermalMirage, CastleStealthLightGem,
-  CastleGrapplePendulum, CastleFlameFlicker, CastleCrowdFormation;
+  CastleGrapplePendulum, CastleFlameFlicker, CastleCrowdFormation,
+  CastlePuddleWetness, CastleAvalancheSlide, CastleMagneticField,
+  CastleClimbingHold, CastleLaserBeam, CastleBossArena,
+  CastleTurretGimbal, CastleSonarPulse, CastleGearLinkage;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -630,6 +633,38 @@ begin
   Reg('lod_instancing', 'Automated LOD Chain & GPU Instancing Optimizer (126 Studios / 22 MCP)', 'AutoLOD',
     shcPerformanceQaDeploy, 406, 'automated lod chain qem hysteresis gpu draw call instancing batch optimizer 126 studio hub',
     'GPU draw-call instancing batch clustering, 4-tier hysteresis LOD chains & 22nd MCP tool.');
+
+  { Horizon 15 (Phases 407-416) }
+  Reg('puddle_wetness', 'Procedural Rain Puddle, Roof Shelter & Splash Ripple Studio', 'Puddle',
+    shcWorldEnvironment, 407, 'procedural rain puddle wetness worldray roof shelter overhang porosity drainage splash ripple',
+    'WorldRay roof shelter mask, topographic basin accumulation, PBR roughness/albedo darkening & ripples.');
+  Reg('avalanche_slide', 'Granular Rockslide, Talus Scree & Angle-of-Repose Studio', 'Scree',
+    shcWorldEnvironment, 408, 'granular rockslide avalanche talus scree cone coulomb angle of repose boulder sorting terrain',
+    'Coulomb angle-of-repose mass-conserving cellular avalanche, talus cone arrest & boulder sorting.');
+  Reg('magnetic_field', '3D Magnetic Dipole, Mag-Boots & Eddy-Current Brake Studio', 'Magnet',
+    shcWorldEnvironment, 409, '3d magnetic dipole attraction repulsion ferromagnetic mag boots eddy current damping brake',
+    '1/r^4 dipole force-gradient attraction/repulsion, WorldRay mag-boot lock & Lenz eddy-current brake.');
+  Reg('climbing_hold', 'Procedural Free-Climbing Hold Scanner & Dyno Reach Studio', 'Climb',
+    shcCharactersAiGas, 410, 'procedural free climbing boulder hold scanner worldray ledge lip bfs dyno leap overhang stamina',
+    'WorldRay ledge lip/clearance hold extraction, BFS reachability graph, Dyno leaps & overhang stamina.');
+  Reg('laser_beam', 'Multi-Bounce Optical Laser, Prism Snell/TIR & Gate Studio', 'Laser',
+    shcMaterialsVfxLighting, 411, 'multi bounce optical laser mirror reflection snell prism refraction tir cutoff receiver gate',
+    'Multi-bounce WorldRay specular reflection, Snell refraction/TIR, Beer-Lambert attenuation & gate.');
+  Reg('boss_arena', 'Tactical Boss Telegraph & AoE Hazard Zone Studio', 'BossAoE',
+    shcCharactersAiGas, 412, 'tactical boss arena telegraph pizza cone safe eye donut charge lane jump shock ring windup',
+    'Windup->Active->Recovery boss telegraphs: Pizza-Cone, Safe-Eye Donut, Charge Lane & Jump Shock-Ring.');
+  Reg('turret_gimbal', 'Dual-Axis Gimbal Turret, Slew Servo & Recoil/Heat Studio', 'Turret',
+    shcCharactersAiGas, 413, 'dual axis gimbal turret yaw pitch slew servo ballistic lead recoil spring overheat lockout',
+    'Azimuth/elevation servo limits, iterative ballistic lead, critically-damped recoil & thermal vent.');
+  Reg('sonar_pulse', '3D Echolocation & Active Sonar Pulse Wavefront Studio', 'Sonar',
+    shcCinematicsAudioInput, 414, '3d echolocation active sonar submarine pulse worldray wavefront two way echo doppler shift',
+    'Expanding spherical WorldRay sonar ping, two-way echo delay, inverse-4th return & radial Doppler.');
+  Reg('gear_linkage', 'Mechanical Gear Train, Rack-and-Pinion & Clockwork Studio', 'Gears',
+    shcArchitecturePcg, 415, 'mechanical gear train spur tooth ratio rack and pinion belt pulley worm shaft odd cycle jam',
+    'BFS kinematic gear/rack/belt/shaft solver, inverse tooth-count ratios & odd-cycle jam detection.');
+  Reg('shader_complexity', 'Viewport Overdraw & Shader ALU Complexity Auditor (136 Studios / 23 MCP)', 'Overdraw',
+    shcPerformanceQaDeploy, 416, 'viewport overdraw transparency alpha stacking early z fragment shader alu hotspot 136 studio hub',
+    '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -961,6 +996,20 @@ var
       BumpSub(shcCharactersAiGas);
     if (C is TCastleThermalMirageVolume) or (C is TCastleFlameFlickerRig) then
       BumpSub(shcMaterialsVfxLighting);
+
+    { Horizon 15 Subsystems }
+    if (C is TCastlePuddleWetnessField) or (C is TCastleAvalancheSlide) or
+       (C is TCastleMagneticField) then
+      BumpSub(shcWorldEnvironment);
+    if (C is TCastleClimbingHoldScanner) or (C is TCastleBossHazardDirector) or
+       (C is TCastleTurretGimbal) then
+      BumpSub(shcCharactersAiGas);
+    if C is TCastleLaserBeamRig then
+      BumpSub(shcMaterialsVfxLighting);
+    if C is TCastleSonarPulse then
+      BumpSub(shcCinematicsAudioInput);
+    if C is TCastleGearLinkage then
+      BumpSub(shcArchitecturePcg);
   end;
 
   procedure Traverse(const C: TComponent);

@@ -729,6 +729,7 @@ type
       MenuItemTurretGimbal: TMenuItem;
       MenuItemSonarPulse: TMenuItem;
       MenuItemGearLinkage: TMenuItem;
+      MenuItemShaderComplexity: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -878,6 +879,7 @@ type
     procedure MenuItemTurretGimbalClick(Sender: TObject);
     procedure MenuItemSonarPulseClick(Sender: TObject);
     procedure MenuItemGearLinkageClick(Sender: TObject);
+    procedure MenuItemShaderComplexityClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3147,6 +3149,11 @@ begin
   MenuItemGearLinkage.Caption := 'Mechanical Gear Train, Rack-and-Pinion & Clockwork Studio...';
   MenuItemGearLinkage.OnClick := @MenuItemGearLinkageClick;
   MenuItemDesign.Add(MenuItemGearLinkage);
+
+  MenuItemShaderComplexity := TMenuItem.Create(MenuItemDesign);
+  MenuItemShaderComplexity.Caption := 'Viewport Overdraw & Shader ALU Complexity Auditor (136 Studios)...';
+  MenuItemShaderComplexity.OnClick := @MenuItemShaderComplexityClick;
+  MenuItemDesign.Add(MenuItemShaderComplexity);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6897,6 +6904,12 @@ procedure TProjectForm.MenuItemGearLinkageClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowGearLinkageDialog;
+end;
+
+procedure TProjectForm.MenuItemShaderComplexityClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowShaderComplexityDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

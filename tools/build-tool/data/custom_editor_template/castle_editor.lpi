@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="303">
+    <Units Count="305">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1597,6 +1597,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormGearLinkage"/>
       </Unit302>
+      <Unit303>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolshadercomplexity.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolShaderComplexity"/>
+      </Unit303>
+      <Unit304>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formshadercomplexity.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormShaderComplexity"/>
+      </Unit304>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

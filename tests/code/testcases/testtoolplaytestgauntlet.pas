@@ -151,7 +151,7 @@ begin
       InnerText := TJSONObject(OuterJson).Objects['result'].Arrays['content'].Objects[0].Strings['text'];
       InnerJson := GetJSON(InnerText);
       try
-        AssertEquals(126, TJSONObject(InnerJson).Integers['totalCatalogCount']);
+        AssertEquals(136, TJSONObject(InnerJson).Integers['totalCatalogCount']);
         AssertEquals(1, TJSONObject(InnerJson).Integers['matchedCount']);
         AssertEquals('vehicle_studio',
           TJSONObject(InnerJson).Arrays['studios'].Objects[0].Strings['studioId']);

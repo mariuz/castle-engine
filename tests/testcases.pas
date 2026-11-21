@@ -242,6 +242,7 @@ uses
   TestToolTurretGimbal,
   TestToolSonarPulse,
   TestToolGearLinkage,
+  TestToolShaderComplexity,
   TestCastleVulkanRHI;
 
 implementation

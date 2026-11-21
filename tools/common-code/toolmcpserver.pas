@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1062,6 +1062,14 @@ begin
   AddToolDef('cge_optimize_lod_instancing',
     'Cluster repeated meshes into GPU-instanced draw-call batches and synthesize 4-tier screen-size hysteresis LOD chains.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Overdraw & shader complexity operation: audit_viewport or status.'));
+  P.Add('maxTranslucentLayers', MakePropSchema('integer', 'Maximum allowed stacked translucent alpha layers per screen tile before flagging hotspot (default 3).'));
+  P.Add('aluHotspotCap', MakePropSchema('integer', 'Per-tile fragment ALU instruction hotspot threshold (default 320).'));
+  AddToolDef('cge_audit_overdraw_shaders',
+    'Audit 32x18 screen-tile viewport translucent overdraw, Early-Z vs. alpha-blend fragment ALU cost, and cutout remediation.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1192,6 +1200,8 @@ var
   LodInstRep: TLodInstancingReport;
   MinBatchInstVal, LodMinTrisVal: Integer;
   LodFovVal: Single;
+  OverdrawRep: TShaderComplexityReport;
+  MaxTransLayersVal, AluCapVal: Integer;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2247,6 +2257,58 @@ begin
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally
       FreeAndNil(ClassesArr);
+      FreeAndNil(TargetsArr);
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_audit_overdraw_shaders' then
+  begin
+    if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    ActionName := 'audit_viewport';
+    MaxTransLayersVal := 3;
+    AluCapVal := 320;
+    if ArgsObj <> nil then
+    begin
+      ActionName := ArgsObj.Get('action', 'audit_viewport');
+      MaxTransLayersVal := ArgsObj.Get('maxTranslucentLayers', 3);
+      AluCapVal := ArgsObj.Get('aluHotspotCap', 320);
+    end;
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if SameText(ActionName, 'status') then
+      OverdrawRep := TShaderComplexityAuditor.SharedAuditor.LastReport
+    else
+      OverdrawRep := TShaderComplexityAuditor.SharedAuditor.AuditViewportOverdraw(
+        DesignRoot, MaxTransLayersVal, AluCapVal);
+
+    OutPayload := TJSONObject.Create;
+    TargetsArr := TJSONArray.Create;
+    try
+      for I := 0 to High(OverdrawRep.Contributors) do
+      begin
+        StudioItemObj := TJSONObject.Create;
+        StudioItemObj.Add('name', OverdrawRep.Contributors[I].ComponentName);
+        StudioItemObj.Add('translucent', OverdrawRep.Contributors[I].IsTranslucent);
+        StudioItemObj.Add('estimatedAlu', OverdrawRep.Contributors[I].EstimatedAluCost);
+        StudioItemObj.Add('coveredTiles', OverdrawRep.Contributors[I].CoveredTileCount);
+        StudioItemObj.Add('remediation', OverdrawRep.Contributors[I].RemediationHint);
+        TargetsArr.Add(StudioItemObj);
+      end;
+      OutPayload.Add('ok', True);
+      OutPayload.Add('action', ActionName);
+      OutPayload.Add('analyzedLayerCount', OverdrawRep.AnalyzedLayerCount);
+      OutPayload.Add('opaqueLayerCount', OverdrawRep.OpaqueLayerCount);
+      OutPayload.Add('translucentLayerCount', OverdrawRep.TranslucentLayerCount);
+      OutPayload.Add('peakTranslucentOverdraw', OverdrawRep.PeakTranslucentOverdraw);
+      OutPayload.Add('peakTileAluInstructions', OverdrawRep.PeakTileAluInstructions);
+      OutPayload.Add('averageTileAluInstructions', OverdrawRep.AverageTileAluInstructions);
+      OutPayload.Add('hotspotTileCount', OverdrawRep.HotspotTileCount);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('contributors', TargetsArr);
+      TargetsArr := nil;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
       FreeAndNil(TargetsArr);
       FreeAndNil(OutPayload);
     end;

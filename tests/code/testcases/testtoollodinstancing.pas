@@ -112,7 +112,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify all 126 studios (Horizons 2-14, Phases 1-406) are registered }
-  AssertEquals(126, TStudioHubManager.StudioCount);
+  AssertEquals(136, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon14Ids) do
     AssertTrue('Missing Horizon 14 studio: ' + Horizon14Ids[I],
       TStudioHubManager.FindStudioById(Horizon14Ids[I], Entry));
@@ -135,7 +135,7 @@ begin
     ListResp := Srv.HandleJsonRpcString('{"jsonrpc":"2.0","id":1,"method":"tools/list"}', '');
     OuterJson := GetJSON(ListResp);
     ToolsArr := TJSONObject(OuterJson).Objects['result'].Arrays['tools'];
-    AssertEquals(22, ToolsArr.Count);
+    AssertEquals(23, ToolsArr.Count);
     AssertTrue(Pos('cge_optimize_lod_instancing', ListResp) > 0);
     FreeAndNil(OuterJson);
 
@@ -147,7 +147,7 @@ begin
     InnerJson := GetJSON(InnerText);
     PayloadObj := TJSONObject(InnerJson);
     AssertTrue(PayloadObj.Booleans['ok']);
-    AssertEquals(126, PayloadObj.Integers['studioCatalogCount']);
+    AssertEquals(136, PayloadObj.Integers['studioCatalogCount']);
     AssertEquals(19, PayloadObj.Integers['baselineDrawCalls']);
     AssertEquals(3, PayloadObj.Integers['optimizedDrawCalls']);
     AssertEquals(16, PayloadObj.Integers['savedDrawCalls']);
