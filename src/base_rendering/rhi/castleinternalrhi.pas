@@ -1235,6 +1235,11 @@ function AntiAliasingToSampleCount(const AAntiAliasing: TAntiAliasing): Cardinal
   (1, 2, 4, 8, 16, 32, 64) supported by the device's MaxSupportedSamples. }
 function ClampSampleCountToCapabilities(const ARequestedSamples, AMaxSupportedSamples: Cardinal): Cardinal;
 
+{ Computes the exact full mipmap pyramid level count (floor(log2(max(1, AMaxDimension))) + 1)
+  using integer bit-shifting (avoiding IEEE-754 Double Ln(8)/Ln(2) = 2.9999999999999996
+  truncation on Win64 and ARM targets). }
+function CalculateTextureMipLevels(const AMaxDimension: Cardinal): Cardinal;
+
 { Compares two framebuffer readback images (e.g. OpenGL vs Vulkan GrabTextureImage)
   by computing the normalized Root Mean Square Error (RMSE in [0..1]) across all channels.
   Returns True if dimensions/formats match and OutNormalizedRMSE <= MaxNormalizedRMSE. }
@@ -1403,6 +1408,19 @@ begin
   if MaxAllowed >= 4 then Result := 4 else
   if MaxAllowed >= 2 then Result := 2 else
     Result := 1;
+end;
+
+function CalculateTextureMipLevels(const AMaxDimension: Cardinal): Cardinal;
+var
+  Dim: Cardinal;
+begin
+  Result := 1;
+  Dim := AMaxDimension;
+  while Dim > 1 do
+  begin
+    Dim := Dim shr 1;
+    Inc(Result);
+  end;
 end;
 
 function CompareImagesPerceptualDiff(const ImageA, ImageB: TCastleImage;

@@ -462,6 +462,36 @@ type
 
 implementation
 
+function ResolveRepoExampleFile(const ARelPath: String): String;
+var
+  EnvDir, CurDir, Candidate: String;
+  Step: Integer;
+begin
+  if FileExists(ARelPath) then
+    Exit(ExpandFileName(ARelPath));
+  if FileExists('../' + ARelPath) then
+    Exit(ExpandFileName('../' + ARelPath));
+
+  EnvDir := GetEnvironmentVariable('CASTLE_ENGINE_PATH');
+  if EnvDir <> '' then
+  begin
+    Candidate := InclPathDelim(EnvDir) + ARelPath;
+    if FileExists(Candidate) then
+      Exit(ExpandFileName(Candidate));
+  end;
+
+  CurDir := InclPathDelim(ExtractFilePath(ExpandFileName(ParamStr(0))));
+  for Step := 1 to 10 do
+  begin
+    Candidate := CurDir + ARelPath;
+    if FileExists(Candidate) then
+      Exit(ExpandFileName(Candidate));
+    CurDir := CurDir + '../';
+  end;
+
+  Result := ARelPath;
+end;
+
 { TTestCastleVulkanRHI }
 
 procedure TTestCastleVulkanRHI.TestRHIFundamentals;
@@ -1517,9 +1547,8 @@ begin
   AssertTrue('CreateVulkanViSurface raises ERHIError when vkCreateViSurfaceNN is not loaded', RaisedError);
 
   { 2. Verify TCastleManifest loading of vulkan_3d_scene and ShouldPrewarmVulkanShaders }
-  ManifestUrl := 'examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml';
-  if not FileExists(ManifestUrl) then
-    ManifestUrl := '../examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml';
+  ManifestUrl := FilenameToUriSafe(
+    ResolveRepoExampleFile('examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml'));
   Manifest := TCastleManifest.CreateFromUrl(ManifestUrl);
   try
     AssertEquals('Manifest name', 'vulkan_3d_scene', Manifest.Name);
@@ -11710,9 +11739,8 @@ begin
   { 2. Verify all 3 examples/vulkan/* CastleEngineManifest.xml files declare render_backend="vulkan" }
   for I := 0 to High(ExampleDirs) do
   begin
-    ManifestUrl := ExampleDirs[I] + '/CastleEngineManifest.xml';
-    if not FileExists(ManifestUrl) then
-      ManifestUrl := '../' + ExampleDirs[I] + '/CastleEngineManifest.xml';
+    ManifestUrl := FilenameToUriSafe(
+      ResolveRepoExampleFile(ExampleDirs[I] + '/CastleEngineManifest.xml'));
 
     Manifest := TCastleManifest.CreateFromUrl(ManifestUrl);
     try
@@ -12589,10 +12617,7 @@ var
 begin
   SL := TStringList.Create;
   try
-    if FileExists('examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr') then
-      SL.LoadFromFile('examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr')
-    else
-      SL.LoadFromFile('../examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr');
+    SL.LoadFromFile(ResolveRepoExampleFile('examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr'));
     SourceText := SL.Text;
     AssertTrue('vulkan_3d_scene.dpr must call Viewport.PrepareResources(Scene)',
       Pos('Viewport.PrepareResources(Scene)', SourceText) > 0);
@@ -31846,6 +31871,15 @@ begin
     PipeDesc := Default(TRHIGraphicsPipelineDesc);
     PipeDesc.VertexShader := VS;
     PipeDesc.FragmentShader := FS;
+    SetLength(PipeDesc.VertexInput.Bindings, 1);
+    PipeDesc.VertexInput.Bindings[0].Binding := 0;
+    PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TVector2);
+    PipeDesc.VertexInput.Bindings[0].PerInstance := False;
+    SetLength(PipeDesc.VertexInput.Attributes, 1);
+    PipeDesc.VertexInput.Attributes[0].Location := 0;
+    PipeDesc.VertexInput.Attributes[0].Binding := 0;
+    PipeDesc.VertexInput.Attributes[0].Format := vafVector2;
+    PipeDesc.VertexInput.Attributes[0].Offset := 0;
     PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
     PipeDesc.Rasterizer.CullMode := cmNone;
     PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
@@ -31942,6 +31976,15 @@ begin
     PipeDesc := Default(TRHIGraphicsPipelineDesc);
     PipeDesc.VertexShader := VS;
     PipeDesc.FragmentShader := FS;
+    SetLength(PipeDesc.VertexInput.Bindings, 1);
+    PipeDesc.VertexInput.Bindings[0].Binding := 0;
+    PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TVector2);
+    PipeDesc.VertexInput.Bindings[0].PerInstance := False;
+    SetLength(PipeDesc.VertexInput.Attributes, 1);
+    PipeDesc.VertexInput.Attributes[0].Location := 0;
+    PipeDesc.VertexInput.Attributes[0].Binding := 0;
+    PipeDesc.VertexInput.Attributes[0].Format := vafVector2;
+    PipeDesc.VertexInput.Attributes[0].Offset := 0;
     PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
     PipeDesc.Rasterizer.CullMode := cmNone;
     PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;

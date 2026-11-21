@@ -182,7 +182,7 @@ begin
             FrameH := Max(FrameH shr (GLTextureScale - 1), GLTextureMinSize);
         end;
         if (not GUITexture) and Filter.NeedsMipmaps then
-          MipCount := Floor(Log2(Max(1, Max(FrameW, FrameH)))) + 1
+          MipCount := CalculateTextureMipLevels(Max(Cardinal(1), Cardinal(Max(FrameW, FrameH))))
         else
           MipCount := 1;
         TexDesc := TRHITextureDesc.Create2D(

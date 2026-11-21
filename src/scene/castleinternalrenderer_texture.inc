@@ -1222,7 +1222,7 @@ begin
         else if TextureNode.TextureImage is TGPUCompressedImage then
           MipLevels := 1
         else
-          MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(FAllocatedWidth, FAllocatedHeight)))) + 1);
+          MipLevels := CalculateTextureMipLevels(Max(FAllocatedWidth, FAllocatedHeight));
       end else
         MipLevels := 1;
       TexDesc := TRHITextureDesc.Create2D(FAllocatedWidth, FAllocatedHeight,
@@ -1529,7 +1529,7 @@ begin
             FrameH := Max(FrameH shr (GLTextureScale - 1), GLTextureMinSize);
         end;
         if Filter.NeedsMipmaps then
-          MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(FrameW, FrameH)))) + 1)
+          MipLevels := CalculateTextureMipLevels(Max(FrameW, FrameH))
         else
           MipLevels := 1;
         TexDesc := TRHITextureDesc.Create2D(
@@ -1757,7 +1757,7 @@ begin
     end;
 
     if NeedsMipmaps then
-      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(Width, Height)))) + 1)
+      MipLevels := CalculateTextureMipLevels(Max(Width, Height))
     else
       MipLevels := 1;
 
@@ -2465,7 +2465,7 @@ begin
       end;
 
       if Filter.NeedsMipmaps then
-        MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(CubeSize))) + 1)
+        MipLevels := CalculateTextureMipLevels(CubeSize)
       else
         MipLevels := 1;
 
@@ -2612,7 +2612,7 @@ begin
         else if SideImg is TGPUCompressedImage then
           MipLevels := 1
         else
-          MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(CubeSize))) + 1);
+          MipLevels := CalculateTextureMipLevels(CubeSize);
       end else
         MipLevels := 1;
       TexDesc := TRHITextureDesc.CreateCube(CubeSize, TexFormat,
@@ -2733,7 +2733,7 @@ begin
     if (RHIDevice.Capabilities.MaxTextureSize > 0) and (Size > RHIDevice.Capabilities.MaxTextureSize) then
       Size := RHIDevice.Capabilities.MaxTextureSize;
     if NeedsMipmaps then
-      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Size))) + 1)
+      MipLevels := CalculateTextureMipLevels(Size)
     else
       MipLevels := 1;
 
@@ -2956,7 +2956,7 @@ begin
       else if TextureNode.TextureImage is TGPUCompressedImage then
         MipLevels := 1
       else
-        MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(MaxDim))) + 1);
+        MipLevels := CalculateTextureMipLevels(MaxDim);
     end else
       MipLevels := 1;
 
@@ -3103,7 +3103,7 @@ begin
 
     NeedsMipmaps := VarianceShadowMaps;
     if NeedsMipmaps then
-      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Size))) + 1)
+      MipLevels := CalculateTextureMipLevels(Size)
     else
       MipLevels := 1;
 
