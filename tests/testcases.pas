@@ -238,6 +238,7 @@ uses
   TestToolMagneticField,
   TestToolClimbingHold,
   TestToolLaserBeam,
+  TestToolBossArena,
   TestCastleVulkanRHI;
 
 implementation

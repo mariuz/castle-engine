@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="295">
+    <Units Count="297">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1557,6 +1557,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormLaserBeam"/>
       </Unit294>
+      <Unit295>
+        <Filename Value="../common-code/toolbossarena.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolBossArena"/>
+      </Unit295>
+      <Unit296>
+        <Filename Value="code/formbossarena.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormBossArena"/>
+      </Unit296>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

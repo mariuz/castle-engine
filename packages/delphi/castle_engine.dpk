@@ -401,6 +401,7 @@ contains
   castlemagneticfield in '..\..\src\scene\castlemagneticfield.pas',
   castleclimbinghold in '..\..\src\scene\castleclimbinghold.pas',
   castlelaserbeam in '..\..\src\scene\castlelaserbeam.pas',
+  castlebossarena in '..\..\src\scene\castlebossarena.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

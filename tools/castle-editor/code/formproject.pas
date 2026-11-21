@@ -725,6 +725,7 @@ type
       MenuItemMagneticField: TMenuItem;
       MenuItemClimbingHold: TMenuItem;
       MenuItemLaserBeam: TMenuItem;
+      MenuItemBossArena: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -870,6 +871,7 @@ type
     procedure MenuItemMagneticFieldClick(Sender: TObject);
     procedure MenuItemClimbingHoldClick(Sender: TObject);
     procedure MenuItemLaserBeamClick(Sender: TObject);
+    procedure MenuItemBossArenaClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3119,6 +3121,11 @@ begin
   MenuItemLaserBeam.Caption := 'Multi-Bounce Optical Laser, Mirror/Prism & Cutoff Gate Studio...';
   MenuItemLaserBeam.OnClick := @MenuItemLaserBeamClick;
   MenuItemDesign.Add(MenuItemLaserBeam);
+
+  MenuItemBossArena := TMenuItem.Create(MenuItemDesign);
+  MenuItemBossArena.Caption := 'Boss Telegraph & AoE Hazard (Cone, Donut, Shock-Ring) Studio...';
+  MenuItemBossArena.OnClick := @MenuItemBossArenaClick;
+  MenuItemDesign.Add(MenuItemBossArena);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6845,6 +6852,12 @@ procedure TProjectForm.MenuItemLaserBeamClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowLaserBeamDialog;
+end;
+
+procedure TProjectForm.MenuItemBossArenaClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowBossArenaDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

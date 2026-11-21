@@ -4946,6 +4946,13 @@ Phase 411 adds **Portal / Talos-Style Multi-Bounce Optical Laser Puzzles** via `
 - **Iterative `WorldRay` Mirror Bounce & Receiver Powering (`TraceLaserBeam`)**: Reflects beams across rotated `Mirror_*` surfaces, powers `Receiver_*` goal crystals, and cuts off immediately on opaque blockers across 3 presets (`lbpRubyPuzzleRelayLaser`, `lbpHighPowerIndustrialCutter`, `lbpCrownGlassPrismLab`).
 - **Exact Vector Snell's Law & Total Internal Reflection (`ComputeSnellRefractionOrTIR`)**: Evaluates $n_1 \sin\theta_1 = n_2 \sin\theta_2$ refraction and critical-angle TIR inside `Prism_*` dielectrics.
 
+## 66EG. Phase 412: Tactical Boss Telegraph & AoE Hazard Zone (Cone, Donut, Charge & Shock-Ring) Studio
+
+Phase 412 adds **FFXIV / Elden Ring-Style Multi-Shape Boss Combat Telegraphs & Mitigation** via `TCastleBossHazardDirector` (`src/scene/castlebossarena.pas`), `TBossArenaHelper` (`tools/common-code/toolbossarena.pas`), and `TBossArenaForm` (`tools/castle-editor/code/formbossarena.pas`), accessible from **`Hazards`** in the top viewport toolbar, **`Design -> Boss Telegraph & AoE Hazard (Cone, Donut, Shock-Ring) Studio...`**, or `LaunchStudioById('boss_arena')`.
+
+- **4 Composable AoE Shapes (`EvaluatePlayerSafety`)**: Evaluates overlapping `btsFrontalPizzaCone`, `btsAnnularSafeEyeDonut` (`SavedByInnerDonutEye`), `btsLinearChargeLane`, and `btsExpandingJumpShockRing` (`SavedByJumpOverRing` above `JumpClearanceHeightMeters`) across 3 presets (`bapStoryReadableTelegraphs`, `bapSavageRaidOverlapCombo`, `bapBulletHellShockwaveRing`).
+- **`WorldRay` Raid Pillar Shelter (`SavedByPillarShelter`)**: Tests line-of-sight between boss origin and player torso so arena pillars block lethal breath/supernova cones.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5145,4 +5152,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolmagneticfield.pas`](../tests/code/testcases/testtoolmagneticfield.pas) (`TTestToolMagneticField` — 2 tests)**: Verifies exact `2.0x` polar-to-equatorial $|\mathbf{B}|$ ratio, $1/r^3$ falloff, North–South attraction vs. North–North repulsion symmetry, Lenz eddy-current velocity braking, `WorldRay` inverted zero-G hull mag-boot locking, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolclimbinghold.pas`](../tests/code/testcases/testtoolclimbinghold.pas) (`TTestToolClimbingHold` — 2 tests)**: Verifies `WorldRay` protruding ledge-lip extraction (`4` West-face holds vs. `0` on the smooth sheer East monolith), static arm-reach block vs. `3`-hop Dyno summit BFS, slab/vertical/`+40°` overhang + rainstorm stamina drain scaling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoollaserbeam.pas`](../tests/code/testcases/testtoollaserbeam.pas) (`TTestToolLaserBeam` — 2 tests)**: Verifies two-`45°`-mirror U-turn optical relay powering `Receiver_CrystalGoal`, instant Leg #2 `Crate_BeamBlocker` cutoff, exact $n_1 \sin\theta_1 = n_2 \sin\theta_2$ Snell refraction, `60°` crown-glass Total Internal Reflection, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolbossarena.pas`](../tests/code/testcases/testtoolbossarena.pas) (`TTestToolBossArena` — 2 tests)**: Verifies 3-zone overlapping Cone + Donut + Shock-Ring hit summation (`1370` dmg), `R < 3.5m` inner donut safe-eye, `WorldRay` `RaidLineOfSightPillar` breath occlusion, `1.35m` airborne jump over `0.90m` ground shockwave rings, rotated charge lanes, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
