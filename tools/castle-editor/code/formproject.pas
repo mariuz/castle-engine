@@ -723,6 +723,7 @@ type
       MenuItemPuddleWetness: TMenuItem;
       MenuItemAvalancheSlide: TMenuItem;
       MenuItemMagneticField: TMenuItem;
+      MenuItemClimbingHold: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -866,6 +867,7 @@ type
     procedure MenuItemPuddleWetnessClick(Sender: TObject);
     procedure MenuItemAvalancheSlideClick(Sender: TObject);
     procedure MenuItemMagneticFieldClick(Sender: TObject);
+    procedure MenuItemClimbingHoldClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3105,6 +3107,11 @@ begin
   MenuItemMagneticField.Caption := '3D Magnetic Dipole, Mag-Boots & Eddy-Current Brake Studio...';
   MenuItemMagneticField.OnClick := @MenuItemMagneticFieldClick;
   MenuItemDesign.Add(MenuItemMagneticField);
+
+  MenuItemClimbingHold := TMenuItem.Create(MenuItemDesign);
+  MenuItemClimbingHold.Caption := 'Free-Climbing Hold Scanner, Reach Graph & Overhang Stamina Studio...';
+  MenuItemClimbingHold.OnClick := @MenuItemClimbingHoldClick;
+  MenuItemDesign.Add(MenuItemClimbingHold);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6819,6 +6826,12 @@ procedure TProjectForm.MenuItemMagneticFieldClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMagneticFieldDialog;
+end;
+
+procedure TProjectForm.MenuItemClimbingHoldClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowClimbingHoldDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

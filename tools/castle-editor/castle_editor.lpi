@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="291">
+    <Units Count="293">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1537,6 +1537,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMagneticField"/>
       </Unit290>
+      <Unit291>
+        <Filename Value="../common-code/toolclimbinghold.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolClimbingHold"/>
+      </Unit291>
+      <Unit292>
+        <Filename Value="code/formclimbinghold.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormClimbingHold"/>
+      </Unit292>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -630,6 +630,7 @@ begin
     P.Targets.AddUnit('castlepuddlewetness.pas');
     P.Targets.AddUnit('castleavalancheslide.pas');
     P.Targets.AddUnit('castlemagneticfield.pas');
+    P.Targets.AddUnit('castleclimbinghold.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');
