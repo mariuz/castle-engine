@@ -396,6 +396,7 @@ contains
   castlegrapplependulum in '..\..\src\scene\castlegrapplependulum.pas',
   castleflameflicker in '..\..\src\scene\castleflameflicker.pas',
   castlecrowdformation in '..\..\src\scene\castlecrowdformation.pas',
+  castlepuddlewetness in '..\..\src\scene\castlepuddlewetness.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

@@ -720,6 +720,7 @@ type
       MenuItemFlameFlicker: TMenuItem;
       MenuItemCrowdFormation: TMenuItem;
       MenuItemLodInstancing: TMenuItem;
+      MenuItemPuddleWetness: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -860,6 +861,7 @@ type
     procedure MenuItemFlameFlickerClick(Sender: TObject);
     procedure MenuItemCrowdFormationClick(Sender: TObject);
     procedure MenuItemLodInstancingClick(Sender: TObject);
+    procedure MenuItemPuddleWetnessClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3084,6 +3086,11 @@ begin
   MenuItemLodInstancing.Caption := 'Automated LOD Chain & GPU Instancing Optimizer (126 Studios)...';
   MenuItemLodInstancing.OnClick := @MenuItemLodInstancingClick;
   MenuItemDesign.Add(MenuItemLodInstancing);
+
+  MenuItemPuddleWetness := TMenuItem.Create(MenuItemDesign);
+  MenuItemPuddleWetness.Caption := 'Procedural Rain Puddle, Roof Shelter & Splash Ripple Studio...';
+  MenuItemPuddleWetness.OnClick := @MenuItemPuddleWetnessClick;
+  MenuItemDesign.Add(MenuItemPuddleWetness);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6780,6 +6787,12 @@ procedure TProjectForm.MenuItemLodInstancingClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowLodInstancingDialog;
+end;
+
+procedure TProjectForm.MenuItemPuddleWetnessClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPuddleWetnessDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

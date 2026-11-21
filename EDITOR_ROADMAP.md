@@ -4526,3 +4526,46 @@ With Horizons 1–8 (`Phases 1–346`, `66` Studios, `16` MCP Tools) complete an
   - **Example (Phase 406):** Click **`AutoLOD`** in the top viewport bar, click **`+ Spawn Colonnade Demo (19)`**, and compare **`Analyze Instancing (>=2)`** (`19 -> 3` draws, `-84.2%`) against **`Large Batches Only (>=9)`** (`19 -> 10` draws).
 
 > 🏆 **Horizon 14 Milestone Complete (`10 / 10` Phases — `406 / 406` Total Phases, `126` Studios & `22` MCP Tools):** All 10 Horizon 14 phases (`Phases 397–406`: Procedural Overhang Icicles & Paired Stalagmites, `4/6/8`-Leg Hildebrand Gait & Slope Tilt, Sloped Pulley Ziplines & Vaults, Milestone Phase 400 Voronoi Destruction Fracture & BFS Floating-Island Collapse, Edlén Grazing Desert Mirage & Reef Caustics, Thief-Style Multi-Torch `WorldRay` Stealth Light-Gem & Backlight Silhouettes, 3D Spherical Grapple Pendulum Swings & Motorized Winches, Planckian Blackbody Torch Flicker & Gale Blowout, Tactical Wedge/Phalanx/Shield-Circle Squad Formations with Boulder Split-Around, and the Automated LOD Chain & GPU Draw-Call Instancing Optimizer + **126-Studio Hub / 22-Tool MCP** `cge_optimize_lod_instancing`) are implemented, documented, and verified across all **`256 / 256` `TTestTool*` tests** with **`0 unfreed memory blocks`** under `heaptrc`.
+
+---
+
+## 16. Horizon 15 (`Phases 407–416` — UE 6.0+ / Houdini / BotW / Portal / FFXIV / Subnautica Parity: Rain Puddle Shelter & Ripples, Mohr–Coulomb Granular Rockslides, 3D Magnetic Dipoles & Eddy Brakes, Free-Climbing Ledge Hold Graphs, Multi-Bounce Mirror/Prism Lasers, Boss AoE Combat Telegraphs, Dual-Axis Gimbal Turrets, 3D Active Sonar Echolocation, Meshing Clockwork Gear Trains & Viewport Overdraw/Shader Complexity Auditor — `136` Studios & `23` MCP Tools)
+
+### Phase 407: Procedural Rain Puddle, `WorldRay` Roof Shelter, Specular Wetness & Splash Ripple Studio (UE 6.0+ Weather Wetness & Ripple Solver Parity)
+- [x] **407.1. `TCastlePuddleWetnessField`, Upward `WorldRay` Roof/Awning Rain Occlusion, Capillary Porous Darkening, Mirror Roughness Collapse & Ring-Buffered Splash Ripples (`castlepuddlewetness.pas`, `toolpuddlewetness.pas`, `formpuddlewetness.pas`, `framedesign.pas`, `formproject.pas`, `testtoolpuddlewetness.pas`)**
+  - Implemented `TCastlePuddleWetnessField`, `TPuddleSurfaceSample`, `TPuddleSplashRipple`, and `TPuddleWetnessPreset` (`src/scene/castlepuddlewetness.pas`, registered in `castle_engine_base.lpk`, `fpmake.pp`, `castle_engine.dpk`/`.dproj`, and `editorregisterallcomponents.pas`), casting upward `WorldRay` probes (`SampleSurfaceWetnessAtWorld`) so ground beneath bridges, porches, and awnings stays dry (`RoofSheltered = True`), pooling standing rain in periodic cobblestone/trench basins (`StandingWaterDepthMeters`), collapsing wet-puddle roughness to mirror `0.025` alongside capillary porous albedo darkening (`PorousAlbedoScale`), advancing `24`-slot ring-buffered footstep/raindrop wave rings ($R = v \cdot t$), and rendering `csTransient` (`Pickable := False`) 3D previews across 3 presets (`pwpCobblestoneAlleyStorm`, `pwpMuddyTrenchDownpour`, `pwpMarbleCourtyardAfterRain`).
+  - Implemented `TPuddleWetnessHelper` (`tools/common-code/toolpuddlewetness.pas`) and `TPuddleWetnessForm` (`tools/castle-editor/code/formpuddlewetness.pas`), wired into `framedesign.pas` (`ButtonPuddleWetness` `"Puddles"`, Hierarchy badge `[Puddles:Fill=72% Wet=90% Ripples=1]`, and `LaunchStudioById('puddle_wetness')`) and `formproject.pas` (`Design -> Procedural Rain Puddle, Roof Shelter & Splash Ripple Studio...`), featuring a Cobblestone Alley + Tavern Porch Awning spawner, Footstep Splash, `+0.3s` Ripple Step & `-20%` Sun Dry triggers, a 2D Roof-Shelter / Puddle Map canvas, and Markdown export.
+  - Added 2 comprehensive unit tests in `tests/code/testcases/testtoolpuddlewetness.pas` (`TestOpenSkyPuddleMirrorRoughnessVsWorldRayPorchRoofDryShelter`, `TestSplashRipplePropagationRingCapEvaporationAndJsonRoundtrip`) verified with `0 unfreed memory blocks`.
+  - **Official Docs & Visual References (Phase 407):** [CGE Shaders, PBR Roughness & Raycasting](https://castle-engine.io/shaders) · [Unreal Engine Rain Wetness, Puddle Pooling & Ripple Normals](https://dev.epicgames.com/documentation/en-us/unreal-engine/physically-based-materials-in-unreal-engine)
+  - **Official Videos & Movies (Phase 407):**
+    - 🎬 [CGE Official Video — Physically Based Materials, Shaders & Weather (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Unreal Engine Storm Puddle Pooling & Roof Shelter Masking](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/699fa079-b742-484d-a91b-7db0d78fb21d/water-overview.png)
+  - **Screenshots:** [CGE Water & Wetness Materials](https://castle-engine.io/images/thumb_const_height_size/water_reflections.webp) · [CGE Component Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+  - **Example (Phase 407):** Click **`Puddles`** in the top viewport bar, click **`+ Spawn Alley + Porch Roof`** (blue mirror puddles in the open alley vs. dry tan stone under the porch awning), click **`Footstep Splash (0,0)`**, and step **`Step Ripples (+0.3s)`**.
+
+### Phase 408: Granular Rockslide, Talus Scree Cone & Angle-of-Repose Avalanche Studio (Houdini / UE 6.0+ Mass-Conserving Debris Chute Parity)
+- [ ] **408.1. `TCastleAvalancheSlide`, Mohr–Coulomb Critical Angle-of-Repose Cellular Relaxation, Mass-Conserving Chute Runout & Deflection Berm Arrest (`castleavalancheslide.pas`, `toolavalancheslide.pas`, `formavalancheslide.pas`, `framedesign.pas`, `formproject.pas`, `testtoolavalancheslide.pas`)**
+
+### Phase 409: 3D Magnetic Dipole, Ferromagnetic Snap, Zero-G Mag-Boots & Eddy-Current Brake Studio (UE 6.0+ / Sci-Fi Physics Parity)
+- [ ] **409.1. `TCastleMagneticField`, Exact 3D Dipole $\mathbf{B}$-Field, Opposite-Pole Attraction vs. Like-Pole Repulsion, Hull Mag-Boot Lock & Lenz Eddy Damping (`castlemagneticfield.pas`, `toolmagneticfield.pas`, `formmagneticfield.pas`, `framedesign.pas`, `formproject.pas`, `testtoolmagneticfield.pas`)**
+
+### Phase 410 (Milestone 410th Phase!): Procedural Free-Climbing Hold Scanner (`WorldRay` Ledge/Crack Graph, Limb Reach & Overhang Stamina) Studio (BotW / Jusant Climbing Parity)
+- [ ] **410.1. `TCastleClimbingHoldScanner`, `WorldRay` Ledge Lip Depth Probing, Arm-Span Reachability Graph, Overhang Stamina Drain & Dyno Leap Solver (`castleclimbinghold.pas`, `toolclimbinghold.pas`, `formclimbinghold.pas`, `framedesign.pas`, `formproject.pas`, `testtoolclimbinghold.pas`)**
+
+### Phase 411: Multi-Bounce Optical Laser, Mirror Reflection, Snell Prism Refraction & Beam-Break Cutoff Studio (Portal / Talos Optical Puzzle Parity)
+- [ ] **411.1. `TCastleLaserBeamRig`, Iterative `WorldRay` Mirror Bounce, Snell's-Law Glass Prism Refraction / TIR & Solid Obstacle Beam-Break Receiver Gate (`castlelaserbeam.pas`, `toollaserbeam.pas`, `formlaserbeam.pas`, `framedesign.pas`, `formproject.pas`, `testtoollaserbeam.pas`)**
+
+### Phase 412: Tactical Boss Telegraph & AoE Hazard Zone (Pizza-Cone, Safe-Eye Donut, Line Charge & Jumpable Shock-Ring) Studio (FFXIV / Elden Ring Encounter Parity)
+- [ ] **412.1. `TCastleBossHazardDirector`, Conic Cleave, Annular Donut, Rotated Charge Lane, Vertical Jump-Over Shockwave Ring & `WorldRay` Pillar LoS Shelter (`castlebossarena.pas`, `toolbossarena.pas`, `formbossarena.pas`, `framedesign.pas`, `formproject.pas`, `testtoolbossarena.pas`)**
+
+### Phase 413: Dual-Axis Gimbal Turret, Slew-Rate Servo, Critically-Damped Barrel Recoil & Thermal Overheat Vent Studio (Armored Vehicle & AA Sentry Parity)
+- [ ] **413.1. `TCastleTurretGimbal`, Bounded Yaw/Elevation Slew-Rate Tracking, `WorldRay` Friendly-Hull Safety Inhibit, Recoil Spring & Overheat Steam Lockout (`castleturretgimbal.pas`, `toolturretgimbal.pas`, `formturretgimbal.pas`, `framedesign.pas`, `formproject.pas`, `testtoolturretgimbal.pas`)**
+
+### Phase 414: 3D Echolocation & Active Sonar Pulse (`WorldRay` Spherical Ping Wavefront, Two-Way Echo & Doppler Shift) Studio (Subnautica / Tactical Scanner Parity)
+- [ ] **414.1. `TCastleSonarPulse`, Finite-Speed Expanding Ping Sphere, Roundtrip Echo Arrival Gate, Material Acoustic Reflectivity & Radial Doppler Shift (`castlesonarpulse.pas`, `toolsonarpulse.pas`, `formsonarpulse.pas`, `framedesign.pas`, `formproject.pas`, `testtoolsonarpulse.pas`)**
+
+### Phase 415: Mechanical Gear Train, Rack-and-Pinion, Belt Pulley & Odd-Cycle Jam Detection Studio (Clockwork & Drawbridge Machinery Parity)
+- [ ] **415.1. `TCastleGearLinkage`, Topological Spur/Belt Ratio Propagation, Torque Multiplication, Rotary-to-Linear Gate Rack & Contradictory Odd-Loop Jam Detector (`castlegearlinkage.pas`, `toolgearlinkage.pas`, `formgearlinkage.pas`, `framedesign.pas`, `formproject.pas`, `testtoolgearlinkage.pas`)**
+
+### Phase 416: Viewport Overdraw, Transparency Stacking & Shader ALU Complexity Auditor + 136-Studio Hub / 23rd MCP Tool (`cge_audit_overdraw_shaders`) (UE 6.0+ Quad Overdraw Viewmode Parity)
+- [ ] **416.1. `TShaderComplexityAuditor`, `TShaderComplexityForm`, `32x18` Screen-Tile Translucent Overdraw & Fragment ALU Estimator, 136-Studio Hub & 23rd MCP Tool (`toolshadercomplexity.pas`, `formshadercomplexity.pas`, `toolstudiohub.pas`, `toolmcpserver.pas`, `framedesign.pas`, `formproject.pas`, `testtoolshadercomplexity.pas`)**

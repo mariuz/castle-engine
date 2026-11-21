@@ -233,6 +233,7 @@ uses
   TestToolFlameFlicker,
   TestToolCrowdFormation,
   TestToolLodInstancing,
+  TestToolPuddleWetness,
   TestCastleVulkanRHI;
 
 implementation

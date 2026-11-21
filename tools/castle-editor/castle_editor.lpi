@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="285">
+    <Units Count="287">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1507,6 +1507,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormLodInstancing"/>
       </Unit284>
+      <Unit285>
+        <Filename Value="../common-code/toolpuddlewetness.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPuddleWetness"/>
+      </Unit285>
+      <Unit286>
+        <Filename Value="code/formpuddlewetness.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPuddleWetness"/>
+      </Unit286>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
