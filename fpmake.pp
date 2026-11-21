@@ -633,6 +633,7 @@ begin
     P.Targets.AddUnit('castleclimbinghold.pas');
     P.Targets.AddUnit('castlelaserbeam.pas');
     P.Targets.AddUnit('castlebossarena.pas');
+    P.Targets.AddUnit('castleturretgimbal.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

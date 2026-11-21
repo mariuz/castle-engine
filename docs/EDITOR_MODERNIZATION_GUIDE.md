@@ -4953,6 +4953,13 @@ Phase 412 adds **FFXIV / Elden Ring-Style Multi-Shape Boss Combat Telegraphs & M
 - **4 Composable AoE Shapes (`EvaluatePlayerSafety`)**: Evaluates overlapping `btsFrontalPizzaCone`, `btsAnnularSafeEyeDonut` (`SavedByInnerDonutEye`), `btsLinearChargeLane`, and `btsExpandingJumpShockRing` (`SavedByJumpOverRing` above `JumpClearanceHeightMeters`) across 3 presets (`bapStoryReadableTelegraphs`, `bapSavageRaidOverlapCombo`, `bapBulletHellShockwaveRing`).
 - **`WorldRay` Raid Pillar Shelter (`SavedByPillarShelter`)**: Tests line-of-sight between boss origin and player torso so arena pillars block lethal breath/supernova cones.
 
+## 66EH. Phase 413: Dual-Axis Gimbal Turret, Slew-Rate Servo, Barrel Recoil & Thermal Overheat Studio
+
+Phase 413 adds **Armored Turret Servo Tracking, Friendly-Fire Inhibit & Thermal Lockout** via `TCastleTurretGimbal` (`src/scene/castleturretgimbal.pas`), `TTurretGimbalHelper` (`tools/common-code/toolturretgimbal.pas`), and `TTurretGimbalForm` (`tools/castle-editor/code/formturretgimbal.pas`), accessible from **`Turret`** in the top viewport toolbar, **`Design -> Dual-Axis Gimbal Turret, Slew Servo, Recoil & Overheat Studio...`**, or `LaunchStudioById('turret_gimbal')`.
+
+- **Shortest-Arc `360°` vs. Casemate Servo Slew & Friendly Inhibit (`StepServoTracking`)**: Steps yaw and pitch at bounded angular speeds while blocking shots through `Friendly*` / `Superstructure*` hull geometry via `WorldRay` across 3 presets (`tgpHeavyBattleshipMainBattery`, `tgpRapidCiwsAntiAirPhalanx`, `tgpSponsonCasemateLimitedArc`).
+- **Critically-Damped Recoil & Thermal Steam-Vent Lockout (`FireCannonRound`)**: Integrates $\ddot{x} = -\omega_0^2 x - 2\omega_0 \dot{x}$ barrel recoil and enforces cooling hysteresis after `100%` overheat.
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -5153,4 +5160,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolclimbinghold.pas`](../tests/code/testcases/testtoolclimbinghold.pas) (`TTestToolClimbingHold` — 2 tests)**: Verifies `WorldRay` protruding ledge-lip extraction (`4` West-face holds vs. `0` on the smooth sheer East monolith), static arm-reach block vs. `3`-hop Dyno summit BFS, slab/vertical/`+40°` overhang + rainstorm stamina drain scaling, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoollaserbeam.pas`](../tests/code/testcases/testtoollaserbeam.pas) (`TTestToolLaserBeam` — 2 tests)**: Verifies two-`45°`-mirror U-turn optical relay powering `Receiver_CrystalGoal`, instant Leg #2 `Crate_BeamBlocker` cutoff, exact $n_1 \sin\theta_1 = n_2 \sin\theta_2$ Snell refraction, `60°` crown-glass Total Internal Reflection, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolbossarena.pas`](../tests/code/testcases/testtoolbossarena.pas) (`TTestToolBossArena` — 2 tests)**: Verifies 3-zone overlapping Cone + Donut + Shock-Ring hit summation (`1370` dmg), `R < 3.5m` inner donut safe-eye, `WorldRay` `RaidLineOfSightPillar` breath occlusion, `1.35m` airborne jump over `0.90m` ground shockwave rings, rotated charge lanes, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolturretgimbal.pas`](../tests/code/testcases/testtoolturretgimbal.pas) (`TTestToolTurretGimbal` — 2 tests)**: Verifies shortest-arc `+170° -> -170°` `20°` wraparound slew, `[-45°..+45°]` casemate clamping, `WorldRay` `FriendlyShipSuperstructureBridge` fire inhibit, 3-salvo overheat lockout & cooling hysteresis, critically-damped recoil recovery, and `csTransient`-clean `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

@@ -239,6 +239,7 @@ uses
   TestToolClimbingHold,
   TestToolLaserBeam,
   TestToolBossArena,
+  TestToolTurretGimbal,
   TestCastleVulkanRHI;
 
 implementation

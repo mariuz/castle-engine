@@ -726,6 +726,7 @@ type
       MenuItemClimbingHold: TMenuItem;
       MenuItemLaserBeam: TMenuItem;
       MenuItemBossArena: TMenuItem;
+      MenuItemTurretGimbal: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -872,6 +873,7 @@ type
     procedure MenuItemClimbingHoldClick(Sender: TObject);
     procedure MenuItemLaserBeamClick(Sender: TObject);
     procedure MenuItemBossArenaClick(Sender: TObject);
+    procedure MenuItemTurretGimbalClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3126,6 +3128,11 @@ begin
   MenuItemBossArena.Caption := 'Boss Telegraph & AoE Hazard (Cone, Donut, Shock-Ring) Studio...';
   MenuItemBossArena.OnClick := @MenuItemBossArenaClick;
   MenuItemDesign.Add(MenuItemBossArena);
+
+  MenuItemTurretGimbal := TMenuItem.Create(MenuItemDesign);
+  MenuItemTurretGimbal.Caption := 'Dual-Axis Gimbal Turret, Slew Servo, Recoil & Overheat Studio...';
+  MenuItemTurretGimbal.OnClick := @MenuItemTurretGimbalClick;
+  MenuItemDesign.Add(MenuItemTurretGimbal);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6858,6 +6865,12 @@ procedure TProjectForm.MenuItemBossArenaClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowBossArenaDialog;
+end;
+
+procedure TProjectForm.MenuItemTurretGimbalClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowTurretGimbalDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

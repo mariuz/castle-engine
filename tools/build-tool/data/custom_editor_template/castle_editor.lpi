@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="297">
+    <Units Count="299">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1567,6 +1567,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormBossArena"/>
       </Unit296>
+      <Unit297>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolturretgimbal.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTurretGimbal"/>
+      </Unit297>
+      <Unit298>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formturretgimbal.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTurretGimbal"/>
+      </Unit298>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
