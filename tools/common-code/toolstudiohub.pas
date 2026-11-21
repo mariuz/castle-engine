@@ -133,7 +133,8 @@ uses
   CastleGameplayDebugger, CastleWindField, CastleAssetPreloader,
   CastleSubstrateMaterial, CastleFireGrid2D, CastleGameplayMessenger,
   CastleOctahedralImpostor, CastlePoseSnapshot, CastleGravityField,
-  CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace;
+  CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
+  CastleBlueprint;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -534,9 +535,14 @@ begin
   Reg('lod_instancing', 'Automated LOD Chain & GPU Instancing Optimizer (22nd MCP)', 'AutoLOD',
     shcPerformanceQaDeploy, 379, 'actor merging automated lod chain qem hysteresis gpu draw call instancing batch optimizer studio hub',
     'GPU draw-call instancing batch clustering, 4-tier hysteresis LOD chains & 22nd MCP tool.');
-  Reg('shader_complexity', 'Viewport Overdraw & Shader ALU Complexity Auditor (100 UE Studios / 23 MCP)', 'Overdraw',
-    shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot 100 studio hub',
+  Reg('shader_complexity', 'Viewport Overdraw & Shader ALU Complexity Auditor (23rd MCP)', 'Overdraw',
+    shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot studio hub',
     '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
+
+  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 101 UE Studios & 24 MCP Tools) }
+  Reg('blueprint_editor', 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)', 'Blueprint',
+    shcCharactersAiGas, 381, 'blueprint ublueprint kismet visual scripting eventgraph construction script exec pin variable branch forloop delay timeline breakpoint pascal codegen mcp',
+    'EventGraph + Construction Script node VM, Exec/Data pins, latent Delay/Timeline, breakpoints & Pascal nativizer (24th MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -721,6 +727,8 @@ var
       BumpSub(shcCinematicsAudioInput);
     if (C is TCastleGameplayDebugger) or (C is TCastleAssetPreloadQueue) then
       BumpSub(shcPerformanceQaDeploy);
+    if C is TCastleBlueprint then
+      BumpSub(shcCharactersAiGas);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

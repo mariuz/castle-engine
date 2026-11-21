@@ -604,6 +604,7 @@ begin
     P.Targets.AddUnit('castlecloudshadows.pas');
     P.Targets.AddUnit('castleballisticsolver.pas');
     P.Targets.AddUnit('castleacousticspace.pas');
+    P.Targets.AddUnit('castleblueprint.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

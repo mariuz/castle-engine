@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="233">
+    <Units Count="235">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1247,6 +1247,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormShaderComplexity"/>
       </Unit232>
+      <Unit233>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolblueprinteditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolBlueprintEditor"/>
+      </Unit233>
+      <Unit234>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formblueprinteditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormBlueprintEditor"/>
+      </Unit234>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

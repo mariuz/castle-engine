@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1070,6 +1070,16 @@ begin
   AddToolDef('cge_audit_overdraw_shaders',
     'Audit 32x18 screen-tile viewport translucent overdraw, Early-Z vs. alpha-blend fragment ALU cost, and cutout remediation.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Blueprint operation: status, compile, run_construction, fire_event, generate_pascal, or spawn_preset (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleBlueprint name (defaults to first Blueprint in design).'));
+  P.Add('eventName', MakePropSchema('string', 'Event to fire for fire_event: begin_play, tick, overlap, or a CustomEvent name (default begin_play).'));
+  P.Add('deltaSec', MakePropSchema('number', 'Delta seconds for tick event (default 0.25).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: colonnade, door_timeline, or warmup_branch (default colonnade).'));
+  AddToolDef('cge_compile_blueprint',
+    'Compile, inspect, run Construction Script, dispatch EventGraph events, or generate nativized Pascal code for TCastleBlueprint visual scripts.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1202,6 +1212,10 @@ var
   LodFovVal: Single;
   OverdrawRep: TShaderComplexityReport;
   MaxTransLayersVal, AluCapVal: Integer;
+  BpAudit: TBlueprintSceneAuditReport;
+  BpComp: TCastleBlueprint;
+  BpPresetVal: TBlueprintPreset;
+  BpErrStr, BpEventStr, ActionStr: String;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2310,6 +2324,96 @@ begin
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally
       FreeAndNil(TargetsArr);
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_compile_blueprint' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    BpEventStr := 'begin_play';
+    MacroMult := 0.25;
+    BpPresetVal := bppPillarRowConstructionAndSpinPickup;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      BpEventStr := Trim(ArgsObj.Get('eventName', 'begin_play'));
+      MacroMult := ArgsObj.Get('deltaSec', 0.25);
+      if SameText(ArgsObj.Get('preset', ''), 'door_timeline') then
+        BpPresetVal := bppSlidingDoorTimelineAndGate
+      else if SameText(ArgsObj.Get('preset', ''), 'warmup_branch') then
+        BpPresetVal := bppPatrolBranchAndLatentDelay;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'run_construction') or
+       SameText(ActionStr, 'fire_event') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      BpComp := TBlueprintEditorHelper.SpawnBlueprintPresetInDesign(
+        DesignRoot, DesignOwner, BpPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Blueprint');
+    end else
+      BpComp := TBlueprintEditorHelper.FindBlueprintByName(DesignRoot, DesignOwner, CompName);
+
+    BpErrStr := '';
+    if SameText(ActionStr, 'compile') then
+      BpAudit := TBlueprintEditorHelper.CompileAllBlueprintsInDesign(DesignRoot, BpErrStr)
+    else
+    begin
+      if (BpComp <> nil) and SameText(ActionStr, 'run_construction') then
+        BpComp.RunConstructionScript
+      else if (BpComp <> nil) and SameText(ActionStr, 'fire_event') then
+      begin
+        if SameText(BpEventStr, 'begin_play') then
+          BpComp.ExecuteBeginPlay
+        else if SameText(BpEventStr, 'tick') then
+          BpComp.StepBlueprintTick(MacroMult)
+        else if SameText(BpEventStr, 'overlap') then
+          BpComp.ExecuteActorBeginOverlap('McpAgent')
+        else
+          BpComp.ExecuteCustomEvent(BpEventStr);
+      end;
+      BpAudit := TBlueprintEditorHelper.AuditBlueprintsInDesign(DesignRoot);
+    end;
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('blueprintCount', BpAudit.BlueprintCount);
+      OutPayload.Add('compiledOkCount', BpAudit.CompiledOkCount);
+      OutPayload.Add('errorBlueprintCount', BpAudit.ErrorBlueprintCount);
+      OutPayload.Add('totalNodeCount', BpAudit.TotalNodeCount);
+      OutPayload.Add('totalVariableCount', BpAudit.TotalVariableCount);
+      OutPayload.Add('totalConstructionMeshes', BpAudit.TotalConstructionMeshes);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('compileErrors', BpErrStr);
+      if BpComp <> nil then
+      begin
+        OutPayload.Add('activeBlueprint', BpComp.Name);
+        OutPayload.Add('summaryBadge', BpComp.BlueprintSummaryBadge);
+        if SameText(ActionStr, 'generate_pascal') then
+          OutPayload.Add('pascalUnit', BpComp.GeneratePascalUnit);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
       FreeAndNil(OutPayload);
     end;
     Exit;

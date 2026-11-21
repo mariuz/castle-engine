@@ -207,6 +207,7 @@ uses
   TestToolBudgetTreemap,
   TestToolLodInstancing,
   TestToolShaderComplexity,
+  TestToolBlueprintEditor,
   TestCastleVulkanRHI;
 
 implementation

@@ -694,6 +694,7 @@ type
       MenuItemBudgetTreemap: TMenuItem;
       MenuItemLodInstancing: TMenuItem;
       MenuItemShaderComplexity: TMenuItem;
+      MenuItemBlueprintEditor: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -808,6 +809,7 @@ type
     procedure MenuItemBudgetTreemapClick(Sender: TObject);
     procedure MenuItemLodInstancingClick(Sender: TObject);
     procedure MenuItemShaderComplexityClick(Sender: TObject);
+    procedure MenuItemBlueprintEditorClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2935,9 +2937,14 @@ begin
 
 
   MenuItemShaderComplexity := TMenuItem.Create(MenuItemDesign);
-  MenuItemShaderComplexity.Caption := 'Viewport Overdraw & Shader ALU Complexity Auditor (100 UE Studios)...';
+  MenuItemShaderComplexity.Caption := 'Viewport Overdraw & Shader ALU Complexity Auditor...';
   MenuItemShaderComplexity.OnClick := @MenuItemShaderComplexityClick;
   MenuItemDesign.Add(MenuItemShaderComplexity);
+
+  MenuItemBlueprintEditor := TMenuItem.Create(MenuItemDesign);
+  MenuItemBlueprintEditor.Caption := 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)...';
+  MenuItemBlueprintEditor.OnClick := @MenuItemBlueprintEditorClick;
+  MenuItemDesign.Add(MenuItemBlueprintEditor);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6514,6 +6521,12 @@ procedure TProjectForm.MenuItemShaderComplexityClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowShaderComplexityDialog;
+end;
+
+procedure TProjectForm.MenuItemBlueprintEditorClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowBlueprintEditorDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
