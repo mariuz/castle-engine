@@ -230,7 +230,7 @@ begin
   PnlLeft := TPanel.Create(Self);
   PnlLeft.Parent := Self;
   PnlLeft.Align := alLeft;
-  PnlLeft.Width := 210;
+  PnlLeft.Width := 242;
   PnlLeft.BevelOuter := bvLowered;
 
   LblVars := TLabel.Create(Self);
@@ -322,9 +322,9 @@ end;
 function TBlueprintEditorForm.NodeBoxWidth(const N: TBlueprintNode): Integer;
 begin
   if TCastleBlueprint.NodeIsPure(N.Kind) then
-    Result := 156
+    Result := 188
   else
-    Result := 178;
+    Result := 208;
 end;
 
 function TBlueprintEditorForm.NodeBoxHeight(const N: TBlueprintNode): Integer;
@@ -542,7 +542,7 @@ begin
         TitleText := TitleText + ': ' + N.MemberName;
       C.Brush.Style := bsClear;
       C.Font.Color := clWhite;
-      C.TextOut(BoxR.Left + 8, BoxR.Top + 5, Copy(TitleText, 1, 24));
+      C.TextOut(BoxR.Left + 8, BoxR.Top + 5, Copy(TitleText, 1, 29));
 
       { Red Breakpoint Badge }
       if N.HasBreakpoint then

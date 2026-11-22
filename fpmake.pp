@@ -606,6 +606,7 @@ begin
     P.Targets.AddUnit('castleacousticspace.pas');
     P.Targets.AddUnit('castleblueprint.pas');
     P.Targets.AddUnit('castlepcggraph.pas');
+    P.Targets.AddUnit('castleanimblueprint.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

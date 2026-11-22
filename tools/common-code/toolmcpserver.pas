@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1090,6 +1090,18 @@ begin
   AddToolDef('cge_execute_pcg_graph',
     'Execute, re-seed, spawn, or inspect intermediate per-node point clouds of TCastlePcgGraph visual PCG pipelines.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'AnimBlueprint operation: status, step_pose, set_params, or spawn_preset (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleAnimBlueprint name (defaults to first AnimBlueprint in design).'));
+  P.Add('deltaSec', MakePropSchema('number', 'Delta seconds for step_pose (default 0.25).'));
+  P.Add('speedMps', MakePropSchema('number', 'Character speed in m/s for set_params (default 5.5).'));
+  P.Add('upperAimWeight', MakePropSchema('number', 'Upper-body LayeredBlendPerBone weight 0..1 for set_params (default 1.0).'));
+  P.Add('isInAir', MakePropSchema('boolean', 'Airborne jump state flag for set_params (default false).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: loco_aim_ik, combat_slot, or jump_air (default loco_aim_ik).'));
+  AddToolDef('cge_evaluate_anim_blueprint',
+    'Spawn, configure, step AnimGraph pose evaluation, or inspect AnimNotify tracks on TCastleAnimBlueprint components.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1231,6 +1243,9 @@ var
   PcgPresetVal: TPcgGraphPreset;
   PcgPts: TPcgPointArray;
   PcgNodeIdStr: String;
+  AnimBpAudit: TAnimBlueprintAuditReport;
+  AnimBpComp: TCastleAnimBlueprint;
+  AnimBpPresetVal: TAnimBlueprintPreset;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2511,6 +2526,83 @@ begin
           OutPayload.Add('inspectedNodeId', PcgNodeIdStr);
           OutPayload.Add('inspectedPointCount', Length(PcgPts));
         end;
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_evaluate_anim_blueprint' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    MacroMult := 0.25;
+    AnimBpPresetVal := abpLocomotionUpperBodyAimAndFootIk;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      MacroMult := ArgsObj.Get('deltaSec', 0.25);
+      if SameText(ArgsObj.Get('preset', ''), 'combat_slot') then
+        AnimBpPresetVal := abpCombatSlotMontageOverride
+      else if SameText(ArgsObj.Get('preset', ''), 'jump_air') then
+        AnimBpPresetVal := abpAirborneJumpStateCrossfade;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'step_pose') or
+       SameText(ActionStr, 'set_params') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      AnimBpComp := TAnimBlueprintHelper.SpawnAnimBlueprintPresetInDesign(
+        DesignRoot, DesignOwner, AnimBpPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn AnimBlueprint');
+    end else
+      AnimBpComp := TAnimBlueprintHelper.FindAnimBlueprintByName(DesignRoot, DesignOwner, CompName);
+
+    if (AnimBpComp <> nil) and SameText(ActionStr, 'set_params') and (ArgsObj <> nil) then
+    begin
+      AnimBpComp.SpeedMps := ArgsObj.Get('speedMps', AnimBpComp.SpeedMps);
+      AnimBpComp.UpperBodyAimWeight := ArgsObj.Get('upperAimWeight', AnimBpComp.UpperBodyAimWeight);
+      AnimBpComp.IsInAir := ArgsObj.Get('isInAir', AnimBpComp.IsInAir);
+      AnimBpComp.StepAnimBlueprint(0.0);
+    end else if (AnimBpComp <> nil) and SameText(ActionStr, 'step_pose') then
+      AnimBpComp.StepAnimBlueprint(MacroMult);
+
+    AnimBpAudit := TAnimBlueprintHelper.AuditAnimBlueprintsInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('animBpCount', AnimBpAudit.AnimBpCount);
+      OutPayload.Add('validCount', AnimBpAudit.ValidCount);
+      OutPayload.Add('errorCount', AnimBpAudit.ErrorCount);
+      OutPayload.Add('totalPoseNodeCount', AnimBpAudit.TotalPoseNodeCount);
+      OutPayload.Add('totalNotifyTrackCount', AnimBpAudit.TotalNotifyTrackCount);
+      OutPayload.Add('totalTriggeredNotifies', AnimBpAudit.TotalTriggeredNotifies);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if AnimBpComp <> nil then
+      begin
+        OutPayload.Add('activeAnimBlueprint', AnimBpComp.Name);
+        OutPayload.Add('activeState', AnimBpComp.ActiveLocomotionState);
+        OutPayload.Add('playheadSec', AnimBpComp.PlayheadTimeSec);
+        OutPayload.Add('summaryBadge', AnimBpComp.AnimBlueprintSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

@@ -134,7 +134,7 @@ uses
   CastleSubstrateMaterial, CastleFireGrid2D, CastleGameplayMessenger,
   CastleOctahedralImpostor, CastlePoseSnapshot, CastleGravityField,
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
-  CastleBlueprint, CastlePcgGraph;
+  CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -539,13 +539,16 @@ begin
     shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot studio hub',
     '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
 
-  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 102 UE Studios & 25 MCP Tools) }
+  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 103 UE Studios & 26 MCP Tools) }
   Reg('blueprint_editor', 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)', 'Blueprint',
     shcCharactersAiGas, 381, 'blueprint ublueprint kismet visual scripting eventgraph construction script exec pin variable branch forloop delay timeline breakpoint pascal codegen mcp',
     'EventGraph + Construction Script node VM, Exec/Data pins, latent Delay/Timeline, breakpoints & Pascal nativizer (24th MCP).');
   Reg('pcg_graph', 'PCG Visual Node Graph Editor (Point-Cloud DAG, Difference & Self-Pruning)', 'PCGGraph',
     shcWorldEnvironment, 382, 'pcg upcggraph procedural content generation point cloud surface spline sampler density slope filter difference union self pruning spawner inspect mcp',
     'Directed point-cloud node graph with Surface/Spline samplers, Difference, Self-Pruning, Inspect & 25th MCP tool.');
+  Reg('anim_blueprint', 'Animation Blueprint Editor (AnimGraph Pose Pipeline & AnimNotify Tracks)', 'AnimBP',
+    shcCharactersAiGas, 383, 'animation blueprint uanimblueprint animgraph state machine layered blend per bone cached pose slot two bone ik animnotify animnotifystate mcp',
+    'Visual AnimGraph pose pipeline (StateMachine, LayeredBlendPerBone, CachedPose, Slot, IK) & AnimNotify tracks (26th MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -734,6 +737,8 @@ var
       BumpSub(shcCharactersAiGas);
     if C is TCastlePcgGraph then
       BumpSub(shcWorldEnvironment);
+    if C is TCastleAnimBlueprint then
+      BumpSub(shcCharactersAiGas);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

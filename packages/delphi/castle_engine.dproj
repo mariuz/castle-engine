@@ -536,6 +536,7 @@
         <DCCReference Include="..\..\src\scene\castleacousticspace.pas"/>
         <DCCReference Include="..\..\src\scene\castleblueprint.pas"/>
         <DCCReference Include="..\..\src\scene\castlepcggraph.pas"/>
+        <DCCReference Include="..\..\src\scene\castleanimblueprint.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>

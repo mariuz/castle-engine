@@ -209,6 +209,7 @@ uses
   TestToolShaderComplexity,
   TestToolBlueprintEditor,
   TestToolPcgGraph,
+  TestToolAnimBlueprint,
   TestCastleVulkanRHI;
 
 implementation
