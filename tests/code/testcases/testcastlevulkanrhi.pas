@@ -28761,7 +28761,7 @@ begin
 
     PassInfo := TRHIRenderingInfo.CreateColorDepth(
       Rectangle(0, 0, 64, 64),
-      ColorTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      ColorTex, loClear, Vector4(0.2, 0.0, 0.2, 1.0),
       DepthTex, loClear, 1.0);
     RealCmd.BeginRendering(PassInfo);
 
@@ -36147,9 +36147,9 @@ begin
       Win.VulkanFramesRenderedCount >= 2);
     ImgVulkanMid := Win.Container.SaveScreenRgba;
 
-    PxBox := ImgVulkanMid.PixelPtr(46, 60)^;
-    PxSphere := ImgVulkanMid.PixelPtr(114, 60)^;
-    PxUi := ImgVulkanMid.PixelPtr(18, 16)^;
+    PxBox := ImgVulkanMid.PixelPtr((ImgVulkanMid.Width * 46) div 160, ImgVulkanMid.Height div 2)^;
+    PxSphere := ImgVulkanMid.PixelPtr((ImgVulkanMid.Width * 114) div 160, ImgVulkanMid.Height div 2)^;
+    PxUi := ImgVulkanMid.PixelPtr((ImgVulkanMid.Width * 18) div 160, (ImgVulkanMid.Height * 16) div 120)^;
     AssertTrue(Format('Hot-switched Vulkan frame must render left Red box (got R=%d G=%d B=%d)',
       [PxBox.X, PxBox.Y, PxBox.Z]),
       (PxBox.X >= 105) and (PxBox.X > PxBox.Z + 55));
@@ -36789,7 +36789,7 @@ procedure TTestCastleVulkanRHI.TestFlagshipDemosExploreCastlePlatformerAndTerrai
         end;
         ImgToggledGL := Win.Container.SaveScreenRgba;
         AssertTrue('OpenGL toggle frame must have valid dimensions',
-          (ImgToggledGL.Width = 160) and (ImgToggledGL.Height = 120));
+          (ImgToggledGL.Width = ImgVk.Width) and (ImgToggledGL.Height = ImgVk.Height));
 
         ApplicationProperties.RenderBackend := backendVulkan;
         if RHIDevice is TVulkanRHIDevice then

@@ -800,12 +800,10 @@ begin
 
     if PassPipeline <> nil then
       Cmd.BindPipeline(PassPipeline);
-    Cmd.BindDescriptorSet(0, DescSet, []);
-    UserDescSet := GetScreenEffectRHIUserDescriptorSet(I);
-    if UserDescSet <> nil then
-      Cmd.BindDescriptorSet(2, UserDescSet, []);
 
-    { Push 32-byte TCastleScreenPushConstants }
+    { Push 32-byte TCastleScreenPushConstants immediately after BindPipeline
+      (before BindDescriptorSet, matching CastleBatch2D so MoltenVK encoder state
+      never clobbers Set 0 buffer bindings when switching pipeline layouts). }
     PushConsts.ScreenSize := Vector2(AWidth, AHeight);
     PushConsts.ScreenPlanes := Vector2(ANearPlane, AFarPlane);
     PushConsts.ScreenCustom := Vector4(I, PassCount, 0, 0);
@@ -814,6 +812,11 @@ begin
         SizeOf(TCastleScreenPushConstants), PushConsts)
     else
       Cmd.PushConstants([ssFragment], 0, SizeOf(TCastleScreenPushConstants), PushConsts);
+
+    Cmd.BindDescriptorSet(0, DescSet, []);
+    UserDescSet := GetScreenEffectRHIUserDescriptorSet(I);
+    if UserDescSet <> nil then
+      Cmd.BindDescriptorSet(2, UserDescSet, []);
 
     { Bind fullscreen quad VBO/IBO and draw 2 triangles (6 indices) }
     Cmd.BindVertexBuffers(0, [FRHIScreenQuadVBO], [0]);

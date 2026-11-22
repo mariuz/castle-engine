@@ -742,20 +742,21 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
           DefaultMainVS;
 
       ScreenLibFrag :=
-        'ivec2 screen_position() { return ivec2(tex_coord * castle_Screen.screen_size); }' + LineEnding +
-        'int screen_x() { return int(tex_coord.x * castle_Screen.screen_size.x); }' + LineEnding +
-        'int screen_y() { return int(tex_coord.y * castle_Screen.screen_size.y); }' + LineEnding +
-        'vec2 screenf_position() { return tex_coord * castle_Screen.screen_size; }' + LineEnding +
-        'float screenf_x() { return tex_coord.x * castle_Screen.screen_size.x; }' + LineEnding +
-        'float screenf_y() { return tex_coord.y * castle_Screen.screen_size.y; }' + LineEnding +
-        'vec4 screenf_get_color(vec2 position) { return texture(screen, position / castle_Screen.screen_size); }' + LineEnding +
+        'vec2 castle_effective_screen_size() { return (castle_Screen.screen_size.x > 0.5 && castle_Screen.screen_size.y > 0.5) ? castle_Screen.screen_size : vec2(max(textureSize(screen, 0), ivec2(1, 1))); }' + LineEnding +
+        'ivec2 screen_position() { return ivec2(tex_coord * castle_effective_screen_size()); }' + LineEnding +
+        'int screen_x() { return int(tex_coord.x * castle_effective_screen_size().x); }' + LineEnding +
+        'int screen_y() { return int(tex_coord.y * castle_effective_screen_size().y); }' + LineEnding +
+        'vec2 screenf_position() { return tex_coord * castle_effective_screen_size(); }' + LineEnding +
+        'float screenf_x() { return tex_coord.x * castle_effective_screen_size().x; }' + LineEnding +
+        'float screenf_y() { return tex_coord.y * castle_effective_screen_size().y; }' + LineEnding +
+        'vec4 screenf_get_color(vec2 position) { return texture(screen, position / castle_effective_screen_size()); }' + LineEnding +
         'vec4 screenf_get_original_color() { return texture(screen, screenf_01_position); }' + LineEnding +
         'vec4 screenf_01_get_color(vec2 position) { return texture(screen, position); }' + LineEnding +
         'vec4 screen_get_color(ivec2 position) { return screenf_get_color(vec2(position) + vec2(0.5)); }' + LineEnding;
       if NeedsDepth then
         ScreenLibFrag := ScreenLibFrag +
           'float screenf_01_get_depth(vec2 position) { return texture(screen_depth, position).r; }' + LineEnding +
-          'float screenf_get_depth(vec2 position) { return screenf_01_get_depth(position / castle_Screen.screen_size); }' + LineEnding +
+          'float screenf_get_depth(vec2 position) { return screenf_01_get_depth(position / castle_effective_screen_size()); }' + LineEnding +
           'float screenf_get_original_depth() { return screenf_01_get_depth(screenf_01_position); }' + LineEnding +
           'float screen_get_depth(ivec2 position) { return screenf_get_depth(vec2(position) + vec2(0.5)); }' + LineEnding +
           'float screenf_get_depth_fast(vec2 position) { return screenf_get_depth(position); }' + LineEnding +

@@ -9708,6 +9708,8 @@ constructor TVulkanRHIComputePipeline.Create(const ADevice: TVulkanRHIDevice;
   const ADesc: TRHIComputePipelineDesc; const AOwnsHandle: Boolean);
 var
   SetLayouts: array of VkDescriptorSetLayout;
+  TempEmptySetLayout: VkDescriptorSetLayout;
+  EmptySetLayoutInfo: VkDescriptorSetLayoutCreateInfo;
   PushRange: VkPushConstantRange;
   LayoutInfo: VkPipelineLayoutCreateInfo;
   ComputeInfo: VkComputePipelineCreateInfo;
@@ -9724,33 +9726,48 @@ begin
     Exit;
   end;
 
-  SetLength(SetLayouts, Length(ADesc.DescriptorSetLayouts));
-  for I := 0 to High(ADesc.DescriptorSetLayouts) do
-    if ADesc.DescriptorSetLayouts[I] <> nil then
-      SetLayouts[I] := (ADesc.DescriptorSetLayouts[I] as TVulkanRHIDescriptorSetLayout).Handle
-    else
-      SetLayouts[I] := VK_NULL_HANDLE;
+  TempEmptySetLayout := VK_NULL_HANDLE;
+  try
+    SetLength(SetLayouts, Length(ADesc.DescriptorSetLayouts));
+    for I := 0 to High(ADesc.DescriptorSetLayouts) do
+      if ADesc.DescriptorSetLayouts[I] <> nil then
+        SetLayouts[I] := (ADesc.DescriptorSetLayouts[I] as TVulkanRHIDescriptorSetLayout).Handle
+      else
+      begin
+        if TempEmptySetLayout = VK_NULL_HANDLE then
+        begin
+          FillChar(EmptySetLayoutInfo, SizeOf(EmptySetLayoutInfo), 0);
+          EmptySetLayoutInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+          CheckVk(vkCreateDescriptorSetLayout(ADevice.Handle, @EmptySetLayoutInfo, nil, @TempEmptySetLayout),
+            'vkCreateDescriptorSetLayout(EmptyComputePlaceholder)');
+        end;
+        SetLayouts[I] := TempEmptySetLayout;
+      end;
 
-  FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
-  LayoutInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  LayoutInfo.setLayoutCount := Length(SetLayouts);
-  if Length(SetLayouts) > 0 then
-    LayoutInfo.pSetLayouts := @SetLayouts[0];
+    FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
+    LayoutInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    LayoutInfo.setLayoutCount := Length(SetLayouts);
+    if Length(SetLayouts) > 0 then
+      LayoutInfo.pSetLayouts := @SetLayouts[0];
 
-  if ADesc.PushConstantSize > 0 then
-  begin
-    FillChar(PushRange, SizeOf(PushRange), 0);
-    PushRange.stageFlags := RHIToVkShaderStageFlags(ADesc.PushConstantStages);
-    if PushRange.stageFlags = 0 then
-      PushRange.stageFlags := VK_SHADER_STAGE_COMPUTE_BIT;
-    PushRange.offset := 0;
-    PushRange.size := ADesc.PushConstantSize;
-    LayoutInfo.pushConstantRangeCount := 1;
-    LayoutInfo.pPushConstantRanges := @PushRange;
+    if ADesc.PushConstantSize > 0 then
+    begin
+      FillChar(PushRange, SizeOf(PushRange), 0);
+      PushRange.stageFlags := RHIToVkShaderStageFlags(ADesc.PushConstantStages);
+      if PushRange.stageFlags = 0 then
+        PushRange.stageFlags := VK_SHADER_STAGE_COMPUTE_BIT;
+      PushRange.offset := 0;
+      PushRange.size := ADesc.PushConstantSize;
+      LayoutInfo.pushConstantRangeCount := 1;
+      LayoutInfo.pPushConstantRanges := @PushRange;
+    end;
+
+    CheckVk(vkCreatePipelineLayout(ADevice.Handle, @LayoutInfo, nil, @FPipelineLayout),
+      'vkCreatePipelineLayout(Compute)');
+  finally
+    if TempEmptySetLayout <> VK_NULL_HANDLE then
+      vkDestroyDescriptorSetLayout(ADevice.Handle, TempEmptySetLayout, nil);
   end;
-
-  CheckVk(vkCreatePipelineLayout(ADevice.Handle, @LayoutInfo, nil, @FPipelineLayout),
-    'vkCreatePipelineLayout(Compute)');
 
   if (ADesc.ComputeShader <> nil) and
      ((ADesc.ComputeShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) and
