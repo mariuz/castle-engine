@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="239">
+    <Units Count="241">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1277,6 +1277,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormAnimBlueprint"/>
       </Unit238>
+      <Unit239>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolbehaviortree.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolBehaviorTree"/>
+      </Unit239>
+      <Unit240>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formbehaviortree.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormBehaviorTree"/>
+      </Unit240>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

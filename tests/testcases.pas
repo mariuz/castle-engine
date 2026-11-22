@@ -210,6 +210,7 @@ uses
   TestToolBlueprintEditor,
   TestToolPcgGraph,
   TestToolAnimBlueprint,
+  TestToolBehaviorTree,
   TestCastleVulkanRHI;
 
 implementation

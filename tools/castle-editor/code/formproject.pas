@@ -697,6 +697,7 @@ type
       MenuItemBlueprintEditor: TMenuItem;
       MenuItemPcgGraph: TMenuItem;
       MenuItemAnimBlueprint: TMenuItem;
+      MenuItemBehaviorTree: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -814,6 +815,7 @@ type
     procedure MenuItemBlueprintEditorClick(Sender: TObject);
     procedure MenuItemPcgGraphClick(Sender: TObject);
     procedure MenuItemAnimBlueprintClick(Sender: TObject);
+    procedure MenuItemBehaviorTreeClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2959,6 +2961,11 @@ begin
   MenuItemAnimBlueprint.Caption := 'Animation Blueprint Editor (AnimGraph & AnimNotify Tracks)...';
   MenuItemAnimBlueprint.OnClick := @MenuItemAnimBlueprintClick;
   MenuItemDesign.Add(MenuItemAnimBlueprint);
+
+  MenuItemBehaviorTree := TMenuItem.Create(MenuItemDesign);
+  MenuItemBehaviorTree.Caption := 'Behavior Tree & Blackboard Visual Editor (Observer Aborts)...';
+  MenuItemBehaviorTree.OnClick := @MenuItemBehaviorTreeClick;
+  MenuItemDesign.Add(MenuItemBehaviorTree);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6553,6 +6560,12 @@ procedure TProjectForm.MenuItemAnimBlueprintClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowAnimBlueprintDialog;
+end;
+
+procedure TProjectForm.MenuItemBehaviorTreeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowBehaviorTreeDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

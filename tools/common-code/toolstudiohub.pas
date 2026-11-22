@@ -134,7 +134,7 @@ uses
   CastleSubstrateMaterial, CastleFireGrid2D, CastleGameplayMessenger,
   CastleOctahedralImpostor, CastlePoseSnapshot, CastleGravityField,
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
-  CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint;
+  CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -539,7 +539,7 @@ begin
     shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot studio hub',
     '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
 
-  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 103 UE Studios & 26 MCP Tools) }
+  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 104 UE Studios & 27 MCP Tools) }
   Reg('blueprint_editor', 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)', 'Blueprint',
     shcCharactersAiGas, 381, 'blueprint ublueprint kismet visual scripting eventgraph construction script exec pin variable branch forloop delay timeline breakpoint pascal codegen mcp',
     'EventGraph + Construction Script node VM, Exec/Data pins, latent Delay/Timeline, breakpoints & Pascal nativizer (24th MCP).');
@@ -549,6 +549,9 @@ begin
   Reg('anim_blueprint', 'Animation Blueprint Editor (AnimGraph Pose Pipeline & AnimNotify Tracks)', 'AnimBP',
     shcCharactersAiGas, 383, 'animation blueprint uanimblueprint animgraph state machine layered blend per bone cached pose slot two bone ik animnotify animnotifystate mcp',
     'Visual AnimGraph pose pipeline (StateMachine, LayeredBlendPerBone, CachedPose, Slot, IK) & AnimNotify tracks (26th MCP).');
+  Reg('behavior_tree', 'Behavior Tree & Blackboard Editor (Observer Aborts, Services & Parallel)', 'BehavTree',
+    shcCharactersAiGas, 384, 'behavior tree ubehaviortree blackboard selector sequence simple parallel decorator observer aborts lower priority self service moveto mcp',
+    'Composites (Selector/Sequence/SimpleParallel), Blackboard Decorators with Observer Aborts, Services & 27th MCP tool.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -738,6 +741,8 @@ var
     if C is TCastlePcgGraph then
       BumpSub(shcWorldEnvironment);
     if C is TCastleAnimBlueprint then
+      BumpSub(shcCharactersAiGas);
+    if C is TCastleBehaviorTree then
       BumpSub(shcCharactersAiGas);
 
     { Architecture, CSG, Splines & Soft-Body }

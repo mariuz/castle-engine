@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1102,6 +1102,17 @@ begin
   AddToolDef('cge_evaluate_anim_blueprint',
     'Spawn, configure, step AnimGraph pose evaluation, or inspect AnimNotify tracks on TCastleAnimBlueprint components.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Behavior Tree operation: status, tick, set_blackboard, or spawn_preset (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleBehaviorTree name (defaults to first Behavior Tree in design).'));
+  P.Add('deltaSec', MakePropSchema('number', 'Delta seconds for tick (default 0.25).'));
+  P.Add('bbKey', MakePropSchema('string', 'Blackboard boolean key name for set_blackboard (e.g. "HasLineOfSight").'));
+  P.Add('bbBool', MakePropSchema('boolean', 'Blackboard boolean value for set_blackboard (default true).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: tactical_guard, simple_parallel, or ammo_reload (default tactical_guard).'));
+  AddToolDef('cge_tick_behavior_tree',
+    'Spawn, update Blackboard keys, tick Behavior Tree execution (including Observer Aborts & Services), or audit TCastleBehaviorTree components.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1246,6 +1257,10 @@ var
   AnimBpAudit: TAnimBlueprintAuditReport;
   AnimBpComp: TCastleAnimBlueprint;
   AnimBpPresetVal: TAnimBlueprintPreset;
+  BtAudit: TBehaviorTreeAuditReport;
+  BtComp: TCastleBehaviorTree;
+  BtPresetVal: TBehaviorTreePreset;
+  BtKeyStr: String;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2603,6 +2618,81 @@ begin
         OutPayload.Add('activeState', AnimBpComp.ActiveLocomotionState);
         OutPayload.Add('playheadSec', AnimBpComp.PlayheadTimeSec);
         OutPayload.Add('summaryBadge', AnimBpComp.AnimBlueprintSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_tick_behavior_tree' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    BtKeyStr := 'HasLineOfSight';
+    MacroMult := 0.25;
+    BtPresetVal := btpTacticalGuardObserverAborts;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      BtKeyStr := Trim(ArgsObj.Get('bbKey', 'HasLineOfSight'));
+      MacroMult := ArgsObj.Get('deltaSec', 0.25);
+      if SameText(ArgsObj.Get('preset', ''), 'simple_parallel') then
+        BtPresetVal := btpSimpleParallelSuppressAndMove
+      else if SameText(ArgsObj.Get('preset', ''), 'ammo_reload') then
+        BtPresetVal := btpAmmoReloadFallbackSequence;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'tick') or
+       SameText(ActionStr, 'set_blackboard') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      BtComp := TBehaviorTreeHelper.SpawnBehaviorTreePresetInDesign(
+        DesignRoot, DesignOwner, BtPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Behavior Tree');
+    end else
+      BtComp := TBehaviorTreeHelper.FindBehaviorTreeByName(DesignRoot, DesignOwner, CompName);
+
+    if (BtComp <> nil) and SameText(ActionStr, 'set_blackboard') and (ArgsObj <> nil) then
+      BtComp.SetBlackboardBool(BtKeyStr, ArgsObj.Get('bbBool', True))
+    else if (BtComp <> nil) and SameText(ActionStr, 'tick') then
+      BtComp.TickBehaviorTree(MacroMult);
+
+    BtAudit := TBehaviorTreeHelper.AuditBehaviorTreesInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('treeCount', BtAudit.TreeCount);
+      OutPayload.Add('validTreeCount', BtAudit.ValidTreeCount);
+      OutPayload.Add('errorTreeCount', BtAudit.ErrorTreeCount);
+      OutPayload.Add('totalNodeCount', BtAudit.TotalNodeCount);
+      OutPayload.Add('totalBlackboardKeys', BtAudit.TotalBlackboardKeys);
+      OutPayload.Add('totalObserverAborts', BtAudit.TotalObserverAborts);
+      OutPayload.Add('totalServiceTicks', BtAudit.TotalServiceTicks);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if BtComp <> nil then
+      begin
+        OutPayload.Add('activeTree', BtComp.Name);
+        OutPayload.Add('runningLeafNodeId', BtComp.RunningLeafNodeId);
+        OutPayload.Add('summaryBadge', BtComp.BehaviorTreeSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

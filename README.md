@@ -24,7 +24,7 @@ See https://castle-engine.io/features for the complete list of engine features.
 Unreal Engine 5.x Editor Modernization & Blueprint Visual Scripting
 -------------------------------------------------------------------
 
-This branch modernizes `castle-editor` and the Castle Game Engine runtime toward **Unreal Engine 5.5 parity** across **383 Phases**, **103 Specialized Editor Studios** (`Ctrl+Shift+P` Studio Hub), and an embedded **26-Tool Model Context Protocol (MCP) JSON-RPC 2.0 Server** (`http://127.0.0.1:8765/mcp`):
+This branch modernizes `castle-editor` and the Castle Game Engine runtime toward **Unreal Engine 5.5 parity** across **384 Phases**, **104 Specialized Editor Studios** (`Ctrl+Shift+P` Studio Hub), and an embedded **27-Tool Model Context Protocol (MCP) JSON-RPC 2.0 Server** (`http://127.0.0.1:8765/mcp`):
 
 ![Castle Game Engine — Blueprint Visual Scripting Editor (EventGraph, Construction Script & Nativizer)](docs/images/blueprint_editor.png)
 

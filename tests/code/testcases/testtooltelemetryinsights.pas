@@ -122,7 +122,7 @@ var
   I: Integer;
 begin
   { 1. Verify all 96 Horizon 2-11 studios are cataloged in TStudioHubManager }
-  AssertEquals(103, TStudioHubManager.StudioCount);
+  AssertEquals(104, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon7Ids) do
     AssertTrue('Missing studio id: ' + Horizon7Ids[I],
       TStudioHubManager.FindStudioById(Horizon7Ids[I], Entry));
