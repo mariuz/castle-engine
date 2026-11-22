@@ -116,6 +116,7 @@
         ShadowMapTextures: array[0..3] of TRHITexture;
         ShadowMapSamplers: array[0..3] of TRHISampler;
         ShadowMapUniqueIds: array[0..3] of QWord;
+        VarianceShadowMaps: Boolean;
         SceneBuffer: TRHIBuffer;
         LightsBuffer: TRHIBuffer;
         DescriptorSet: TRHIDescriptorSet;
@@ -723,6 +724,7 @@ var
   CurrentLightsBlock: TCastleLightsUniformBlock;
   DesiredShadowIds: array[0..3] of QWord;
   FoundSlot, SlotIdx, I: Integer;
+  UseVSM: Boolean;
 begin
   if RHIDevice = nil then
     Exit(nil);
@@ -788,6 +790,8 @@ begin
     FSceneUniformBlock.LightCount := 0;
   end;
 
+  UseVSM := (PreparedShader <> nil) and (PreparedShader.ShadowSampling = ssVarianceShadowMaps);
+
   for I := 0 to High(FRHIShadowMapTextures) do
     if FRHIShadowMapTextures[I] <> nil then
       DesiredShadowIds[I] := FRHIShadowMapTextures[I].UniqueId
@@ -797,7 +801,8 @@ begin
   FoundSlot := -1;
   for I := 0 to High(FRHISceneSlots) do
   begin
-    if CompareMem(@FRHISceneSlots[I].SceneBlock, @DesiredSceneBlock, SizeOf(TCastleSceneUniformBlock)) and
+    if (FRHISceneSlots[I].VarianceShadowMaps = UseVSM) and
+       CompareMem(@FRHISceneSlots[I].SceneBlock, @DesiredSceneBlock, SizeOf(TCastleSceneUniformBlock)) and
        CompareMem(@FRHISceneSlots[I].LightsBlock, @CurrentLightsBlock, SizeOf(TCastleLightsUniformBlock)) and
        CompareMem(@FRHISceneSlots[I].ShadowMapTextures[0], @FRHIShadowMapTextures[0], SizeOf(FRHIShadowMapTextures)) and
        CompareMem(@FRHISceneSlots[I].ShadowMapSamplers[0], @FRHIShadowMapSamplers[0], SizeOf(FRHIShadowMapSamplers)) and
@@ -837,6 +842,7 @@ begin
       FRHISceneSlots[SlotIdx].LightsBuffer.UploadData(CurrentLightsBlock, SizeOf(TCastleLightsUniformBlock));
   end;
 
+  FRHISceneSlots[SlotIdx].VarianceShadowMaps := UseVSM;
   FRHISceneSlots[SlotIdx].SceneBlock := DesiredSceneBlock;
   FRHISceneSlots[SlotIdx].LightsBlock := CurrentLightsBlock;
   for I := 0 to High(FRHIShadowMapTextures) do
@@ -857,11 +863,18 @@ begin
         FRHISceneSlots[SlotIdx].DescriptorSet.BindTexture(2 + Cardinal(I),
           FRHIShadowMapTextures[I], FRHIShadowMapSamplers[I])
       {$ifndef WASI}
-      else if (I = 0) and (RHIDevice is TVulkanRHIDevice) and
+      else if (RHIDevice is TVulkanRHIDevice) and
               (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
-        FRHISceneSlots[SlotIdx].DescriptorSet.BindTexture(2,
-          TVulkanRHIDevice(RHIDevice).GetDefaultShadowDepthTexture,
-          TVulkanRHIDevice(RHIDevice).GetDefaultShadowSampler)
+      begin
+        if UseVSM then
+          FRHISceneSlots[SlotIdx].DescriptorSet.BindTexture(2 + Cardinal(I),
+            TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture,
+            TVulkanRHIDevice(RHIDevice).GetDefaultSampler)
+        else
+          FRHISceneSlots[SlotIdx].DescriptorSet.BindTexture(2 + Cardinal(I),
+            TVulkanRHIDevice(RHIDevice).GetDefaultShadowDepthTexture,
+            TVulkanRHIDevice(RHIDevice).GetDefaultShadowSampler);
+      end
       {$endif};
     FRHISceneSlots[SlotIdx].DescriptorSet.Update;
   end;

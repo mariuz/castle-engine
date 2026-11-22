@@ -10618,7 +10618,8 @@ begin
   begin
     SetCullMode(FCurrentPipeline.Desc.Rasterizer.CullMode);
     SetFrontFace(FCurrentPipeline.Desc.Rasterizer.FrontFace);
-    SetPrimitiveTopology(FCurrentPipeline.Desc.Topology);
+    if FCurrentPipeline.Desc.MeshShader = nil then
+      SetPrimitiveTopology(FCurrentPipeline.Desc.Topology);
     SetDepthTestEnable(FCurrentPipeline.Desc.DepthStencil.DepthTestEnable);
     SetDepthWriteEnable(FCurrentPipeline.Desc.DepthStencil.DepthWriteEnable);
     SetDepthCompareOp(FCurrentPipeline.Desc.DepthStencil.DepthCompareOp);

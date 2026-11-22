@@ -1766,7 +1766,29 @@ begin
     else
       FRHIUserEffectLayout := Default(TUserEffectShaderLayout);
     if (FRHIUserEffectLayout.TotalUBOSize > 0) or (Length(FRHIUserEffectLayout.Samplers) > 0) then
+    begin
       EnsureRHISet2DescriptorSet;
+      {$ifndef WASI}
+      if (FRHISkinningDescriptorSet <> nil) and
+         (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+      begin
+        for I := 0 to High(FRHIUserEffectLayout.Samplers) do
+          if (FRHIUserEffectLayout.Samplers[I].SlotIndex >= 0) and
+             (FRHIUserEffectLayout.Samplers[I].SlotIndex <= High(FRHIUserEffectTextures)) and
+             (FRHIUserEffectTextures[FRHIUserEffectLayout.Samplers[I].SlotIndex] = nil) then
+          begin
+            if FRHIUserEffectLayout.Samplers[I].GLSLType = 'samplerCube' then
+              FRHISkinningDescriptorSet.BindTexture(2 + Cardinal(FRHIUserEffectLayout.Samplers[I].SlotIndex),
+                TVulkanRHIDevice(RHIDevice).GetDefaultWhiteCubeTexture, nil)
+            else if FRHIUserEffectLayout.Samplers[I].GLSLType = 'sampler2DShadow' then
+              FRHISkinningDescriptorSet.BindTexture(2 + Cardinal(FRHIUserEffectLayout.Samplers[I].SlotIndex),
+                TVulkanRHIDevice(RHIDevice).GetDefaultShadowDepthTexture,
+                TVulkanRHIDevice(RHIDevice).GetDefaultShadowSampler);
+          end;
+        FRHISkinningDescriptorSet.Update;
+      end;
+      {$endif}
+    end;
 
     FRHIVertexShaderSource := Gen.GenerateDefault3DVertexShader(
       AHasSkinning, AHasTangents, NeedTexCoord1Attr, AHasColorPerVertex);
