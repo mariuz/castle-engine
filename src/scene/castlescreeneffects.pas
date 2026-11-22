@@ -768,14 +768,6 @@ begin
       end;
     end;
 
-    { Allocate and bind Set 0 descriptor set (Binding 0 = screen, Binding 1 = screen_depth) }
-    DescSet := RHIDevice.CreateDescriptorSet(Layout);
-    FRHIScreenDescriptorSets[I] := DescSet;
-    DescSet.BindTexture(0, FRHIScreenTextureSrc, FRHIScreenSampler);
-    if ANeedDepth and (FRHIScreenTextureDepth <> nil) then
-      DescSet.BindTexture(1, FRHIScreenTextureDepth, FRHIScreenSampler);
-    DescSet.Update;
-
     PassPipeline := APassPipelines[I];
     if (PassPipeline <> nil) and
        ((Length(PassPipeline.Desc.ColorAttachmentFormats) <> 1) or
@@ -790,6 +782,21 @@ begin
       AdaptedDesc.SampleCount := PassSampleCount;
       PassPipeline := RHIDevice.GetOrCreatePipeline(AdaptedDesc);
     end;
+
+    { Allocate Set 0 descriptor set directly from PassPipeline's own Set 0 layout
+      when present (critical for MoltenVK Metal Argument Buffers so MVKDescriptorSet
+      and MVKGraphicsPipeline share the exact same MVKDescriptorSetLayout instance). }
+    if (PassPipeline <> nil) and
+       (Length(PassPipeline.Desc.DescriptorSetLayouts) > 0) and
+       (PassPipeline.Desc.DescriptorSetLayouts[0] <> nil) then
+      DescSet := RHIDevice.CreateDescriptorSet(PassPipeline.Desc.DescriptorSetLayouts[0])
+    else
+      DescSet := RHIDevice.CreateDescriptorSet(Layout);
+    FRHIScreenDescriptorSets[I] := DescSet;
+    DescSet.BindTexture(0, FRHIScreenTextureSrc, FRHIScreenSampler);
+    if ANeedDepth and (FRHIScreenTextureDepth <> nil) then
+      DescSet.BindTexture(1, FRHIScreenTextureDepth, FRHIScreenSampler);
+    DescSet.Update;
 
     if PassPipeline <> nil then
       Cmd.BindPipeline(PassPipeline);

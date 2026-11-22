@@ -4842,7 +4842,7 @@ type
 
     { Acquires or creates a cached VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT library. }
     function GetOrCreateFragmentShaderLibrary(
-      const ADesc: TRHIGraphicsPipelineDesc;
+      const AInputDesc: TRHIGraphicsPipelineDesc;
       const ALayout: VkPipelineLayout;
       const ARenderPass: VkRenderPass): VkPipeline;
 
@@ -9322,6 +9322,10 @@ begin
     ADesc := AdaptPipelineDescForPortabilitySubset(AInputDesc, ADevice.PortabilitySubsetCaps)
   else
     ADesc := AInputDesc;
+  if (ADevice <> nil) and (ADevice.Handle <> nil) and
+     (ADevice.PhysicalDevice <> nil) and (ADesc.DepthAttachmentFormat <> pfUndefined) then
+    ADesc.DepthAttachmentFormat := NegotiateOptimalPixelFormat(
+      ADesc.DepthAttachmentFormat, [tuDepthStencil], ADevice.PhysicalDevice);
   inherited Create(ADevice, ADesc);
   if (ADevice <> nil) and (not ADevice.SupportsDynamicRendering) then
     FRenderPass := ADevice.GetOrCreateFallbackRenderPass(
@@ -28220,6 +28224,11 @@ begin
     HasGplFeature,
     FSupportsGraphicsPipelineLibrary,
     ReqGplExts);
+  if Trim(GetEnvironmentVariable('CASTLE_VULKAN_DISABLE_GPL')) = '1' then
+  begin
+    FSupportsGraphicsPipelineLibrary := False;
+    FSupportsGPLFastLinking := False;
+  end;
 
   FillChar(DescIdxFeatures, SizeOf(DescIdxFeatures), 0);
   DescIdxFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
@@ -28487,6 +28496,8 @@ begin
   FCapabilities.SupportsRayQuery := FSupportsRayQuery;
   FCapabilities.SupportsRayTracingPipeline := FSupportsRayTracingPipeline;
   FCapabilities.SupportsMeshShaders := FSupportsMeshShaders;
+  FSwapchainDepthFormat := NegotiateOptimalPixelFormat(
+    pfD24_UNorm_S8_UInt, [tuDepthStencil], FPhysicalDevice);
 end;
 
 function TVulkanRHIDevice.IsDeviceExtensionSupported(const AExtensionName: AnsiString): Boolean;
@@ -29219,10 +29230,11 @@ begin
 end;
 
 function TVulkanRHIDevice.GetOrCreateFragmentShaderLibrary(
-  const ADesc: TRHIGraphicsPipelineDesc;
+  const AInputDesc: TRHIGraphicsPipelineDesc;
   const ALayout: VkPipelineLayout;
   const ARenderPass: VkRenderPass): VkPipeline;
 var
+  ADesc: TRHIGraphicsPipelineDesc;
   KeyHash: UInt64;
   Stage: VkPipelineShaderStageCreateInfo;
   StageCount: Cardinal;
@@ -29234,6 +29246,11 @@ var
   GplInfo: VkGraphicsPipelineLibraryCreateInfoEXT;
   PipelineInfo: VkGraphicsPipelineCreateInfo;
 begin
+  ADesc := AInputDesc;
+  if (FDevice <> nil) and (FPhysicalDevice <> nil) and
+     (ADesc.DepthAttachmentFormat <> pfUndefined) then
+    ADesc.DepthAttachmentFormat := NegotiateOptimalPixelFormat(
+      ADesc.DepthAttachmentFormat, [tuDepthStencil], FPhysicalDevice);
   KeyHash := ComputeFragmentShaderLibraryKeyHash(ADesc);
   if (FFragmentShaderLibMap <> nil) and FFragmentShaderLibMap.TryGetValue(KeyHash, Result) then
   begin
@@ -29344,6 +29361,10 @@ begin
     ADesc := AdaptPipelineDescForPortabilitySubset(AInputDesc, FPortabilitySubsetCaps)
   else
     ADesc := AInputDesc;
+  if (FDevice <> nil) and (FPhysicalDevice <> nil) and
+     (ADesc.DepthAttachmentFormat <> pfUndefined) then
+    ADesc.DepthAttachmentFormat := NegotiateOptimalPixelFormat(
+      ADesc.DepthAttachmentFormat, [tuDepthStencil], FPhysicalDevice);
   KeyHash := ComputeFragmentOutputLibraryKeyHash(ADesc);
   if (FFragmentOutputLibMap <> nil) and FFragmentOutputLibMap.TryGetValue(KeyHash, Result) then
   begin
@@ -31128,6 +31149,10 @@ begin
     EffDesc := AdaptPipelineDescForPortabilitySubset(ADesc, FPortabilitySubsetCaps)
   else
     EffDesc := ADesc;
+  if (FDevice <> nil) and (FPhysicalDevice <> nil) and
+     (EffDesc.DepthAttachmentFormat <> pfUndefined) then
+    EffDesc.DepthAttachmentFormat := NegotiateOptimalPixelFormat(
+      EffDesc.DepthAttachmentFormat, [tuDepthStencil], FPhysicalDevice);
   HashKey := ComputePipelineHash(EffDesc);
   if FPipelineMap.TryGetValue(HashKey, FoundPipeline) then
   begin

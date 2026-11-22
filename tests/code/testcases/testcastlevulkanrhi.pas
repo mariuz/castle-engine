@@ -28679,7 +28679,7 @@ var
   ScreenEffect: TScreenEffectNode;
   CompShader: TComposedShaderNode;
   FragPart: TShaderPartNode;
-  Readback: TRGBAlphaImage;
+  Readback, SrcReadback: TRGBAlphaImage;
 begin
   if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
     Exit;
@@ -28696,6 +28696,7 @@ begin
   Viewport := nil;
   Scene := nil;
   Readback := nil;
+  SrcReadback := nil;
   try
     GLFeatures := nil;
     ApplicationProperties.RenderBackend := backendVulkan;
@@ -28770,16 +28771,31 @@ begin
     RealCmd.EndRendering;
     RealDev.EndFrameAndPresent;
 
+    AssertEquals('ScreenEffect must execute 1 RHI post-processing pass',
+      1, Integer(Viewport.RHIScreenPassCount));
+    AssertTrue('Viewport.RHIScreenTextureSrc must be allocated',
+      Viewport.RHIScreenTextureSrc <> nil);
+    SrcReadback := RealDev.GrabTextureImage(Viewport.RHIScreenTextureSrc, Rectangle(0, 0, 64, 64));
     Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
 
+    { Offscreen pre-effect SrcReadback: Red background (255,0,0) at (4,4), Blue box (0,0,255) at (32,32) }
+    AssertEquals(Format('Offscreen ScreenEffect Src (4,4) R must be 255 [src=(%d,%d,%d,%d), srcCenter=(%d,%d,%d,%d)]', [
+      SrcReadback.PixelPtr(4, 4)^.X, SrcReadback.PixelPtr(4, 4)^.Y, SrcReadback.PixelPtr(4, 4)^.Z, SrcReadback.PixelPtr(4, 4)^.W,
+      SrcReadback.PixelPtr(32, 32)^.X, SrcReadback.PixelPtr(32, 32)^.Y, SrcReadback.PixelPtr(32, 32)^.Z, SrcReadback.PixelPtr(32, 32)^.W]),
+      255, Integer(SrcReadback.PixelPtr(4, 4)^.X));
+    AssertEquals('Offscreen ScreenEffect Src (32,32) B must be 255',
+      255, Integer(SrcReadback.PixelPtr(32, 32)^.Z));
+
     { Corner (4, 4): Viewport Red background (1, 0, 0) inverted by TScreenEffectNode -> Cyan (0, 255, 255) }
-    AssertEquals(Format('Inverted background (4,4) R must be 0 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d)]', [
+    AssertEquals(Format('Inverted background (4,4) R must be 0 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d), src=(%d,%d,%d,%d)]', [
       Readback.PixelPtr(4, 4)^.X, Readback.PixelPtr(4, 4)^.Y, Readback.PixelPtr(4, 4)^.Z, Readback.PixelPtr(4, 4)^.W,
-      Readback.PixelPtr(32, 32)^.X, Readback.PixelPtr(32, 32)^.Y, Readback.PixelPtr(32, 32)^.Z, Readback.PixelPtr(32, 32)^.W]),
+      Readback.PixelPtr(32, 32)^.X, Readback.PixelPtr(32, 32)^.Y, Readback.PixelPtr(32, 32)^.Z, Readback.PixelPtr(32, 32)^.W,
+      SrcReadback.PixelPtr(4, 4)^.X, SrcReadback.PixelPtr(4, 4)^.Y, SrcReadback.PixelPtr(4, 4)^.Z, SrcReadback.PixelPtr(4, 4)^.W]),
       0, Integer(Readback.PixelPtr(4, 4)^.X));
-    AssertEquals(Format('Inverted background (4,4) G must be 255 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d)]', [
+    AssertEquals(Format('Inverted background (4,4) G must be 255 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d), src=(%d,%d,%d,%d)]', [
       Readback.PixelPtr(4, 4)^.X, Readback.PixelPtr(4, 4)^.Y, Readback.PixelPtr(4, 4)^.Z, Readback.PixelPtr(4, 4)^.W,
-      Readback.PixelPtr(32, 32)^.X, Readback.PixelPtr(32, 32)^.Y, Readback.PixelPtr(32, 32)^.Z, Readback.PixelPtr(32, 32)^.W]),
+      Readback.PixelPtr(32, 32)^.X, Readback.PixelPtr(32, 32)^.Y, Readback.PixelPtr(32, 32)^.Z, Readback.PixelPtr(32, 32)^.W,
+      SrcReadback.PixelPtr(4, 4)^.X, SrcReadback.PixelPtr(4, 4)^.Y, SrcReadback.PixelPtr(4, 4)^.Z, SrcReadback.PixelPtr(4, 4)^.W]),
       255, Integer(Readback.PixelPtr(4, 4)^.Y));
     AssertEquals('Inverted background (4,4) B must be 255', 255, Integer(Readback.PixelPtr(4, 4)^.Z));
 
@@ -28788,6 +28804,7 @@ begin
     AssertEquals('Inverted 3D Blue box (32,32) G must be 255', 255, Integer(Readback.PixelPtr(32, 32)^.Y));
     AssertEquals('Inverted 3D Blue box (32,32) B must be 0', 0, Integer(Readback.PixelPtr(32, 32)^.Z));
   finally
+    FreeAndNil(SrcReadback);
     FreeAndNil(Readback);
     FreeAndNil(Scene);
     FreeAndNil(Viewport);
@@ -37310,8 +37327,10 @@ begin
     {$endif}
 
     { 2. Verify portability-sensitive PSO (pmPoint + bfConstantAlpha + unaligned stride) builds cleanly on live GPU }
-    MinVertSpv := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssVertex);
-    MinFragSpv := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssFragment);
+    AssertTrue('TryGetBuiltInSPIRV Primitive2D_VS',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssVertex, '', 'Primitive2D_VS', MinVertSpv));
+    AssertTrue('TryGetBuiltInSPIRV Primitive2D_FS',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssFragment, '', 'Primitive2D_FS', MinFragSpv));
     PortDesc := Default(TRHIGraphicsPipelineDesc);
     PortDesc.VertexShader := RealDev.CreateShaderModuleFromSPIRV(
       ssVertex, @MinVertSpv[0], Length(MinVertSpv), 'Phase120PortVS');
@@ -37326,7 +37345,7 @@ begin
       PortDesc.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
       PortDesc.BlendState.SrcColorBlendFactor := bfConstantAlpha;
       PortDesc.BlendState.DstColorBlendFactor := bfOneMinusConstantAlpha;
-      PortDesc.PushConstantSize := 64;
+      PortDesc.PushConstantSize := 32;
       PortDesc.PushConstantStages := [ssVertex, ssFragment];
       SetLength(PortDesc.ColorAttachmentFormats, 1);
       PortDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
@@ -37335,6 +37354,11 @@ begin
       SetLength(PortDesc.VertexInput.Bindings, 1);
       PortDesc.VertexInput.Bindings[0].Binding := 0;
       PortDesc.VertexInput.Bindings[0].Stride := 16;
+      SetLength(PortDesc.VertexInput.Attributes, 1);
+      PortDesc.VertexInput.Attributes[0].Location := 0;
+      PortDesc.VertexInput.Attributes[0].Binding := 0;
+      PortDesc.VertexInput.Attributes[0].Format := vafVector2;
+      PortDesc.VertexInput.Attributes[0].Offset := 0;
 
       PortPipe := RealDev.GetOrCreatePipeline(PortDesc);
       AssertTrue('Live hardware PSO creation must succeed', PortPipe <> nil);
