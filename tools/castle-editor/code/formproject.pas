@@ -699,6 +699,7 @@ type
       MenuItemAnimBlueprint: TMenuItem;
       MenuItemBehaviorTree: TMenuItem;
       MenuItemNiagaraStack: TMenuItem;
+      MenuItemWidgetAnim: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -818,6 +819,7 @@ type
     procedure MenuItemAnimBlueprintClick(Sender: TObject);
     procedure MenuItemBehaviorTreeClick(Sender: TObject);
     procedure MenuItemNiagaraStackClick(Sender: TObject);
+    procedure MenuItemWidgetAnimClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2973,6 +2975,11 @@ begin
   MenuItemNiagaraStack.Caption := 'Niagara Modular Emitter Stack & Curve Editor...';
   MenuItemNiagaraStack.OnClick := @MenuItemNiagaraStackClick;
   MenuItemDesign.Add(MenuItemNiagaraStack);
+
+  MenuItemWidgetAnim := TMenuItem.Create(MenuItemDesign);
+  MenuItemWidgetAnim.Caption := 'UMG Widget Animation Timeline & Anchor Slot Designer...';
+  MenuItemWidgetAnim.OnClick := @MenuItemWidgetAnimClick;
+  MenuItemDesign.Add(MenuItemWidgetAnim);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6579,6 +6586,12 @@ procedure TProjectForm.MenuItemNiagaraStackClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowNiagaraStackDialog;
+end;
+
+procedure TProjectForm.MenuItemWidgetAnimClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowWidgetAnimDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

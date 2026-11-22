@@ -212,6 +212,7 @@ uses
   TestToolAnimBlueprint,
   TestToolBehaviorTree,
   TestToolNiagaraStack,
+  TestToolWidgetAnim,
   TestCastleVulkanRHI;
 
 implementation

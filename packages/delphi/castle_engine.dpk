@@ -378,6 +378,7 @@ contains
   castleanimblueprint in '..\..\src\scene\castleanimblueprint.pas',
   castlebehaviortree in '..\..\src\scene\castlebehaviortree.pas',
   castleniagarastack in '..\..\src\scene\castleniagarastack.pas',
+  castlewidgetanim in '..\..\src\scene\castlewidgetanim.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1123,6 +1123,16 @@ begin
   AddToolDef('cge_simulate_niagara_stack',
     'Spawn, toggle stack modules, step simulation, or audit TCastleNiagaraSystem 4-stage modular VFX emitters.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'UMG Widget Animation operation: status, spawn_preset, play_clip, scrub, or fire_event (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleWidgetAnimator name (defaults to first WidgetAnimator in design).'));
+  P.Add('clipName', MakePropSchema('string', 'Clip name for play_clip (e.g. "Anim_ModalOpen" or "Anim_ButtonHover").'));
+  P.Add('timeSec', MakePropSchema('number', 'Timeline time in seconds for scrub (default 0.30).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: modal_bounce, hud_damage, or boss_banner (default modal_bounce).'));
+  AddToolDef('cge_animate_umg_widget',
+    'Spawn, scrub timeline, play forward/reverse clips, trigger UI events, or audit TCastleWidgetAnimator UMG 2D UI animations.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1275,6 +1285,11 @@ var
   NiagComp: TCastleNiagaraSystem;
   NiagPresetVal: TNiagaraSystemPreset;
   NiagModId: String;
+  UmgAudit: TUmgWidgetSceneAuditReport;
+  UmgComp: TCastleWidgetAnimator;
+  UmgPresetVal: TUmgWidgetAnimPreset;
+  UmgClipStr: String;
+  UmgTimeVal: Single;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2780,6 +2795,82 @@ begin
       begin
         OutPayload.Add('activeSystem', NiagComp.Name);
         OutPayload.Add('summaryBadge', NiagComp.NiagaraSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_animate_umg_widget' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    UmgClipStr := 'Anim_ModalOpen';
+    UmgTimeVal := 0.30;
+    UmgPresetVal := uwapModalPopupSlideBounceAndFade;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      UmgClipStr := Trim(ArgsObj.Get('clipName', 'Anim_ModalOpen'));
+      UmgTimeVal := ArgsObj.Get('timeSec', 0.30);
+      if SameText(ArgsObj.Get('preset', ''), 'hud_damage') then
+        UmgPresetVal := uwapHudDamageToastAndHealthFlash
+      else if SameText(ArgsObj.Get('preset', ''), 'boss_banner') then
+        UmgPresetVal := uwapBossHealthBannerStretchReveal;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'play_clip') or
+       SameText(ActionStr, 'scrub') or SameText(ActionStr, 'fire_event') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      UmgComp := TWidgetAnimHelper.SpawnWidgetAnimPresetInDesign(
+        DesignRoot, DesignOwner, UmgPresetVal);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn UMG Widget Animator');
+    end else
+      UmgComp := TWidgetAnimHelper.FindWidgetAnimatorByName(DesignRoot, DesignOwner, CompName);
+
+    if (UmgComp <> nil) and SameText(ActionStr, 'play_clip') then
+      UmgComp.PlayAnimation(UmgClipStr, upmForward, 1, 1.0)
+    else if (UmgComp <> nil) and SameText(ActionStr, 'scrub') then
+      UmgComp.ScrubTimeline(UmgTimeVal)
+    else if (UmgComp <> nil) and SameText(ActionStr, 'fire_event') then
+      UmgComp.FireUiEvent('', uetOnShow);
+
+    UmgAudit := TWidgetAnimHelper.AuditWidgetAnimatorsInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('animatorCount', UmgAudit.AnimatorCount);
+      OutPayload.Add('slotCount', UmgAudit.SlotCount);
+      OutPayload.Add('clipCount', UmgAudit.ClipCount);
+      OutPayload.Add('trackCount', UmgAudit.TrackCount);
+      OutPayload.Add('keyframeCount', UmgAudit.KeyframeCount);
+      OutPayload.Add('bindingCount', UmgAudit.BindingCount);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if UmgComp <> nil then
+      begin
+        OutPayload.Add('activeAnimator', UmgComp.Name);
+        OutPayload.Add('currentTimeSec', UmgComp.CurrentTimeSec);
+        OutPayload.Add('summaryBadge', UmgComp.WidgetAnimSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

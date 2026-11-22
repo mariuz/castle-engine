@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="243">
+    <Units Count="245">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1297,6 +1297,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormNiagaraStack"/>
       </Unit242>
+      <Unit243>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolwidgetanim.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolWidgetAnim"/>
+      </Unit243>
+      <Unit244>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formwidgetanim.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormWidgetAnim"/>
+      </Unit244>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

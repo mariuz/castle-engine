@@ -89,7 +89,7 @@ begin
   FOnModified := AOnModified;
   FOnRefresh := AOnRefresh;
 
-  Caption := 'Niagara Modular Emitter Stack & Curve Editor (105 UE Studios / 28 MCP)';
+  Caption := 'Niagara Modular Emitter Stack & Curve Editor (106 UE Studios / 29 MCP)';
   Position := poScreenCenter;
   Width := 1160;
   Height := 710;
@@ -320,6 +320,34 @@ begin
         C.Font.Color := RGBToColor(225, 232, 242);
         C.TextOut(CardL + 36, YCursor + 5,
           TCastleNiagaraSystem.ModuleKindTitle(M.Kind) + '  [' + M.ModuleId + ']');
+
+        C.Font.Color := RGBToColor(142, 198, 255);
+        case M.Kind of
+          nmkSpawnBurstInstantaneous:
+            C.TextOut(CardR - 132, YCursor + 5, Format('Burst=%d', [Round(M.ParamA)]));
+          nmkSpawnRate:
+            C.TextOut(CardR - 132, YCursor + 5, Format('%.0f pts/s', [M.ParamA]));
+          nmkInitializeParticle:
+            C.TextOut(CardR - 156, YCursor + 5, Format('Life=%.1f..%.1fs', [M.ParamA, M.ParamB]));
+          nmkSphereLocation:
+            C.TextOut(CardR - 132, YCursor + 5, Format('R=%.1fm', [M.ParamA]));
+          nmkAddVelocityCone:
+            C.TextOut(CardR - 156, YCursor + 5, Format('%.1f..%.1f m/s', [M.ParamA, M.ParamB]));
+          nmkGravityForce:
+            C.TextOut(CardR - 144, YCursor + 5, Format('G=(0,%.1f,0)', [M.VecA.Y]));
+          nmkDragForce:
+            C.TextOut(CardR - 132, YCursor + 5, Format('Drag=%.2f', [M.ParamA]));
+          nmkCurlNoiseForce:
+            C.TextOut(CardR - 156, YCursor + 5, Format('Str=%.1f Freq=%.2f', [M.ParamA, M.ParamB]));
+          nmkPointAttractor:
+            C.TextOut(CardR - 156, YCursor + 5, Format('Pull=%.0f Y=%.1fm', [M.ParamA, M.VecA.Y]));
+          nmkScaleSizeByLifeCurve:
+            C.TextOut(CardR - 132, YCursor + 5, '4-Key LUT');
+          nmkColorOverLifeLut:
+            C.TextOut(CardR - 132, YCursor + 5, 'Cyan->Violet');
+          nmkFloorCollisionBounce:
+            C.TextOut(CardR - 156, YCursor + 5, Format('Bounce=%.2f +Spark', [M.ParamB]));
+        end;
         Inc(YCursor, 28);
       end;
     Inc(YCursor, 8);
@@ -370,7 +398,7 @@ end;
 procedure TNiagaraStackForm.PaintCurveEditor(Sender: TObject);
 var
   C: TCanvas;
-  W, H, LPad, RPad, TPad, BPad, S, X0, Y0, X1, Y1: Integer;
+  W, H, LPad, RPad, TPad, BPad, S, K, X0, Y0, X1, Y1, KX, KY: Integer;
   CurveVal: TNiagaraFloatCurve;
   T0, T1, V0, V1: Single;
 begin
@@ -386,10 +414,26 @@ begin
   C.TextOut(10, 6, 'Scale Size by Life Curve (NormalizedAge 0..1)');
 
   LPad := 24; RPad := W - 18; TPad := 28; BPad := H - 18;
+  C.Pen.Width := 1;
   C.Pen.Color := RGBToColor(58, 66, 78);
   C.Rectangle(LPad, TPad, RPad, BPad);
 
+  { Subtle vertical quarter-age gridlines }
+  C.Pen.Color := RGBToColor(36, 40, 48);
+  for K := 1 to 3 do
+  begin
+    KX := LPad + Round((K * 0.25) * (RPad - LPad));
+    C.Line(KX, TPad + 1, KX, BPad - 1);
+  end;
+
   CurveVal := TNiagaraFloatCurve.DefaultBellCurve;
+  if (FActiveSys <> nil) and (FSelectedModuleId <> '') then
+  begin
+    K := FActiveSys.FindModuleIndex(FSelectedModuleId);
+    if K >= 0 then
+      CurveVal := FActiveSys.Modules[K].Curve;
+  end;
+
   C.Pen.Color := RGBToColor(96, 232, 148);
   C.Pen.Width := 2;
   for S := 0 to 31 do
@@ -403,6 +447,18 @@ begin
     Y0 := BPad - Round((V0 / 1.5) * (BPad - TPad));
     Y1 := BPad - Round((V1 / 1.5) * (BPad - TPad));
     C.Line(X0, Y0, X1, Y1);
+  end;
+
+  { 4 Keyframe Handles }
+  C.Pen.Width := 1;
+  C.Pen.Color := RGBToColor(24, 26, 30);
+  C.Brush.Style := bsSolid;
+  C.Brush.Color := RGBToColor(255, 206, 72);
+  for K := 0 to 3 do
+  begin
+    KX := LPad + Round(EnsureRange(CurveVal.KeyTimes[K], 0.0, 1.0) * (RPad - LPad));
+    KY := BPad - Round(EnsureRange(CurveVal.KeyValues[K] / 1.5, 0.0, 1.0) * (BPad - TPad));
+    C.Rectangle(KX - 4, KY - 4, KX + 5, KY + 5);
   end;
 end;
 
