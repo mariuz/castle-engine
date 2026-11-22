@@ -7147,7 +7147,9 @@ begin
   begin
     FillChar(BufInfo, SizeOf(BufInfo), 0);
     BufInfo.sType := VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    BufInfo.size := ADesc.Size;
+    { Pad underlying VkBuffer / MTLBuffer size to at least 16-byte alignment on real GPUs
+      (e.g. 12-byte 6-index UInt16 quad IBOs on Apple Paravirtual / Metal) while keeping FDesc.Size exact. }
+    BufInfo.size := Max(VkDeviceSize(16), (VkDeviceSize(ADesc.Size) + 15) and not VkDeviceSize(15));
     BufInfo.sharingMode := VK_SHARING_MODE_EXCLUSIVE;
     BufInfo.usage := BuildVkUsageFlags;
 

@@ -571,14 +571,14 @@ begin
     ScreenPoint[3].TexCoord := Vector2(0, 1);
 
     BufDesc := TRHIBufferDesc.Create(SizeOf(ScreenPoint),
-      [buVertex], muCpuToGpu, 'TCastleScreenEffects.QuadVBO');
+      [buVertex, buTransferDst], muGpuOnly, 'TCastleScreenEffects.QuadVBO');
     FRHIScreenQuadVBO := RHIDevice.CreateBuffer(BufDesc, @ScreenPoint[0]);
   end;
 
   if FRHIScreenQuadIBO = nil then
   begin
     BufDesc := TRHIBufferDesc.Create(SizeOf(QuadIndices),
-      [buIndex], muCpuToGpu, 'TCastleScreenEffects.QuadIBO');
+      [buIndex, buTransferDst], muGpuOnly, 'TCastleScreenEffects.QuadIBO');
     FRHIScreenQuadIBO := RHIDevice.CreateBuffer(BufDesc, @QuadIndices[0]);
   end;
 
@@ -769,6 +769,13 @@ begin
     end;
 
     PassPipeline := APassPipelines[I];
+    if PassPipeline = nil then
+    begin
+      if ANeedDepth then
+        PassPipeline := FRHIScreenDefaultPipelineDepth
+      else
+        PassPipeline := FRHIScreenDefaultPipelineColor;
+    end;
     if (PassPipeline <> nil) and
        ((Length(PassPipeline.Desc.ColorAttachmentFormats) <> 1) or
         (PassPipeline.Desc.ColorAttachmentFormats[0] <> PassColorFormat) or

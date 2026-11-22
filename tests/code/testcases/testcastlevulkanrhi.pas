@@ -28801,12 +28801,20 @@ begin
         [Viewport.GetScreenEffectRHIPipeline(0)], 64, 64, False, DirectColorTex, 0.1, 100.0);
       RealDev.EndFrameAndPresent;
       DirectReadback := RealDev.GrabTextureImage(DirectColorTex, Rectangle(0, 0, 64, 64));
-      DiagExtra := Format(', direct=(%d,%d,%d,%d), directCenter=(%d,%d,%d,%d), vpY=%.1f, scY=%d, draws=%d', [
+      DiagExtra := Format(', direct=(%d,%d,%d,%d), pipeOk=%d', [
         DirectReadback.PixelPtr(4, 4)^.X, DirectReadback.PixelPtr(4, 4)^.Y,
         DirectReadback.PixelPtr(4, 4)^.Z, DirectReadback.PixelPtr(4, 4)^.W,
-        DirectReadback.PixelPtr(32, 32)^.X, DirectReadback.PixelPtr(32, 32)^.Y,
-        DirectReadback.PixelPtr(32, 32)^.Z, DirectReadback.PixelPtr(32, 32)^.W,
-        RealCmd.LastVkViewportY, RealCmd.LastVkScissorOffsetY, Integer(Viewport.RHIScreenDrawCount)]);
+        Ord(Viewport.GetScreenEffectRHIPipeline(0) <> nil)]);
+      FreeAndNil(DirectReadback);
+      RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+      SetActiveCommandList(RealCmd);
+      Viewport.ExecuteRHIScreenEffectPasses(
+        [nil], 64, 64, False, DirectColorTex, 0.1, 100.0);
+      RealDev.EndFrameAndPresent;
+      DirectReadback := RealDev.GrabTextureImage(DirectColorTex, Rectangle(0, 0, 64, 64));
+      DiagExtra := DiagExtra + Format(', defBuiltin=(%d,%d,%d,%d)', [
+        DirectReadback.PixelPtr(4, 4)^.X, DirectReadback.PixelPtr(4, 4)^.Y,
+        DirectReadback.PixelPtr(4, 4)^.Z, DirectReadback.PixelPtr(4, 4)^.W]);
     end;
 
     { Corner (4, 4): Viewport Red background (1, 0, 0) inverted by TScreenEffectNode -> Cyan (0, 255, 255) }
