@@ -5849,7 +5849,7 @@ end;
 function ComputePipelineKeyHashEx(const ADesc: TRHIGraphicsPipelineDesc;
   const AIgnoreExtendedDynamicStates: Boolean): UInt64;
 var
-  I: Integer;
+  I, Count: Integer;
 begin
   Result := FNV1aOffsetBasis64;
   HashUInt64FNV1a(Result, PtrUInt(ADesc.VertexShader));
@@ -5877,6 +5877,11 @@ begin
   HashBytesFNV1a(Result, ADesc.PushConstantStages, SizeOf(ADesc.PushConstantStages));
   HashBytesFNV1a(Result, ADesc.DepthAttachmentFormat, SizeOf(ADesc.DepthAttachmentFormat));
   HashBytesFNV1a(Result, ADesc.SampleCount, SizeOf(ADesc.SampleCount));
+
+  Count := Length(ADesc.DescriptorSetLayouts);
+  HashBytesFNV1a(Result, Count, SizeOf(Count));
+  for I := 0 to High(ADesc.DescriptorSetLayouts) do
+    HashUInt64FNV1a(Result, PtrUInt(ADesc.DescriptorSetLayouts[I]));
 
   for I := 0 to High(ADesc.VertexInput.Bindings) do
     HashBytesFNV1a(Result, ADesc.VertexInput.Bindings[I], SizeOf(TRHIVertexBindingDesc));
@@ -9543,10 +9548,14 @@ begin
 
   FillChar(DepthStencil, SizeOf(DepthStencil), 0);
   DepthStencil.sType := VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-  DepthStencil.depthTestEnable := Ord(ADesc.DepthStencil.DepthTestEnable);
-  DepthStencil.depthWriteEnable := Ord(ADesc.DepthStencil.DepthWriteEnable);
-  DepthStencil.depthCompareOp := RHIToVkCompareOp(ADesc.DepthStencil.DepthCompareOp);
-  DepthStencil.stencilTestEnable := Ord(ADesc.DepthStencil.StencilTestEnable);
+  if ADesc.DepthAttachmentFormat <> pfUndefined then
+  begin
+    DepthStencil.depthTestEnable := Ord(ADesc.DepthStencil.DepthTestEnable);
+    DepthStencil.depthWriteEnable := Ord(ADesc.DepthStencil.DepthWriteEnable);
+    DepthStencil.depthCompareOp := RHIToVkCompareOp(ADesc.DepthStencil.DepthCompareOp);
+    if ADesc.DepthAttachmentFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt] then
+      DepthStencil.stencilTestEnable := Ord(ADesc.DepthStencil.StencilTestEnable);
+  end;
   DepthStencil.front := RHIToVkStencilOpState(ADesc.DepthStencil.FrontStencil);
   DepthStencil.back := RHIToVkStencilOpState(ADesc.DepthStencil.BackStencil);
 
@@ -11076,8 +11085,15 @@ begin
     SetFrontFace(FCurrentPipeline.Desc.Rasterizer.FrontFace);
     if FCurrentPipeline.Desc.MeshShader = nil then
       SetPrimitiveTopology(FCurrentPipeline.Desc.Topology);
-    SetDepthTestEnable(FCurrentPipeline.Desc.DepthStencil.DepthTestEnable);
-    SetDepthWriteEnable(FCurrentPipeline.Desc.DepthStencil.DepthWriteEnable);
+    if FIsRendering and (not FActiveRenderingHasDepth) then
+    begin
+      SetDepthTestEnable(False);
+      SetDepthWriteEnable(False);
+    end else
+    begin
+      SetDepthTestEnable(FCurrentPipeline.Desc.DepthStencil.DepthTestEnable);
+      SetDepthWriteEnable(FCurrentPipeline.Desc.DepthStencil.DepthWriteEnable);
+    end;
     SetDepthCompareOp(FCurrentPipeline.Desc.DepthStencil.DepthCompareOp);
   end;
 end;
@@ -27973,8 +27989,17 @@ begin
 end;
 
 procedure TVulkanRHIDevice.PickPhysicalDevice;
+const
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES_LOCAL = VkStructureType(1000168000);
+type
+  TVkPhysicalDeviceMaintenance3PropertiesLocal = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    maxPerSetDescriptors: UInt32;
+    maxMemoryAllocationSize: VkDeviceSize;
+  end;
 var
-  DeviceCount, I: Cardinal;
+  DeviceCount, I, RequestedBindlessMax: Cardinal;
   Devices: array of VkPhysicalDevice;
   Props, ChosenProps: VkPhysicalDeviceProperties;
   Features: VkPhysicalDeviceFeatures;
@@ -27999,6 +28024,7 @@ var
   HasSpirv14: Boolean;
   GplProps: VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
   DescIdxProps: VkPhysicalDeviceDescriptorIndexingProperties;
+  Maint3Props: TVkPhysicalDeviceMaintenance3PropertiesLocal;
   HasGplFeature, HasExtDynFeature, HasSync2Feature, HasTimelineFeature: Boolean;
   DeviceFilterEnv, VendorFilterEnv, CandidateDevName: String;
   BestScore, CandidateScore: Int64;
@@ -28199,6 +28225,8 @@ begin
   DescIdxFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
   FillChar(DescIdxProps, SizeOf(DescIdxProps), 0);
   DescIdxProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+  FillChar(Maint3Props, SizeOf(Maint3Props), 0);
+  Maint3Props.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES_LOCAL;
 
   if ((FDeviceApiVersion >= VK_API_VERSION_1_2) or IsDeviceExtensionSupported(VK_EXT_descriptor_indexing)) and
      Assigned(vkGetPhysicalDeviceFeatures2) then
@@ -28210,11 +28238,27 @@ begin
 
     if Assigned(vkGetPhysicalDeviceProperties2) then
     begin
+      if (FDeviceApiVersion >= VK_API_VERSION_1_1) or IsDeviceExtensionSupported(VK_KHR_maintenance3) then
+        DescIdxProps.pNext := @Maint3Props;
       FillChar(Props2, SizeOf(Props2), 0);
       Props2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
       Props2.pNext := @DescIdxProps;
       vkGetPhysicalDeviceProperties2(FPhysicalDevice, @Props2);
     end;
+  end;
+
+  { Per VUID-vkCreateDescriptorSetLayout-support-09582, Set 1 (Binding 0 = MaxBindlessTextures sampled
+    images + Binding 1 = 1 storage buffer) must stay within VkPhysicalDeviceMaintenance3Properties.maxPerSetDescriptors
+    (e.g. 1212 on Apple Paravirtual device / MoltenVK without tier-2 argument buffers). }
+  RequestedBindlessMax := 4096;
+  if Maint3Props.maxPerSetDescriptors > 4 then
+    RequestedBindlessMax := Min(RequestedBindlessMax, Maint3Props.maxPerSetDescriptors - 4);
+  if (DescIdxFeatures.descriptorBindingSampledImageUpdateAfterBind = VK_FALSE) then
+  begin
+    if ChosenProps.limits.maxPerStageDescriptorSampledImages > 0 then
+      RequestedBindlessMax := Min(RequestedBindlessMax, ChosenProps.limits.maxPerStageDescriptorSampledImages);
+    if ChosenProps.limits.maxDescriptorSetSampledImages > 0 then
+      RequestedBindlessMax := Min(RequestedBindlessMax, ChosenProps.limits.maxDescriptorSetSampledImages);
   end;
 
   ResolveDescriptorIndexingConfig(
@@ -28223,7 +28267,7 @@ begin
     IsDeviceExtensionSupported(VK_KHR_maintenance3),
     DescIdxFeatures,
     DescIdxProps,
-    4096,
+    RequestedBindlessMax,
     FSupportsBindlessTextures,
     FSupportsBindlessUpdateAfterBind,
     FMaxBindlessTextures,
@@ -29211,10 +29255,14 @@ begin
 
   FillChar(DepthStencil, SizeOf(DepthStencil), 0);
   DepthStencil.sType := VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-  DepthStencil.depthTestEnable := Ord(ADesc.DepthStencil.DepthTestEnable);
-  DepthStencil.depthWriteEnable := Ord(ADesc.DepthStencil.DepthWriteEnable);
-  DepthStencil.depthCompareOp := RHIToVkCompareOp(ADesc.DepthStencil.DepthCompareOp);
-  DepthStencil.stencilTestEnable := Ord(ADesc.DepthStencil.StencilTestEnable);
+  if ADesc.DepthAttachmentFormat <> pfUndefined then
+  begin
+    DepthStencil.depthTestEnable := Ord(ADesc.DepthStencil.DepthTestEnable);
+    DepthStencil.depthWriteEnable := Ord(ADesc.DepthStencil.DepthWriteEnable);
+    DepthStencil.depthCompareOp := RHIToVkCompareOp(ADesc.DepthStencil.DepthCompareOp);
+    if ADesc.DepthAttachmentFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt] then
+      DepthStencil.stencilTestEnable := Ord(ADesc.DepthStencil.StencilTestEnable);
+  end;
   DepthStencil.front := RHIToVkStencilOpState(ADesc.DepthStencil.FrontStencil);
   DepthStencil.back := RHIToVkStencilOpState(ADesc.DepthStencil.BackStencil);
 

@@ -509,7 +509,7 @@ begin
 
   if (FRHIScreenTextureDest = nil) or
      (FRHIScreenTextureSrc = nil) or
-     (ANeedDepth <> (FRHIScreenTextureDepth <> nil)) or
+     (FRHIScreenTextureDepth = nil) or
      (ScreenEffectRTT = nil) or
      (ScreenEffectTextureWidth <> AWidth) or
      (ScreenEffectTextureHeight <> AHeight) then
@@ -530,20 +530,17 @@ begin
     TexDesc.DebugName := 'TCastleScreenEffects.Src';
     FRHIScreenTextureSrc := RHIDevice.CreateTexture(TexDesc);
 
-    if ANeedDepth then
-    begin
-      TexDesc := TRHITextureDesc.Create2D(AWidth, AHeight, pfD32_Float,
-        [tuDepthStencil, tuSampled, tuTransferSrc], 1, 1);
-      TexDesc.DebugName := 'TCastleScreenEffects.Depth';
-      FRHIScreenTextureDepth := RHIDevice.CreateTexture(TexDesc);
-    end;
+    { Always allocate a depth attachment for ScreenEffectRTT (matching OpenGL's
+      TGLRenderToTexture depth renderbuffer) so 3D viewports rendered into
+      FRHIScreenTextureDest retain hardware depth testing even when NeedsDepth = False. }
+    TexDesc := TRHITextureDesc.Create2D(AWidth, AHeight, pfD32_Float,
+      [tuDepthStencil, tuSampled, tuTransferSrc], 1, 1);
+    TexDesc.DebugName := 'TCastleScreenEffects.Depth';
+    FRHIScreenTextureDepth := RHIDevice.CreateTexture(TexDesc);
 
     ScreenEffectRTT := TGLRenderToTexture.Create(AWidth, AHeight);
     ScreenEffectRTT.SetRHITexture(FRHIScreenTextureDest, FRHIScreenTextureDepth);
-    if ANeedDepth then
-      ScreenEffectRTT.Buffer := tbColorAndDepth
-    else
-      ScreenEffectRTT.Buffer := tbColor;
+    ScreenEffectRTT.Buffer := tbColorAndDepth;
     ScreenEffectRTT.Stencil := False;
     ScreenEffectRTT.GLContextOpen;
   end;
@@ -591,7 +588,7 @@ begin
     BindingsColorOnly[0].Binding := 0;
     BindingsColorOnly[0].DescriptorType := dtCombinedImageSampler;
     BindingsColorOnly[0].Count := 1;
-    BindingsColorOnly[0].StageFlags := [ssFragment];
+    BindingsColorOnly[0].StageFlags := [ssVertex, ssFragment];
     FRHIScreenLayoutColorOnly := RHIDevice.CreateDescriptorSetLayout(BindingsColorOnly);
   end;
 
@@ -601,11 +598,11 @@ begin
     BindingsColorDepth[0].Binding := 0;
     BindingsColorDepth[0].DescriptorType := dtCombinedImageSampler;
     BindingsColorDepth[0].Count := 1;
-    BindingsColorDepth[0].StageFlags := [ssFragment];
+    BindingsColorDepth[0].StageFlags := [ssVertex, ssFragment];
     BindingsColorDepth[1].Binding := 1;
     BindingsColorDepth[1].DescriptorType := dtCombinedImageSampler;
     BindingsColorDepth[1].Count := 1;
-    BindingsColorDepth[1].StageFlags := [ssFragment];
+    BindingsColorDepth[1].StageFlags := [ssVertex, ssFragment];
     FRHIScreenLayoutColorAndDepth := RHIDevice.CreateDescriptorSetLayout(BindingsColorDepth);
   end;
 
@@ -965,10 +962,7 @@ var
     if RHIDevice <> nil then
     begin
       EnsureRHIScreenResources(SR.Width, SR.Height, CurrentScreenEffectsNeedDepth);
-      if CurrentScreenEffectsNeedDepth then
-        ScreenEffectRTT.Buffer := tbColorAndDepth
-      else
-        ScreenEffectRTT.Buffer := tbColor;
+      ScreenEffectRTT.Buffer := tbColorAndDepth;
       ScreenEffectRTT.SetRHITexture(FRHIScreenTextureDest, FRHIScreenTextureDepth);
       if RenderContext <> nil then
       begin

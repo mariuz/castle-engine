@@ -780,13 +780,13 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
     Bindings[0].Binding := 0;
     Bindings[0].DescriptorType := dtCombinedImageSampler;
     Bindings[0].Count := 1;
-    Bindings[0].StageFlags := [ssFragment];
+    Bindings[0].StageFlags := [ssVertex, ssFragment];
     if NeedsDepth then
     begin
       Bindings[1].Binding := 1;
       Bindings[1].DescriptorType := dtCombinedImageSampler;
       Bindings[1].Count := 1;
-      Bindings[1].StageFlags := [ssFragment];
+      Bindings[1].StageFlags := [ssVertex, ssFragment];
     end;
     FRHIDescriptorLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
 

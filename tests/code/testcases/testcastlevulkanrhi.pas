@@ -28773,8 +28773,14 @@ begin
     Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
 
     { Corner (4, 4): Viewport Red background (1, 0, 0) inverted by TScreenEffectNode -> Cyan (0, 255, 255) }
-    AssertEquals('Inverted background (4,4) R must be 0', 0, Integer(Readback.PixelPtr(4, 4)^.X));
-    AssertEquals('Inverted background (4,4) G must be 255', 255, Integer(Readback.PixelPtr(4, 4)^.Y));
+    AssertEquals(Format('Inverted background (4,4) R must be 0 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d)]', [
+      Readback.PixelPtr(4, 4)^.X, Readback.PixelPtr(4, 4)^.Y, Readback.PixelPtr(4, 4)^.Z, Readback.PixelPtr(4, 4)^.W,
+      Readback.PixelPtr(32, 32)^.X, Readback.PixelPtr(32, 32)^.Y, Readback.PixelPtr(32, 32)^.Z, Readback.PixelPtr(32, 32)^.W]),
+      0, Integer(Readback.PixelPtr(4, 4)^.X));
+    AssertEquals(Format('Inverted background (4,4) G must be 255 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d)]', [
+      Readback.PixelPtr(4, 4)^.X, Readback.PixelPtr(4, 4)^.Y, Readback.PixelPtr(4, 4)^.Z, Readback.PixelPtr(4, 4)^.W,
+      Readback.PixelPtr(32, 32)^.X, Readback.PixelPtr(32, 32)^.Y, Readback.PixelPtr(32, 32)^.Z, Readback.PixelPtr(32, 32)^.W]),
+      255, Integer(Readback.PixelPtr(4, 4)^.Y));
     AssertEquals('Inverted background (4,4) B must be 255', 255, Integer(Readback.PixelPtr(4, 4)^.Z));
 
     { Center (32, 32): Blue 3D box (0, 0, 1) inverted by TScreenEffectNode -> Yellow (255, 255, 0) }
