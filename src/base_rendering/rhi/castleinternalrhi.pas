@@ -759,10 +759,12 @@ type
     FActiveRenderingHasDepth: Boolean;
     FActiveRenderingDepthFormat: TRHIPixelFormat;
     FActiveRenderingSampleCount: Cardinal;
+    FCurrentPassHasCommands: Boolean;
   public
     constructor Create(const ALevel: TRHICommandListLevel = cllPrimary);
     property Level: TRHICommandListLevel read FLevel;
     property IsRendering: Boolean read FIsRendering;
+    property CurrentPassHasCommands: Boolean read FCurrentPassHasCommands;
     property ActiveRenderingInfo: TRHIRenderingInfo read FActiveRenderingInfo;
     property ActiveRenderingHasColor: Boolean read FActiveRenderingHasColor;
     property ActiveRenderingColorFormat: TRHIPixelFormat read FActiveRenderingColorFormat;

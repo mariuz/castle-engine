@@ -10432,6 +10432,7 @@ begin
   end;
 
   FIsRendering := True;
+  FCurrentPassHasCommands := False;
   FActiveRenderingInfo := Info;
   FActiveRenderingInfo.ColorAttachments := Copy(Info.ColorAttachments);
   if FViewportPendingReapply and
@@ -10816,6 +10817,7 @@ end;
 procedure TVulkanRHICommandList.EndRendering;
 begin
   FIsRendering := False;
+  FCurrentPassHasCommands := False;
   FViewportPendingReapply := False;
   FScissorPendingReapply := False;
   if FInFallbackRenderPass then
@@ -10873,6 +10875,7 @@ begin
 
   if FIsRendering then
   begin
+    FCurrentPassHasCommands := True;
     Inc(FClearAttachmentCallCount);
     if (FHandle <> nil) and Assigned(vkCmdClearAttachments) then
     begin
@@ -11398,6 +11401,7 @@ end;
 procedure TVulkanRHICommandList.Draw(const VertexCount, InstanceCount,
   FirstVertex, FirstInstance: Cardinal);
 begin
+  FCurrentPassHasCommands := True;
   if (FHandle <> nil) and Assigned(vkCmdDraw) then
     vkCmdDraw(FHandle, VertexCount, InstanceCount, FirstVertex, FirstInstance);
 end;
@@ -11405,6 +11409,7 @@ end;
 procedure TVulkanRHICommandList.DrawIndexed(const IndexCount, InstanceCount,
   FirstIndex: Cardinal; const VertexOffset: Integer; const FirstInstance: Cardinal);
 begin
+  FCurrentPassHasCommands := True;
   if (FHandle <> nil) and Assigned(vkCmdDrawIndexed) then
     vkCmdDrawIndexed(FHandle, IndexCount, InstanceCount, FirstIndex, VertexOffset, FirstInstance);
 end;
@@ -11416,6 +11421,7 @@ var
   VkBuf: VkBuffer;
 begin
   if IndirectBuffer = nil then Exit;
+  FCurrentPassHasCommands := True;
   Inc(FIndirectDrawCallCount);
   FLastEffectiveIndirectDrawCount := DrawCount;
   if (FHandle <> nil) and Assigned(vkCmdDrawIndirect) and (DrawCount > 0) then
@@ -11441,6 +11447,7 @@ var
   VkBuf: VkBuffer;
 begin
   if IndirectBuffer = nil then Exit;
+  FCurrentPassHasCommands := True;
   Inc(FIndirectDrawCallCount);
   FLastEffectiveIndirectDrawCount := DrawCount;
   if (FHandle <> nil) and Assigned(vkCmdDrawIndexedIndirect) and (DrawCount > 0) then
@@ -11468,6 +11475,7 @@ var
   VkBuf: VkBuffer;
 begin
   if (IndirectBuffer = nil) or (CountBuffer = nil) then Exit;
+  FCurrentPassHasCommands := True;
 
   EffectiveCount := MaxDrawCount;
   if (CountBuffer.Desc.MemoryUsage in [muCpuToGpu, muGpuToCpu]) and
@@ -11525,6 +11533,7 @@ var
   VkBuf: VkBuffer;
 begin
   if (IndirectBuffer = nil) or (CountBuffer = nil) then Exit;
+  FCurrentPassHasCommands := True;
 
   EffectiveCount := MaxDrawCount;
   if (CountBuffer.Desc.MemoryUsage in [muCpuToGpu, muGpuToCpu]) and
@@ -11574,6 +11583,7 @@ procedure TVulkanRHICommandList.DrawMeshTasks(const GroupCountX: Cardinal;
   const GroupCountY: Cardinal; const GroupCountZ: Cardinal);
 begin
   if (GroupCountX = 0) or (GroupCountY = 0) or (GroupCountZ = 0) then Exit;
+  FCurrentPassHasCommands := True;
   Inc(FMeshTasksDrawCallCount);
   if (FHandle <> nil) and (FDevice <> nil) and
      FDevice.SupportsMeshShaders and Assigned(vkCmdDrawMeshTasksEXT) then
@@ -11584,6 +11594,7 @@ procedure TVulkanRHICommandList.DrawMeshTasksIndirect(const IndirectBuffer: TRHI
   const Offset: PtrUInt; const DrawCount: Cardinal; const Stride: Cardinal);
 begin
   if (IndirectBuffer = nil) or (DrawCount = 0) then Exit;
+  FCurrentPassHasCommands := True;
   Inc(FMeshTasksDrawCallCount);
   Inc(FIndirectDrawCallCount);
   FLastEffectiveIndirectDrawCount := DrawCount;
@@ -11655,6 +11666,7 @@ var
 begin
   if Length(SecondaryCommandLists) = 0 then
     Exit;
+  FCurrentPassHasCommands := True;
 
   if FIsRendering and (not FActiveRenderingInfo.ContentsSecondaryCommandBuffers) then
   begin

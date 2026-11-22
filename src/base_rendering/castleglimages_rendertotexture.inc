@@ -830,10 +830,17 @@ begin
           FRHISuspendedOuterPass := True;
           FRHISuspendedRenderingInfo := ActiveCommandList.ActiveRenderingInfo;
           FRHISuspendedRenderingInfo.ColorAttachments := Copy(ActiveCommandList.ActiveRenderingInfo.ColorAttachments);
-          for I := 0 to High(FRHISuspendedRenderingInfo.ColorAttachments) do
-            FRHISuspendedRenderingInfo.ColorAttachments[I].LoadOp := loLoad;
-          if FRHISuspendedRenderingInfo.HasDepthAttachment then
-            FRHISuspendedRenderingInfo.DepthAttachment.LoadOp := loLoad;
+          { Only switch to loLoad when draws or clears were already recorded in the outer pass;
+            if the outer pass had 0 commands, preserve its original LoadOp (e.g. loClear) so
+            tile-based / paravirtualized GPUs (MoltenVK Apple Paravirtual device) do not rely on
+            loading from a 0-draw empty render pass encoder. }
+          if ActiveCommandList.CurrentPassHasCommands then
+          begin
+            for I := 0 to High(FRHISuspendedRenderingInfo.ColorAttachments) do
+              FRHISuspendedRenderingInfo.ColorAttachments[I].LoadOp := loLoad;
+            if FRHISuspendedRenderingInfo.HasDepthAttachment then
+              FRHISuspendedRenderingInfo.DepthAttachment.LoadOp := loLoad;
+          end;
           ActiveCommandList.EndRendering;
         end else
           FRHISuspendedOuterPass := False;

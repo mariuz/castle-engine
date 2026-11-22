@@ -679,7 +679,8 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
     ShaderGen: TCastleShaderGeneratorRHI;
     Bindings: array of TRHIDescriptorBindingDesc;
     PipeDesc: TRHIGraphicsPipelineDesc;
-    NeedsDepth: Boolean;
+    NeedsDepth, HasCustomVert: Boolean;
+    ActiveStages: TRHIShaderStageFlags;
   begin
     CompShader := nil;
     UserVertSource := '';
@@ -709,6 +710,11 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
       Exit;
 
     NeedsDepth := Node.FdNeedsDepth.Value;
+    HasCustomVert := Trim(UserVertSource) <> '';
+    if HasCustomVert then
+      ActiveStages := [ssVertex, ssFragment]
+    else
+      ActiveStages := [ssFragment];
     ShaderGen := TCastleShaderGeneratorRHI.Create(RHIDevice.Capabilities.Backend);
     try
       DefaultMainVS :=
@@ -721,18 +727,18 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
       FRHIUserEffectLayout := ShaderGen.ExtractUserEffectLayout(
         UserVertSource, UserFragSource, '', 4);
 
-      if Trim(UserVertSource) <> '' then
+      if HasCustomVert then
       begin
         UpgradedVertSource := ShaderGen.UpgradeUserEffectStageSource(
           ssVertex, UserVertSource, FRHIUserEffectLayout);
         if Pos('main(', UpgradedVertSource) = 0 then
           UpgradedVertSource := UpgradedVertSource + LineEnding + DefaultMainVS;
         FRHIVertexGLSL :=
-          ShaderGen.GenerateScreenEffectPreamble(ssVertex, NeedsDepth) + LineEnding +
+          ShaderGen.GenerateScreenEffectPreamble(ssVertex, NeedsDepth, True) + LineEnding +
           UpgradedVertSource;
       end else
         FRHIVertexGLSL :=
-          ShaderGen.GenerateScreenEffectPreamble(ssVertex, NeedsDepth) + LineEnding +
+          ShaderGen.GenerateScreenEffectPreamble(ssVertex, NeedsDepth, False) + LineEnding +
           DefaultMainVS;
 
       ScreenLibFrag :=
@@ -780,13 +786,13 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
     Bindings[0].Binding := 0;
     Bindings[0].DescriptorType := dtCombinedImageSampler;
     Bindings[0].Count := 1;
-    Bindings[0].StageFlags := [ssVertex, ssFragment];
+    Bindings[0].StageFlags := ActiveStages;
     if NeedsDepth then
     begin
       Bindings[1].Binding := 1;
       Bindings[1].DescriptorType := dtCombinedImageSampler;
       Bindings[1].Count := 1;
-      Bindings[1].StageFlags := [ssVertex, ssFragment];
+      Bindings[1].StageFlags := ActiveStages;
     end;
     FRHIDescriptorLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
 
@@ -826,7 +832,7 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
       PipeDesc.DescriptorSetLayouts[0] := FRHIDescriptorLayout;
     end;
     PipeDesc.PushConstantSize := 32; // SizeOf(TCastleScreenPushConstants)
-    PipeDesc.PushConstantStages := [ssVertex, ssFragment];
+    PipeDesc.PushConstantStages := ActiveStages;
     PipeDesc.DebugName := 'ScreenEffectPSO.' + Node.NiceName;
     FRHIPipeline := RHIDevice.GetOrCreatePipeline(PipeDesc);
   end;

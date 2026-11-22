@@ -571,14 +571,14 @@ begin
     ScreenPoint[3].TexCoord := Vector2(0, 1);
 
     BufDesc := TRHIBufferDesc.Create(SizeOf(ScreenPoint),
-      [buVertex, buTransferDst], muCpuToGpu, 'TCastleScreenEffects.QuadVBO');
+      [buVertex], muCpuToGpu, 'TCastleScreenEffects.QuadVBO');
     FRHIScreenQuadVBO := RHIDevice.CreateBuffer(BufDesc, @ScreenPoint[0]);
   end;
 
   if FRHIScreenQuadIBO = nil then
   begin
     BufDesc := TRHIBufferDesc.Create(SizeOf(QuadIndices),
-      [buIndex, buTransferDst], muCpuToGpu, 'TCastleScreenEffects.QuadIBO');
+      [buIndex], muCpuToGpu, 'TCastleScreenEffects.QuadIBO');
     FRHIScreenQuadIBO := RHIDevice.CreateBuffer(BufDesc, @QuadIndices[0]);
   end;
 
@@ -588,7 +588,7 @@ begin
     BindingsColorOnly[0].Binding := 0;
     BindingsColorOnly[0].DescriptorType := dtCombinedImageSampler;
     BindingsColorOnly[0].Count := 1;
-    BindingsColorOnly[0].StageFlags := [ssVertex, ssFragment];
+    BindingsColorOnly[0].StageFlags := [ssFragment];
     FRHIScreenLayoutColorOnly := RHIDevice.CreateDescriptorSetLayout(BindingsColorOnly);
   end;
 
@@ -598,11 +598,11 @@ begin
     BindingsColorDepth[0].Binding := 0;
     BindingsColorDepth[0].DescriptorType := dtCombinedImageSampler;
     BindingsColorDepth[0].Count := 1;
-    BindingsColorDepth[0].StageFlags := [ssVertex, ssFragment];
+    BindingsColorDepth[0].StageFlags := [ssFragment];
     BindingsColorDepth[1].Binding := 1;
     BindingsColorDepth[1].DescriptorType := dtCombinedImageSampler;
     BindingsColorDepth[1].Count := 1;
-    BindingsColorDepth[1].StageFlags := [ssVertex, ssFragment];
+    BindingsColorDepth[1].StageFlags := [ssFragment];
     FRHIScreenLayoutColorAndDepth := RHIDevice.CreateDescriptorSetLayout(BindingsColorDepth);
   end;
 
@@ -641,7 +641,7 @@ begin
     PipeDesc.SampleCount := 1;
     SetLength(PipeDesc.DescriptorSetLayouts, 1);
     PipeDesc.PushConstantSize := SizeOf(TCastleScreenPushConstants);
-    PipeDesc.PushConstantStages := [ssVertex, ssFragment];
+    PipeDesc.PushConstantStages := [ssFragment];
 
     if FRHIScreenDefaultPipelineColor = nil then
     begin
@@ -809,7 +809,11 @@ begin
     PushConsts.ScreenSize := Vector2(AWidth, AHeight);
     PushConsts.ScreenPlanes := Vector2(ANearPlane, AFarPlane);
     PushConsts.ScreenCustom := Vector4(I, PassCount, 0, 0);
-    Cmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(TCastleScreenPushConstants), PushConsts);
+    if (PassPipeline <> nil) and (PassPipeline.Desc.PushConstantStages <> []) then
+      Cmd.PushConstants(PassPipeline.Desc.PushConstantStages, 0,
+        SizeOf(TCastleScreenPushConstants), PushConsts)
+    else
+      Cmd.PushConstants([ssFragment], 0, SizeOf(TCastleScreenPushConstants), PushConsts);
 
     { Bind fullscreen quad VBO/IBO and draw 2 triangles (6 indices) }
     Cmd.BindVertexBuffers(0, [FRHIScreenQuadVBO], [0]);

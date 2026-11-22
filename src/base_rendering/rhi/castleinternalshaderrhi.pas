@@ -684,7 +684,9 @@ type
     function SanitizeVulkanShaderSource(const Source: String): String;
 
     { Builds GLSL 450 preamble for post-processing screen effects (TCastleScreenEffects) }
-    function GenerateScreenEffectPreamble(const AStage: TRHIShaderStage; const HasDepth: Boolean): String;
+    function GenerateScreenEffectPreamble(const AStage: TRHIShaderStage;
+      const HasDepth: Boolean;
+      const AIncludeVertexResources: Boolean = False): String;
 
     { Builds GLSL 450 preamble for custom 2D fragment shaders (TDrawableImage.CustomShader)
       paired with TCastleBatch2DRenderer (64-byte push constants + location 0/1 stage IO). }
@@ -3582,7 +3584,8 @@ begin
 end;
 
 function TCastleShaderGeneratorRHI.GenerateScreenEffectPreamble(
-  const AStage: TRHIShaderStage; const HasDepth: Boolean): String;
+  const AStage: TRHIShaderStage; const HasDepth: Boolean;
+  const AIncludeVertexResources: Boolean): String;
 begin
   if FBackend <> rbVulkan then
     Exit('');
@@ -3593,26 +3596,31 @@ begin
     '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, set = SetIdx, binding = BindIdx)' + NL +
     '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(set = SetIdx, binding = BindIdx)' + NL +
     '#define CASTLE_DESCRIPTOR_SET(SetIdx, BindIdx) layout(set = SetIdx, binding = BindIdx)' + NL +
-    '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
-    NL +
-    '/* --- Screen Effect Push Constants --- */' + NL +
-    'layout(push_constant) uniform CastleScreenPushConstants {' + NL +
-    '  vec2 screen_size;' + NL +
-    '  vec2 screen_planes;' + NL +
-    '  vec4 screen_custom;' + NL +
-    '} castle_Screen;' + NL +
-    NL +
-    '#define screen_width (castle_Screen.screen_size.x)' + NL +
-    '#define screen_height (castle_Screen.screen_size.y)' + NL +
-    '#define near (castle_Screen.screen_planes.x)' + NL +
-    '#define far (castle_Screen.screen_planes.y)' + NL +
-    NL +
-    '/* --- Screen Effect Textures (Set 0) --- */' + NL +
-    'layout(set = 0, binding = 0) uniform sampler2D screen;' + NL;
+    '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL;
 
-  if HasDepth then
+  if (AStage = ssFragment) or AIncludeVertexResources then
+  begin
     Result := Result +
-      'layout(set = 0, binding = 1) uniform sampler2D screen_depth;' + NL;
+      NL +
+      '/* --- Screen Effect Push Constants --- */' + NL +
+      'layout(push_constant) uniform CastleScreenPushConstants {' + NL +
+      '  vec2 screen_size;' + NL +
+      '  vec2 screen_planes;' + NL +
+      '  vec4 screen_custom;' + NL +
+      '} castle_Screen;' + NL +
+      NL +
+      '#define screen_width (castle_Screen.screen_size.x)' + NL +
+      '#define screen_height (castle_Screen.screen_size.y)' + NL +
+      '#define near (castle_Screen.screen_planes.x)' + NL +
+      '#define far (castle_Screen.screen_planes.y)' + NL +
+      NL +
+      '/* --- Screen Effect Textures (Set 0) --- */' + NL +
+      'layout(set = 0, binding = 0) uniform sampler2D screen;' + NL;
+
+    if HasDepth then
+      Result := Result +
+        'layout(set = 0, binding = 1) uniform sampler2D screen_depth;' + NL;
+  end;
 
   Result := Result +
     NL +

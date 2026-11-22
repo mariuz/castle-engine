@@ -526,13 +526,13 @@ begin
   Bindings[0].Binding := 0;
   Bindings[0].DescriptorType := dtCombinedImageSampler;
   Bindings[0].Count := 1;
-  Bindings[0].StageFlags := [ssVertex, ssFragment];
+  Bindings[0].StageFlags := [ssFragment];
   if NeedsDepth then
   begin
     Bindings[1].Binding := 1;
     Bindings[1].DescriptorType := dtCombinedImageSampler;
     Bindings[1].Count := 1;
-    Bindings[1].StageFlags := [ssVertex, ssFragment];
+    Bindings[1].StageFlags := [ssFragment];
   end;
   FRHIDescriptorLayout := ADevice.CreateDescriptorSetLayout(Bindings);
 
@@ -572,7 +572,7 @@ begin
     PipeDesc.DescriptorSetLayouts[0] := FRHIDescriptorLayout;
   end;
   PipeDesc.PushConstantSize := SizeOf(TCastleScreenPushConstants);
-  PipeDesc.PushConstantStages := [ssVertex, ssFragment];
+  PipeDesc.PushConstantStages := [ssFragment];
   PipeDesc.DebugName := DebugPrefix + '.PSO';
   FRHIPipeline := ADevice.GetOrCreatePipeline(PipeDesc);
   Result := FRHIPipeline;

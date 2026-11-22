@@ -2339,6 +2339,7 @@ var
   I, AttCount: Integer;
 begin
   FIsRendering := True;
+  FCurrentPassHasCommands := False;
   FActiveRenderingInfo := Info;
   FActiveRenderingInfo.ColorAttachments := Copy(Info.ColorAttachments);
   FActiveRenderingHasColor := (Length(Info.ColorAttachments) > 0) and
@@ -2529,6 +2530,7 @@ begin
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   end;
   FIsRendering := False;
+  FCurrentPassHasCommands := False;
 end;
 
 procedure TOpenGLRHICommandList.ClearAttachments(const ClearColorBuf: Boolean;
@@ -2538,6 +2540,8 @@ procedure TOpenGLRHICommandList.ClearAttachments(const ClearColorBuf: Boolean;
 var
   ClearMask: TGLbitfield;
 begin
+  if FIsRendering then
+    FCurrentPassHasCommands := True;
   if (FDevice = nil) or (not FDevice.HasLiveGLContext) then
     Exit;
 
@@ -3217,6 +3221,7 @@ procedure TOpenGLRHICommandList.Draw(const VertexCount, InstanceCount,
 begin
   if (VertexCount = 0) or (InstanceCount = 0) or (FCurrentPipeline = nil) then
     Exit;
+  FCurrentPassHasCommands := True;
   Inc(FDrawCallCount);
 
   if (FDevice = nil) or (not FDevice.HasLiveGLContext) then
@@ -3244,6 +3249,7 @@ var
 begin
   if (IndexCount = 0) or (InstanceCount = 0) or (FCurrentPipeline = nil) then
     Exit;
+  FCurrentPassHasCommands := True;
   Inc(FDrawCallCount);
 
   if (FDevice = nil) or (not FDevice.HasLiveGLContext) then
@@ -3282,6 +3288,7 @@ var
 begin
   if (IndirectBuffer = nil) or (DrawCount = 0) or (FCurrentPipeline = nil) then
     Exit;
+  FCurrentPassHasCommands := True;
 
   Inc(FDrawCallCount);
   Inc(FIndirectDrawCallCount);
@@ -3338,6 +3345,7 @@ var
 begin
   if (IndirectBuffer = nil) or (DrawCount = 0) or (FCurrentPipeline = nil) then
     Exit;
+  FCurrentPassHasCommands := True;
 
   Inc(FDrawCallCount);
   Inc(FIndirectDrawCallCount);
