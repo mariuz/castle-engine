@@ -2827,6 +2827,9 @@ begin
     Macros.Add('NAME_PASCAL'     , NamePascal);
     Macros.Add('QUALIFIED_NAME'  , QualifiedName);
     Macros.Add('CAPTION'         , Caption);
+    Macros.Add('CAPTION_XML'     , SReplacePatterns(Caption,
+      ['&', '<', '>', '"', ''''],
+      ['&amp;', '&lt;', '&gt;', '&quot;', '&apos;'], false));
     Macros.Add('AUTHOR'          , NonEmptyAuthor);
     Macros.Add('EXECUTABLE_NAME' , ExecutableName);
     Macros.Add('DELPHI_EXECUTABLE_NAME', DelphiExecutableName);
