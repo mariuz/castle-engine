@@ -362,7 +362,7 @@ implementation
 uses {$ifdef UNIX} BaseUnix, {$endif}
   StrUtils, DOM,
   CastleUriUtils, CastleXmlUtils, CastleLog, CastleFilesUtils, CastleImages,
-  CastleTimeUtils, CastleComponentSerialize, CastleColors,
+  CastleTimeUtils, CastleComponentSerialize, CastleColors, CastleApplicationProperties,
   ToolResources, ToolAndroid, ToolMacOS, ToolWeb,
   ToolTextureGeneration, ToolIOS, ToolAndroidMerging, ToolNintendoSwitch,
   ToolCommonUtils, ToolMacros, ToolCompilerInfo, ToolPackageCollectFiles,
@@ -1244,6 +1244,10 @@ procedure TCastleProject.DoRun(const OverrideCompiler: TCompiler;
     OverrideEnvironment := EnvironmentStrings;
     try
       OverrideEnvironment.Values['CASTLE_LOG'] := 'stdout';
+      if (Manifest.RenderBackend <> backendAuto) and
+         (GetEnvironmentVariable('CASTLE_RENDER_BACKEND') = '') then
+        OverrideEnvironment.Values['CASTLE_RENDER_BACKEND'] :=
+          RenderBackendToString(Manifest.RenderBackend);
       ExecuteCommandSimple(CurrentDirectory, ExeName, Options, OverrideEnvironment);
     finally FreeAndNil(OverrideEnvironment) end;
   end;

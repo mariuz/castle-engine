@@ -2794,7 +2794,7 @@ begin
     end;
 
     FRHI2DAdaptedFragmentSource :=
-      Gen.GeneratePreamble(ssFragment) +
+      Gen.GenerateBatch2DFragmentPreamble +
       '#define texture2D texture' + NL +
       '#define gl_FragColor castle_FragColor' + NL +
       AdaptedBody;

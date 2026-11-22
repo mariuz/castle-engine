@@ -39,6 +39,7 @@ type
     procedure SchedulePrepareResources;
     function PrepareTexture(Shape: TShape; Texture: TAbstractTextureNode): Pointer;
     function UnprepareTexture(Shape: TShape; Texture: TAbstractTextureNode): Pointer;
+    function UnprepareTextureOnContextClose(Shape: TShape; Texture: TAbstractTextureNode): Pointer;
     procedure UnprepareAllTextures;
   public
     PassedFrustumAndDistanceCulling: Boolean;
@@ -148,7 +149,7 @@ type
 implementation
 
 uses Generics.Defaults, Math, SysUtils,
-  CastleScene, CastleBoxes, CastleInternalGLUtils;
+  CastleScene, CastleBoxes, CastleInternalGLUtils, CastleInternalRHI;
 
 { TGLShape --------------------------------------------------------------- }
 
@@ -266,6 +267,12 @@ begin
     TTextureResources.Unprepare(Texture);
 end;
 
+function TGLShape.UnprepareTextureOnContextClose(Shape: TShape; Texture: TAbstractTextureNode): Pointer;
+begin
+  Result := nil;
+  TTextureResources.Unprepare(Texture);
+end;
+
 function TGLShape.PrepareTexture(Shape: TShape; Texture: TAbstractTextureNode): Pointer;
 var
   RenderOptions: TCastleRenderOptions;
@@ -325,7 +332,14 @@ procedure TGLShape.GLContextClose;
   end;
 
 begin
-  UnprepareAllTextures;
+  if TexturesPrepared or (Cache <> nil) then
+  begin
+    TexturesPrepared := false;
+    if RHIDevice <> nil then
+      EnumerateTextures({$ifdef FPC}@{$endif} UnprepareTextureOnContextClose)
+    else
+      EnumerateTextures({$ifdef FPC}@{$endif} UnprepareTexture);
+  end;
   FreeCaches;
   FreeQuery(OcclusionQueryId);
   RHIQuerySlot := 0;

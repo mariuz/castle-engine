@@ -38,12 +38,13 @@ jobs:
           git clone https://github.com/castle-engine/castle-build-ci.git --depth=1 --single-branch --branch=master
           castle-build-ci/install_dependencies
           castle-build-ci/setup_castle_engine --install-castle-engine=false --install-fpc=true --install-lazarus=false
-      - name: Install Vulkan Loader, Mesa Lavapipe, Validation Layers & Xvfb
+      - name: Install Vulkan Loader, Mesa Lavapipe, Validation Layers, libshaderc & glslang
         run: |
           sudo apt-get update
           sudo apt-get --no-install-recommends -y install \
             libgl-dev libx11-dev libxmu-dev libxxf86vm-dev xvfb xauth \
-            libvulkan1 libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers vulkan-tools
+            libvulkan1 libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers vulkan-tools \
+            libshaderc1 glslang-tools
       - name: Set environment
         run: echo "CASTLE_ENGINE_PATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
       - name: Verify Vulkan Loader & Khronos Validation Layer Discovery
@@ -58,14 +59,15 @@ jobs:
           ./tools/build-tool/castle-engine --project ./examples/vulkan/vulkan_3d_scene/ package --package-format=directory --fast
           ls -la ./examples/vulkan/vulkan_3d_scene/vulkan_3d_scene-1.0.0-linux-x86_64/data/shader_cache/
           test -n "$(ls -A ./examples/vulkan/vulkan_3d_scene/vulkan_3d_scene-1.0.0-linux-x86_64/data/shader_cache/*.spv)"
-      - name: Run Headless Vulkan Examples under Validation Gate
+      - name: Run Headless Vulkan Examples & CLI Override under Validation Gate
         run: |
           ./tools/build-tool/castle-engine --project ./examples/vulkan/vulkan_triangle/ compile --compiler-option=-dCASTLE_WINDOW_XLIB
-          ./examples/vulkan/vulkan_triangle/vulkan_triangle --headless
+          ./examples/vulkan/vulkan_triangle/vulkan_triangle --headless --render-backend=vulkan
           ./tools/build-tool/castle-engine --project ./examples/vulkan/vulkan_sprite_batch/ compile --compiler-option=-dCASTLE_WINDOW_XLIB
-          ./examples/vulkan/vulkan_sprite_batch/vulkan_sprite_batch --headless
-          ./examples/vulkan/vulkan_3d_scene/vulkan_3d_scene --headless
-      - name: Run TTestCastleVulkanRHI Suite & OpenGL vs Vulkan Visual Regression under Xvfb
+          ./examples/vulkan/vulkan_sprite_batch/vulkan_sprite_batch --headless --render-backend=vulkan
+          ./examples/vulkan/vulkan_3d_scene/vulkan_3d_scene --headless --render-backend=vulkan
+      - name: Run TTestCastleVulkanRHI Suite (libshaderc + glslang + Flagship Demos + OpenGL vs Vulkan Visual Regression)
         run: |
           ./tools/build-tool/castle-engine --project ./tests/ compile --mode=debug --compiler-option=-dCASTLE_WINDOW_XLIB
           xvfb-run -a ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI*
+          CASTLE_SHADER_COMPILER=builtin xvfb-run -a ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI.TestBuiltInSPIRVCoreShadersAndRealLavapipeDrawPrimitive2DRHI

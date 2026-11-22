@@ -41,6 +41,8 @@ uses
   CastleTransformManipulate, CastleDebugTransform, CastleInternalPhysicsVisualization,
   CastleInternalCompositeImage, CastleFilesUtils, CastleUriUtils,
   CastleInternalGLCubeMaps, CastleInternalSphericalHarmonics,
+  CastleTerrain, CastleComponentSerialize, CastleParameters, CastleFlashEffect,
+  CastleBehaviors, CastleLivingBehaviors, CastleCameras, CastleSoundEngine,
   ToolManifest, CastleInternalRenderDoc;
 
 type
@@ -426,6 +428,9 @@ type
     procedure TestMemoryPoolDefragmentationHeadlessAndRealGpuBufferRelocationRHI;
     procedure TestMultiWindowSharedVulkanDeviceSwapchainsResizeAndTeardownRHI;
     procedure TestRuntimeRenderBackendHotSwitchOpenGLToVulkanToOpenGLVisualParityRHI;
+    procedure TestRenderBackendCLIAndEnvOverrideAndCrossStageEffectLayoutRHI;
+    procedure TestRuntimeShadercAndGlslangCustomEffectAndTerrainVisualParityRHI;
+    procedure TestFlagshipDemosExploreCastlePlatformerAndTerrainEndToEndVulkanRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -941,9 +946,9 @@ begin
     ModelViewMat := TranslationMatrix(Vector3(10.0, 5.0, -20.0));
     PushConstants.ModelViewMatrix := ModelViewMat;
     NormalMat := ModelViewToNormalMatrix(ModelViewMat);
-    PushConstants.NormalMatrixRow0 := Vector4(NormalMat.Rows[0], 0);
-    PushConstants.NormalMatrixRow1 := Vector4(NormalMat.Rows[1], 0);
-    PushConstants.NormalMatrixRow2 := Vector4(NormalMat.Rows[2], 0);
+    PushConstants.NormalMatrixRow0 := Vector4(NormalMat.Columns[0], 0);
+    PushConstants.NormalMatrixRow1 := Vector4(NormalMat.Columns[1], 0);
+    PushConstants.NormalMatrixRow2 := Vector4(NormalMat.Columns[2], 0);
     PushConstants.ObjectParams := Vector4(1.0, 2.0, 0.0, 0.0);
 
     ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
@@ -11765,11 +11770,15 @@ begin
   NM := TMatrix3.Identity;
 
   { 1. Static mesh, SpecularAA enabled, default PCF shadows (0), material 7 }
+  NM.Data[0, 1] := 0.25;
+  NM.Data[1, 0] := -0.75;
   PC := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
     MV, NM, False, False, True, Ord(smsStandardShadowMaps), 7);
   AssertEquals('PushConstants size must be 128 bytes', 128, SizeOf(PC));
   AssertSameValue(12.5, PC.ModelViewMatrix.Data[3, 0], 1e-5);
   AssertSameValue(1.0, PC.NormalMatrixRow0.X, 1e-5);
+  AssertSameValue(0.25, PC.NormalMatrixRow0.Y, 1e-5);
+  AssertSameValue(-0.75, PC.NormalMatrixRow1.X, 1e-5);
   AssertSameValue(7.0, PC.ObjectParams.X, 1e-5);
   AssertSameValue(0.0, PC.ObjectParams.Y, 1e-5);
   AssertSameValue(1.0, PC.ObjectParams.Z, 1e-5);
@@ -19219,11 +19228,11 @@ begin
     AssertTrue('Vertex shader must declare in vec3 castle_MultiTexCoord0 for TTextureCoordinate3DNode',
       Pos('CASTLE_LOCATION(2) in vec3 castle_MultiTexCoord0;', Vert3D) > 0);
     AssertTrue('Vertex shader must declare out vec4 castle_tex_coord0_4d',
-      Pos('CASTLE_LOCATION(7) out vec4 castle_tex_coord0_4d;', Vert3D) > 0);
+      Pos('CASTLE_LOCATION(9) out vec4 castle_tex_coord0_4d;', Vert3D) > 0);
     AssertTrue('Vertex shader must transform 3D texcoord via 4x4 TTextureTransform3DNode matrix',
       Pos('* rawTexCoord4D;', Vert3D) > 0);
     AssertTrue('Fragment shader must declare in vec4 castle_tex_coord0_4d and sample sampler3D with projective xyz/w',
-      (Pos('CASTLE_LOCATION(7) in vec4 castle_tex_coord0_4d;', Frag3D) > 0) and
+      (Pos('CASTLE_LOCATION(9) in vec4 castle_tex_coord0_4d;', Frag3D) > 0) and
       (Pos('vec3 castle_tex3d_coord = castle_tex_coord0_4d.xyz / max(castle_tex_coord0_4d.w, 1e-5);', Frag3D) > 0));
 
     { Switch to TTextureCoordinate4DNode (homogeneous 4D coordinates) }
@@ -19606,7 +19615,7 @@ begin
     AssertTrue('Fragment shader must scale IBL evaluation by EnvironmentLight Color * Intensity',
       Pos('EvaluateIBLCookTorranceGGX(N, V, baseColor.rgb, metallic, roughness, ao, diffuseIrradiance, prefilteredEnv, brdfLut) * vec3(1.6000, 1.8000, 2.0000);', FragSrc) > 0);
     AssertTrue('Fragment shader must sRGB-decode castle_emissive_texture when ColorSpace = csLinear',
-      Pos('emissive += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));', FragSrc) > 0);
+      Pos('emissive *= pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));', FragSrc) > 0);
     AssertTrue('Fragment shader must sRGB-decode multiTex1.rgb when ColorSpace = csLinear',
       Pos('multiTex1.rgb = pow(max(multiTex1.rgb, vec3(0.0)), vec3(2.2));', FragSrc) > 0);
   finally
@@ -20637,7 +20646,7 @@ begin
     EffGeom2.ShaderType := stGeometry;
     EffGeom2.Contents :=
       'void PLUG_geometry_vertex_set(const int index) {' + LineEnding +
-      '  castle_tex_coord0_geoshader += vec4(0.1, 0.0, 0.0, 0.0);' + LineEnding +
+      '  castle_tex_coord0_geoshader += vec2(0.1, 0.0);' + LineEnding +
       '}' + LineEnding +
       'void PLUG_geometry_vertex_add(const int index, const float scale) {' + LineEnding +
       '  castle_tex_coord0_geoshader += castle_tex_coord0[index] * (scale * 0.0);' + LineEnding +
@@ -36088,6 +36097,681 @@ begin
     if (Win <> nil) and (not Win.Closed) then
       Win.Close(False);
     DestroyWindowForTest(Win);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ Phase 119: Runtime GLSL->SPIR-V Compilation (libshaderc & glslangValidator), }
+{ CLI/Env RenderBackend Override & Flagship CGE Demos End-to-End Dogfooding    }
+{ ---------------------------------------------------------------------------- }
+
+procedure TTestCastleVulkanRHI.TestRenderBackendCLIAndEnvOverrideAndCrossStageEffectLayoutRHI;
+const
+  TerrainVS =
+    'varying highp vec3 terrain_position;' + LineEnding +
+    'varying vec3 terrain_normal;' + LineEnding +
+    'void PLUG_vertex_object_space(const in vec4 vertex_object, const in vec3 normal_object)' + LineEnding +
+    '{' + LineEnding +
+    '  terrain_position = vec3(vertex_object);' + LineEnding +
+    '  terrain_normal = normal_object;' + LineEnding +
+    '}';
+  TerrainFS =
+    'uniform sampler2D tex_1;' + LineEnding +
+    'uniform sampler2D tex_2;' + LineEnding +
+    'uniform sampler2D tex_3;' + LineEnding +
+    'uniform sampler2D tex_4;' + LineEnding +
+    'uniform vec3 color_1;' + LineEnding +
+    'uniform vec3 color_2;' + LineEnding +
+    'uniform vec3 color_3;' + LineEnding +
+    'uniform vec3 color_4;' + LineEnding +
+    'uniform vec4 uv_scale;' + LineEnding +
+    'uniform vec4 metallic;' + LineEnding +
+    'uniform vec4 roughness;' + LineEnding +
+    'uniform float height_1;' + LineEnding +
+    'uniform float height_2;' + LineEnding +
+    'uniform float layers_influence;' + LineEnding +
+    'uniform float steep_emphasize;' + LineEnding +
+    'varying highp vec3 terrain_position;' + LineEnding +
+    'varying vec3 terrain_normal;' + LineEnding +
+    '#ifndef GL_ES' + LineEnding +
+    'vec4 castle_texture_color_to_linear(const in vec4 srgbIn);' + LineEnding +
+    '#endif' + LineEnding +
+    'void PLUG_main_texture_apply(inout vec4 fragment_color, const in vec3 normal)' + LineEnding +
+    '{' + LineEnding +
+    '  highp vec2 uv = vec2(terrain_position.x, -terrain_position.z);' + LineEnding +
+    '  vec3 c1 = color_1 * castle_texture_color_to_linear(texture2D(tex_1, uv * uv_scale.x)).rgb;' + LineEnding +
+    '  fragment_color.rgb = mix(fragment_color.rgb, c1, clamp(steep_emphasize + layers_influence + height_1 + height_2 + metallic.x + roughness.x + terrain_normal.y, 0.0, 1.0));' + LineEnding +
+    '}';
+  ExploreCastleTerrainFS =
+    '#ifndef GL_ES' + LineEnding +
+    'varying vec4 castle_TexCoord0;' + LineEnding +
+    '#endif' + LineEnding +
+    'uniform sampler2D mask;' + LineEnding +
+    'uniform sampler2D layer2;' + LineEnding +
+    'uniform sampler2D layer2_normal;' + LineEnding +
+    'uniform float mask_uv_scale;' + LineEnding +
+    'uniform float layer2_uv_scale;' + LineEnding +
+    'uniform float layer2_normalScale;' + LineEnding +
+    '#ifndef GL_ES' + LineEnding +
+    'varying mat3 castle_tangent_to_eye_space;' + LineEnding +
+    '#endif' + LineEnding +
+    'void PLUG_main_texture_apply(inout vec4 fragment_color, const in vec3 normal_eye)' + LineEnding +
+    '{' + LineEnding +
+    '  vec2 mask_uv = castle_TexCoord0.xy * mask_uv_scale;' + LineEnding +
+    '  vec2 layer2_uv = castle_TexCoord0.xy * layer2_uv_scale;' + LineEnding +
+    '  fragment_color.rgb = mix(fragment_color.rgb, texture2D(layer2, layer2_uv).rgb, texture2D(mask, mask_uv).r);' + LineEnding +
+    '}';
+var
+  Parsed: TRenderBackend;
+  SavedBackend: TRenderBackend;
+  SavedOverridden: Boolean;
+  Gen: TCastleShaderGeneratorRHI;
+  Layout, CastleLayout: TUserEffectShaderLayout;
+  UDesc: TUserEffectUniformDesc;
+  SDesc: TUserEffectSamplerDesc;
+  VDesc: TUserEffectVaryingDesc;
+  UpgradedVS, UpgradedFS, UpgradedCastleFS: String;
+begin
+  { 1. Verify ParseRenderBackendName / RenderBackendToName & --render-backend CLI help }
+  AssertTrue(ParseRenderBackendName('vulkan', Parsed) and (Parsed = backendVulkan));
+  AssertTrue(ParseRenderBackendName('VK', Parsed) and (Parsed = backendVulkan));
+  AssertTrue(ParseRenderBackendName(' OpenGL ', Parsed) and (Parsed = backendOpenGL));
+  AssertTrue(ParseRenderBackendName('gl', Parsed) and (Parsed = backendOpenGL));
+  AssertTrue(ParseRenderBackendName('opengles', Parsed) and (Parsed = backendOpenGLES));
+  AssertTrue(ParseRenderBackendName('gles', Parsed) and (Parsed = backendOpenGLES));
+  AssertTrue(ParseRenderBackendName('auto', Parsed) and (Parsed = backendAuto));
+  AssertTrue(ParseRenderBackendName('default', Parsed) and (Parsed = backendAuto));
+  AssertFalse(ParseRenderBackendName('direct3d9', Parsed));
+  AssertEquals('vulkan', RenderBackendToName(backendVulkan));
+  AssertEquals('opengl', RenderBackendToName(backendOpenGL));
+  AssertEquals('opengles', RenderBackendToName(backendOpenGLES));
+  AssertEquals('auto', RenderBackendToName(backendAuto));
+  AssertTrue('ParseStandardParametersHelp must document --render-backend',
+    Pos('--render-backend', Application.ParseStandardParametersHelp) > 0);
+
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedOverridden := ApplicationProperties.RenderBackendOverridden;
+  try
+    ApplicationProperties.ApplyOverrideRenderBackend(backendVulkan);
+    AssertTrue(ApplicationProperties.RenderBackend = backendVulkan);
+    AssertTrue(ApplicationProperties.RenderBackendOverridden);
+  finally
+    ApplicationProperties.RenderBackend := SavedBackend;
+    ApplicationProperties.RenderBackendOverridden := SavedOverridden;
+  end;
+
+  { 2. Verify cross-stage TCastleTerrain (terrain.vs + terrain.fs) std140 & varying layout }
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    Layout := Gen.ExtractUserEffectLayout(TerrainVS, TerrainFS, '', 10);
+    AssertEquals('terrain.fs has 4 custom samplers (tex_1..tex_4)', 4, Length(Layout.Samplers));
+    AssertTrue(Layout.FindSampler('tex_1', SDesc) and (SDesc.SlotIndex = 0));
+    AssertTrue(Layout.FindSampler('tex_4', SDesc) and (SDesc.SlotIndex = 3));
+    AssertEquals('terrain.fs has 11 scalar/vec uniforms', 11, Length(Layout.Uniforms));
+    AssertTrue(Layout.FindUniform('color_1', UDesc) and (UDesc.ByteOffset = 0));
+    AssertTrue(Layout.FindUniform('color_2', UDesc) and (UDesc.ByteOffset = 16));
+    AssertTrue(Layout.FindUniform('color_3', UDesc) and (UDesc.ByteOffset = 32));
+    AssertTrue(Layout.FindUniform('color_4', UDesc) and (UDesc.ByteOffset = 48));
+    AssertTrue(Layout.FindUniform('uv_scale', UDesc) and (UDesc.ByteOffset = 64));
+    AssertTrue(Layout.FindUniform('metallic', UDesc) and (UDesc.ByteOffset = 80));
+    AssertTrue(Layout.FindUniform('roughness', UDesc) and (UDesc.ByteOffset = 96));
+    AssertTrue(Layout.FindUniform('height_1', UDesc) and (UDesc.ByteOffset = 112));
+    AssertTrue(Layout.FindUniform('height_2', UDesc) and (UDesc.ByteOffset = 116));
+    AssertTrue(Layout.FindUniform('layers_influence', UDesc) and (UDesc.ByteOffset = 120));
+    AssertTrue(Layout.FindUniform('steep_emphasize', UDesc) and (UDesc.ByteOffset = 124));
+    AssertEquals('terrain.fs TotalUBOSize = 128', 128, Integer(Layout.TotalUBOSize));
+
+    AssertEquals('terrain.vs/fs share 2 custom varyings', 2, Length(Layout.Varyings));
+    AssertTrue(Layout.FindVarying('terrain_position', VDesc) and (VDesc.Location = 10));
+    AssertTrue(Layout.FindVarying('terrain_normal', VDesc) and (VDesc.Location = 11));
+
+    UpgradedVS := Gen.UpgradeUserEffectStageSource(ssVertex, TerrainVS, Layout);
+    UpgradedFS := Gen.UpgradeUserEffectStageSource(ssFragment, TerrainFS, Layout);
+    AssertTrue('terrain.vs must emit CASTLE_LOCATION(10) out vec3 terrain_position;',
+      Pos('CASTLE_LOCATION(10) out vec3 terrain_position;', UpgradedVS) > 0);
+    AssertTrue('terrain.fs must emit CASTLE_LOCATION(10) in vec3 terrain_position;',
+      Pos('CASTLE_LOCATION(10) in vec3 terrain_position;', UpgradedFS) > 0);
+    AssertTrue('terrain.fs must strip forward decl of castle_texture_color_to_linear',
+      Pos('// [Vulkan RHI built-in helper]:', UpgradedFS) > 0);
+
+    { 3. Verify explore_impressive_castle terrain_multi_texture.x3dv built-in varying stripping }
+    CastleLayout := Gen.ExtractUserEffectLayout('', ExploreCastleTerrainFS, '', 10);
+    AssertEquals('Built-in castle_TexCoord0 and castle_tangent_to_eye_space must not be allocated as custom varyings',
+      0, Length(CastleLayout.Varyings));
+    AssertEquals(3, Length(CastleLayout.Samplers));
+    AssertEquals(3, Length(CastleLayout.Uniforms));
+    UpgradedCastleFS := Gen.UpgradeUserEffectStageSource(ssFragment, ExploreCastleTerrainFS, CastleLayout);
+    AssertTrue('Built-in varying redeclarations must be commented out cleanly',
+      (Pos('// [Vulkan RHI built-in varying]: castle_TexCoord0', UpgradedCastleFS) > 0) and
+      (Pos('// [Vulkan RHI built-in varying]: castle_tangent_to_eye_space', UpgradedCastleFS) > 0));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRuntimeShadercAndGlslangCustomEffectAndTerrainVisualParityRHI;
+const
+  CustomProceduralVertPart =
+    'varying vec3 v_obj_pos;' + LineEnding +
+    'void PLUG_vertex_object_space(const in vec4 vertex_object, const in vec3 normal_object)' + LineEnding +
+    '{' + LineEnding +
+    '  v_obj_pos = vertex_object.xyz;' + LineEnding +
+    '}';
+  CustomProceduralFragPart =
+    'uniform vec3 u_band_a;' + LineEnding +
+    'uniform vec3 u_band_b;' + LineEnding +
+    'uniform float u_checker_scale;' + LineEnding +
+    'varying vec3 v_obj_pos;' + LineEnding +
+    'void PLUG_fragment_modify(inout vec4 fragment_color)' + LineEnding +
+    '{' + LineEnding +
+    '  float cx = floor(v_obj_pos.x * u_checker_scale + 8.0);' + LineEnding +
+    '  float cy = floor(v_obj_pos.y * u_checker_scale + 8.0);' + LineEnding +
+    '  float parity = mod(cx + cy, 2.0);' + LineEnding +
+    '  fragment_color = vec4(mix(u_band_a, u_band_b, step(0.5, parity)), 1.0);' + LineEnding +
+    '}';
+var
+  Compiler: TCastleShaderCompiler;
+  SavedMode: TShaderCompilerMode;
+  SavedDiskEnabled: Boolean;
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedOnInit: TProcedure;
+  ProbeSPV: TSPIRVBytecode;
+  Reflected: TSPIRVReflectionInfo;
+  Win: TCastleWindow;
+  Vp: TCastleViewport;
+  SceneQuad: TCastleScene;
+  Terrain: TCastleTerrain;
+  TerrainNoise: TCastleTerrainNoise;
+  Sun: TCastleDirectionalLight;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  AppNode: TAppearanceNode;
+  MatNode: TUnlitMaterialNode;
+  QuadGeo: TQuadSetNode;
+  CoordNode: TCoordinateNode;
+  EffNode: TEffectNode;
+  VertPart, FragPart: TEffectPartNode;
+  FieldBandB, FieldBandA: TSFVec3f;
+  FieldScale: TSFFloat;
+  ImgGLCustom, ImgVkCustom, ImgGLTerrain, ImgVkTerrain: TRGBAlphaImage;
+  MetricsCustom, MetricsTerrain: TRHIVisualDiffMetrics;
+  CyanPixels, MagentaPixels, LitTerrainPixels, X, Y, I: Integer;
+  Px: TVector4Byte;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {$endif}
+begin
+  Compiler := TCastleShaderCompiler.Instance;
+  SavedMode := Compiler.CompilerMode;
+  SavedDiskEnabled := Compiler.DiskCacheEnabled;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedOnInit := Application.OnInitialize;
+  Application.OnInitialize := nil;
+  Win := nil;
+  ImgGLCustom := nil;
+  ImgVkCustom := nil;
+  ImgGLTerrain := nil;
+  ImgVkTerrain := nil;
+  try
+    Compiler.DiskCacheEnabled := False;
+    Compiler.ClearCache(False);
+
+    { 1. Directly exercise BOTH in-process libshaderc AND external CLI glslangValidator/glslc if present }
+    if SavedMode <> scmBuiltInOnly then
+    begin
+      if Compiler.HasShadercLibrary then
+      begin
+        Compiler.CompilerMode := scmShadercOnly;
+        Compiler.ClearCache(False);
+        Compiler.ResetStats;
+        ProbeSPV := Compiler.GetOrCompileSPIRV(ssFragment,
+          '#version 450' + LineEnding +
+          'layout(location = 0) out vec4 outColor;' + LineEnding +
+          'void main() { outColor = vec4(0.1, 0.8, 0.9, 1.0); }',
+          'Phase119_ShadercProbeFS');
+        AssertTrue('libshaderc must compile valid SPIR-V in-process',
+          (Compiler.RuntimeCompiledCount = 1) and InspectSPIRVBytecode(ProbeSPV, Reflected) and
+          Reflected.IsValid and (Reflected.Stage = ssFragment));
+      end;
+
+      if Compiler.HasExternalCLICompiler then
+      begin
+        Compiler.CompilerMode := scmExternalCLIOnly;
+        Compiler.ClearCache(False);
+        Compiler.ResetStats;
+        ProbeSPV := Compiler.GetOrCompileSPIRV(ssFragment,
+          '#version 450' + LineEnding +
+          'layout(location = 0) out vec4 outColor;' + LineEnding +
+          'void main() { outColor = vec4(0.9, 0.1, 0.8, 1.0); }',
+          'Phase119_GlslangProbeFS');
+        AssertTrue('External CLI compiler (glslangValidator/glslc) must compile valid SPIR-V',
+          (Compiler.RuntimeCompiledCount = 1) and InspectSPIRVBytecode(ProbeSPV, Reflected) and
+          Reflected.IsValid and (Reflected.Stage = ssFragment));
+      end;
+    end;
+
+    Compiler.CompilerMode := SavedMode;
+    Compiler.ClearCache(False);
+    Compiler.ResetStats;
+
+    if (not Compiler.IsRuntimeCompilationAvailable) or (not CanCreateWindowForTest) then
+      Exit;
+
+    {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+    HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                  (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+    if not HasDisplay then
+      Exit;
+    {$endif}
+
+    try
+      if not LoadVulkan then
+        Exit;
+    except
+      on Exception do
+        Exit;
+    end;
+
+    { 2. Build an arbitrary custom procedural Effect (NOT in any of the 56 built-in SPIR-V modules!)
+         AND register X3D InterfaceDeclarations in REVERSED order vs GLSL uniform declarations
+         (u_band_b, u_checker_scale, u_band_a vs GLSL u_band_a, u_band_b, u_checker_scale) }
+    SetRHIDevice(nil);
+    SetActiveCommandList(nil);
+    ApplicationProperties.RenderBackend := backendOpenGL;
+
+    Win := CreateWindowForTest;
+    Win.Visible := False;
+    Win.Width := 128;
+    Win.Height := 128;
+
+    Vp := TCastleViewport.Create(Win);
+    Vp.FullSize := True;
+    Vp.BackgroundColor := Vector4(0.05, 0.05, 0.08, 1.0);
+    Vp.Camera.SetView(
+      Vector3(0.0, 0.0, 3.2),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Win.Controls.InsertFront(Vp);
+
+    SceneQuad := TCastleScene.Create(Win);
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    AppNode := TAppearanceNode.Create;
+    MatNode := TUnlitMaterialNode.Create;
+    MatNode.EmissiveColor := Vector3(1.0, 1.0, 1.0);
+    AppNode.Material := MatNode;
+
+    EffNode := TEffectNode.Create;
+    EffNode.Language := slGLSL;
+    { Intentionally register custom fields in reverse order vs GLSL! }
+    FieldBandB := TSFVec3f.Create(EffNode, False, 'u_band_b', Vector3(0.95, 0.10, 0.85)); // Magenta
+    EffNode.AddCustomField(FieldBandB);
+    FieldScale := TSFFloat.Create(EffNode, False, 'u_checker_scale', 2.0);
+    EffNode.AddCustomField(FieldScale);
+    FieldBandA := TSFVec3f.Create(EffNode, False, 'u_band_a', Vector3(0.05, 0.90, 0.92)); // Cyan
+    EffNode.AddCustomField(FieldBandA);
+
+    VertPart := TEffectPartNode.Create;
+    VertPart.ShaderType := stVertex;
+    VertPart.Contents := CustomProceduralVertPart;
+    FragPart := TEffectPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents := CustomProceduralFragPart;
+    EffNode.SetParts([VertPart, FragPart]);
+    AppNode.SetEffects([EffNode]);
+    ShapeNode.Appearance := AppNode;
+
+    QuadGeo := TQuadSetNode.Create;
+    QuadGeo.Solid := False;
+    CoordNode := TCoordinateNode.Create;
+    CoordNode.SetPoint([
+      Vector3(-1.2, -1.2, 0.0),
+      Vector3( 1.2, -1.2, 0.0),
+      Vector3( 1.2,  1.2, 0.0),
+      Vector3(-1.2,  1.2, 0.0)
+    ]);
+    QuadGeo.Coord := CoordNode;
+    ShapeNode.Geometry := QuadGeo;
+    Root.AddChildren(ShapeNode);
+    SceneQuad.Load(Root, True);
+    Vp.Items.Add(SceneQuad);
+
+    try
+      Win.Open;
+    except
+      on E: Exception do
+      begin
+        DestroyWindowForTest(Win);
+        Exit;
+      end;
+    end;
+
+    for I := 0 to 1 do
+    begin
+      Win.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+    ImgGLCustom := Win.Container.SaveScreenRgba;
+
+    { Also prepare & capture TCastleTerrain (terrain.vs + terrain.fs) on OpenGL before switching to Vulkan }
+    SceneQuad.Exists := False;
+    Sun := TCastleDirectionalLight.Create(Win);
+    Sun.Direction := Vector3(-0.3, -1.0, -0.4).Normalize;
+    Sun.Intensity := 2.2;
+    Vp.Items.Add(Sun);
+
+    TerrainNoise := TCastleTerrainNoise.Create(Win);
+    TerrainNoise.Amplitude := 4.5;
+    TerrainNoise.Frequency := 0.12;
+
+    Terrain := TCastleTerrain.Create(Win);
+    Terrain.Subdivisions := Vector2(32, 32);
+    Terrain.Size := Vector2(24, 24);
+    Terrain.Translation := Vector3(0.0, -3.0, -16.0);
+    Terrain.Layer1.Color := Vector3(0.90, 0.78, 0.45);
+    Terrain.Layer2.Color := Vector3(0.20, 0.72, 0.25);
+    Terrain.Layer3.Color := Vector3(0.55, 0.52, 0.50);
+    Terrain.Layer4.Color := Vector3(0.95, 0.97, 1.00);
+    Terrain.Height1 := -1.0;
+    Terrain.Height2 := 2.5;
+    Terrain.Data := TerrainNoise;
+    Vp.Items.Add(Terrain);
+    Vp.Items.UseHeadlight := hlOn;
+    Vp.Camera.SetView(
+      Vector3(0.0, 6.5, 4.0),
+      Vector3(0.0, -0.55, -0.83).Normalize,
+      Vector3(0.0, 1.0, 0.0));
+
+    Vp.PrepareResources(Terrain);
+    Vp.PrepareResources(Sun);
+    for I := 0 to 1 do
+    begin
+      Win.Container.EventUpdate;
+      Win.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+    ImgGLTerrain := Win.Container.SaveScreenRgba;
+
+    { Switch back to SceneQuad and hot-switch live to Vulkan to verify runtime shaderc/glslang compilation! }
+    Vp.Items.UseHeadlight := hlOff;
+    Terrain.Exists := False;
+    Sun.Exists := False;
+    SceneQuad.Exists := True;
+    Vp.Camera.SetView(
+      Vector3(0.0, 0.0, 3.2),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+
+    Compiler.ResetStats;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    if not (RHIDevice is TVulkanRHIDevice) then
+    begin
+      Win.Close(False);
+      Exit;
+    end;
+    TVulkanRHIDevice(RHIDevice).ResetValidationCounters;
+
+    for I := 0 to 1 do
+    begin
+      Win.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+    ImgVkCustom := Win.Container.SaveScreenRgba;
+
+    AssertTrue('Runtime SPIR-V compiler must compile custom Effect VS+FS modules',
+      Compiler.RuntimeCompiledCount >= 2);
+    TVulkanRHIDevice(RHIDevice).AssertZeroValidationErrors('Phase119.CustomEffectShaderc');
+
+    CyanPixels := 0;
+    MagentaPixels := 0;
+    for Y := 24 to 104 do
+      for X := 24 to 104 do
+      begin
+        Px := ImgVkCustom.PixelPtr(X, Y)^;
+        if (Px.X < 60) and (Px.Y > 180) and (Px.Z > 180) then
+          Inc(CyanPixels)
+        else if (Px.X > 180) and (Px.Y < 60) and (Px.Z > 170) then
+          Inc(MagentaPixels);
+      end;
+    AssertTrue(Format('Vulkan custom runtime-compiled Effect must render BOTH Cyan (%d) and Magenta (%d) checkerboard cells',
+      [CyanPixels, MagentaPixels]),
+      (CyanPixels > 400) and (MagentaPixels > 400));
+
+    CompareImagesDetailedDiff(ImgGLCustom, ImgVkCustom, 0.08, MetricsCustom);
+    AssertTrue(Format('Custom procedural Effect Vulkan vs OpenGL RMSE=%.5f must be <= 0.08',
+      [MetricsCustom.NormalizedRMSE]),
+      MetricsCustom.Passed);
+
+    { 3. Enable live TCastleTerrain (terrain.vs + terrain.fs) on Vulkan and verify OpenGL vs Vulkan parity }
+    SceneQuad.Exists := False;
+    Vp.Items.UseHeadlight := hlOn;
+    Sun.Exists := True;
+    Terrain.Exists := True;
+    Vp.Camera.SetView(
+      Vector3(0.0, 6.5, 4.0),
+      Vector3(0.0, -0.55, -0.83).Normalize,
+      Vector3(0.0, 1.0, 0.0));
+
+    for I := 0 to 1 do
+    begin
+      Win.Container.EventUpdate;
+      Win.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+    ImgVkTerrain := Win.Container.SaveScreenRgba;
+    TVulkanRHIDevice(RHIDevice).AssertZeroValidationErrors('Phase119.CastleTerrainVulkan');
+
+    LitTerrainPixels := 0;
+    for Y := 8 to 96 do
+      for X := 16 to 112 do
+      begin
+        Px := ImgVkTerrain.PixelPtr(X, Y)^;
+        if (Px.X > 30) or (Px.Y > 40) then
+          Inc(LitTerrainPixels);
+      end;
+    AssertTrue(Format('Vulkan TCastleTerrain must render lit multi-layer heightfield (%d lit pixels)',
+      [LitTerrainPixels]),
+      LitTerrainPixels > 2000);
+
+    CompareImagesDetailedDiff(ImgGLTerrain, ImgVkTerrain, 0.08, MetricsTerrain);
+    AssertTrue(Format('TCastleTerrain Vulkan vs OpenGL RMSE=%.5f must be <= 0.08',
+      [MetricsTerrain.NormalizedRMSE]),
+      MetricsTerrain.Passed);
+
+    Win.Close(False);
+  finally
+    FreeAndNil(ImgGLTerrain);
+    FreeAndNil(ImgVkTerrain);
+    FreeAndNil(ImgVkCustom);
+    FreeAndNil(ImgGLCustom);
+    if (Win <> nil) and (not Win.Closed) then
+      Win.Close(False);
+    if Win <> nil then
+      DestroyWindowForTest(Win);
+    Compiler.CompilerMode := SavedMode;
+    Compiler.DiskCacheEnabled := SavedDiskEnabled;
+    Compiler.ClearCache(False);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestFlagshipDemosExploreCastlePlatformerAndTerrainEndToEndVulkanRHI;
+
+  procedure VerifyDemoUiOnVulkanWindow(const ADemoName, AUiFilePath: String;
+    const ATestLiveEditorToggle: Boolean);
+  var
+    Win: TCastleWindow;
+    DesignOwner: TComponent;
+    LoadedUi: TCastleUserInterface;
+    SavedAppData: String;
+    DataDir: String;
+    ImgVk, ImgToggledGL, ImgToggledVk2: TRGBAlphaImage;
+    NonBlackPixels, X, Y, I: Integer;
+    Px: TVector4Byte;
+    Flash: TCastleFlashEffect;
+  begin
+    if (AUiFilePath = '') or (not FileExists(AUiFilePath)) then
+      Exit;
+    DataDir := ExtractFilePath(AUiFilePath);
+    SavedAppData := ApplicationDataOverride;
+    Win := nil;
+    DesignOwner := nil;
+    ImgVk := nil;
+    ImgToggledGL := nil;
+    ImgToggledVk2 := nil;
+    try
+      ApplicationDataOverride := FilenameToUriSafe(IncludeTrailingPathDelimiter(DataDir));
+      ApplicationProperties.RenderBackend := backendVulkan;
+
+      Win := CreateWindowForTest;
+      Win.Visible := False;
+      Win.Width := 160;
+      Win.Height := 120;
+
+      DesignOwner := TComponent.Create(nil);
+      LoadedUi := UserInterfaceLoad('castle-data:/' + ExtractFileName(AUiFilePath), DesignOwner);
+      Win.Controls.InsertFront(LoadedUi);
+
+      if ADemoName = 'explore_impressive_castle' then
+      begin
+        Flash := TCastleFlashEffect.Create(DesignOwner);
+        LoadedUi.InsertFront(Flash);
+        Flash.Flash(Vector4(0.8, 0.2, 0.1, 0.35), True);
+      end;
+
+      Win.Open;
+      if not (RHIDevice is TVulkanRHIDevice) then
+      begin
+        Win.Close(False);
+        Exit;
+      end;
+
+      TVulkanRHIDevice(RHIDevice).ResetValidationCounters;
+      for I := 0 to 2 do
+      begin
+        Win.Container.EventUpdate;
+        Win.Invalidate;
+        Application.ProcessAllMessages;
+      end;
+      ImgVk := Win.Container.SaveScreenRgba;
+      TVulkanRHIDevice(RHIDevice).AssertZeroValidationErrors('Phase119.Flagship.' + ADemoName);
+
+      NonBlackPixels := 0;
+      for Y := 4 to ImgVk.Height - 5 do
+        for X := 4 to ImgVk.Width - 5 do
+        begin
+          Px := ImgVk.PixelPtr(X, Y)^;
+          if (Px.X > 8) or (Px.Y > 8) or (Px.Z > 8) then
+            Inc(NonBlackPixels);
+        end;
+      AssertTrue(Format('Flagship demo "%s" must render non-empty frame on Vulkan (%d active pixels)',
+        [ADemoName, NonBlackPixels]),
+        NonBlackPixels > 500);
+
+      { Exercise castle-editor Viewport -> Render Backend live toggle (Vulkan -> OpenGL -> Vulkan)
+        while the full flagship design hierarchy remains open and active! }
+      if ATestLiveEditorToggle then
+      begin
+        ApplicationProperties.RenderBackend := backendOpenGL;
+        for I := 0 to 1 do
+        begin
+          Win.Invalidate;
+          Application.ProcessAllMessages;
+        end;
+        ImgToggledGL := Win.Container.SaveScreenRgba;
+        AssertTrue('OpenGL toggle frame must have valid dimensions',
+          (ImgToggledGL.Width = 160) and (ImgToggledGL.Height = 120));
+
+        ApplicationProperties.RenderBackend := backendVulkan;
+        if RHIDevice is TVulkanRHIDevice then
+        begin
+          TVulkanRHIDevice(RHIDevice).ResetValidationCounters;
+          for I := 0 to 1 do
+          begin
+            Win.Invalidate;
+            Application.ProcessAllMessages;
+          end;
+          ImgToggledVk2 := Win.Container.SaveScreenRgba;
+          TVulkanRHIDevice(RHIDevice).AssertZeroValidationErrors(
+            'Phase119.FlagshipToggleBackToVulkan.' + ADemoName);
+        end;
+      end;
+
+      Win.Close(False);
+    finally
+      FreeAndNil(ImgToggledVk2);
+      FreeAndNil(ImgToggledGL);
+      FreeAndNil(ImgVk);
+      if (Win <> nil) and (not Win.Closed) then
+        Win.Close(False);
+      FreeAndNil(DesignOwner);
+      if Win <> nil then
+        DestroyWindowForTest(Win);
+      ApplicationDataOverride := SavedAppData;
+    end;
+  end;
+
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedOnInit: TProcedure;
+  TerrainUiPath, PlatformerUiPath, ExploreCastleUiPath: String;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {$endif}
+begin
+  if not CanCreateWindowForTest then
+    Exit;
+
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+  if not HasDisplay then
+    Exit;
+  {$endif}
+
+  try
+    if not LoadVulkan then
+      Exit;
+  except
+    on Exception do
+      Exit;
+  end;
+
+  TerrainUiPath := ResolveRepoExampleFile('examples/terrain/data/gameviewmain.castle-user-interface');
+  PlatformerUiPath := ResolveRepoExampleFile('examples/2d_games/platformer/data/gameviewplay.castle-user-interface');
+  ExploreCastleUiPath := ResolveRepoExampleFile('examples/3d_games/explore_impressive_castle/data/gameviewplay.castle-user-interface');
+  if (TerrainUiPath = '') and (PlatformerUiPath = '') and (ExploreCastleUiPath = '') then
+    Exit;
+
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedOnInit := Application.OnInitialize;
+  Application.OnInitialize := nil;
+  try
+    SetRHIDevice(nil);
+    SetActiveCommandList(nil);
+
+    VerifyDemoUiOnVulkanWindow('platformer', PlatformerUiPath, False);
+    if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
+    begin
+      VerifyDemoUiOnVulkanWindow('terrain', TerrainUiPath, False);
+      VerifyDemoUiOnVulkanWindow('explore_impressive_castle', ExploreCastleUiPath, True);
+    end;
+  finally
     SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;

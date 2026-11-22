@@ -734,33 +734,34 @@ begin
           end;
         end;
       end else
+      if (RHIDevice = nil) and (GLFeatures <> nil) then
       begin
         if Arrays.HasIndexes then
         begin
-          if (RHIDevice = nil) and (GLFeatures <> nil) and (Vbo[vtIndex] <> GLObjectNone) then
+          if Vbo[vtIndex] <> GLObjectNone then
           begin
             RenderContext.CurrentVao := Vao;
             RenderContext.BindBuffer[btElementArray] := Vbo[vtIndex];
           end;
 
           if Arrays.Counts = nil then
-            if (RHIDevice = nil) and (GLFeatures <> nil) then glDrawElements(Mode, Arrays.IndexesCount,
+            glDrawElements(Mode, Arrays.IndexesCount,
               GLIndexConst, Pointer(Arrays.IndexesPtr(First)))
           else
             for I := 0 to Arrays.Counts.Count - 1 do
             begin
-              if (RHIDevice = nil) and (GLFeatures <> nil) then glDrawElements(Mode, Arrays.Counts[I],
+              glDrawElements(Mode, Arrays.Counts[I],
                 GLIndexConst, Pointer(Arrays.IndexesPtr(First)));
               First := First + Arrays.Counts[I];
             end;
         end else
         begin
           if Arrays.Counts = nil then
-            if (RHIDevice = nil) and (GLFeatures <> nil) then glDrawArrays(Mode, First, Arrays.Count)
+            glDrawArrays(Mode, First, Arrays.Count)
           else
             for I := 0 to Arrays.Counts.Count - 1 do
             begin
-              if (RHIDevice = nil) and (GLFeatures <> nil) then glDrawArrays(Mode, First, Arrays.Counts[I]);
+              glDrawArrays(Mode, First, Arrays.Counts[I]);
               First := First + Arrays.Counts[I];
             end;
         end;

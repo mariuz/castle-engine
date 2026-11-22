@@ -64,7 +64,7 @@ function TX3DGLSLProgram.SetupUniforms(var BoundTextureUnits: Cardinal): boolean
 
         if BoundTextureUnits < MaxUnits then
         begin
-          if (RHIDevice <> nil) and (TAbstractTextureNode(TextureNode).InternalRendererResource = nil) then
+          if TTextureResources.Get(TAbstractTextureNode(TextureNode)) = nil then
             TTextureResources.Prepare(nil, TAbstractTextureNode(TextureNode));
           if TTextureResources.Bind(
             TAbstractTextureNode(TextureNode), BoundTextureUnits) then

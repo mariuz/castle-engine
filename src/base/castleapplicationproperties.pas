@@ -87,6 +87,7 @@ type
     FShowUserInterfaceToQuit: Boolean;
     FCaption: String;
     FRenderBackend: TRenderBackend;
+    FRenderBackendOverridden: Boolean;
     FRenderBackendSwitchCount: Cardinal;
     // Maybe we will expose them as public read-only properties in the future.
     FInitializedDebug: Boolean;
@@ -129,10 +130,21 @@ type
     { Explicit rendering backend (Vulkan or OpenGL).
       Defaults to backendAuto, which uses Vulkan when supported by the hardware and driver,
       falling back cleanly to OpenGL.
+      Can also be overridden via the @code(CASTLE_RENDER_BACKEND) environment variable
+      or the @code(--render-backend=auto|opengl|opengles|vulkan) command-line option.
       Changing this property at runtime while windows or controls are open triggers
       @link(OnRenderBackendChange), cleanly tearing down and recreating active GPU
       resources without restarting the application. }
     property RenderBackend: TRenderBackend read FRenderBackend write SetRenderBackend default backendAuto;
+
+    { @true when @link(RenderBackend) was explicitly overridden by environment
+      variable (@code(CASTLE_RENDER_BACKEND)) or command-line option
+      (@code(--render-backend)). }
+    property RenderBackendOverridden: Boolean read FRenderBackendOverridden write FRenderBackendOverridden;
+
+    { Apply an explicit CLI or environment @link(RenderBackend) override and
+      mark @link(RenderBackendOverridden) as @true. }
+    procedure ApplyOverrideRenderBackend(const Value: TRenderBackend);
 
     { Events called whenever @link(RenderBackend) changes at runtime. }
     property OnRenderBackendChange: TNotifyEventList read FOnRenderBackendChange;
@@ -434,6 +446,15 @@ type
 function ApplicationProperties(
   const CreateIfNotExisting: boolean = true): TCastleApplicationProperties;
 
+{ Parse a render backend identifier (@code(auto), @code(opengl), @code(opengles),
+  @code(vulkan), plus short aliases @code(gl), @code(gles), @code(vk), @code(default)).
+  Case-insensitive. Returns @false when @code(AName) is not recognized. }
+function ParseRenderBackendName(const AName: String; out ABackend: TRenderBackend): Boolean;
+
+{ Canonical lowercase identifier for @code(ABackend)
+  (@code('auto'), @code('opengl'), @code('opengles'), @code('vulkan')). }
+function RenderBackendToName(const ABackend: TRenderBackend): String;
+
 implementation
 
 { TGLContextEventList -------------------------------------------------------- }
@@ -486,7 +507,98 @@ begin
   Result := FApplicationProperties;
 end;
 
+function ParseRenderBackendName(const AName: String; out ABackend: TRenderBackend): Boolean;
+var
+  Normalized: String;
+begin
+  Normalized := LowerCase(Trim(AName));
+  Result := True;
+  if (Normalized = 'auto') or (Normalized = 'automatic') or (Normalized = 'default') then
+    ABackend := backendAuto
+  else
+  if (Normalized = 'opengl') or (Normalized = 'gl') then
+    ABackend := backendOpenGL
+  else
+  if (Normalized = 'opengles') or (Normalized = 'gles') then
+    ABackend := backendOpenGLES
+  else
+  if (Normalized = 'vulkan') or (Normalized = 'vk') then
+    ABackend := backendVulkan
+  else
+  begin
+    ABackend := backendAuto;
+    Result := False;
+  end;
+end;
+
+function RenderBackendToName(const ABackend: TRenderBackend): String;
+begin
+  case ABackend of
+    backendAuto: Result := 'auto';
+    backendOpenGL: Result := 'opengl';
+    backendOpenGLES: Result := 'opengles';
+    backendVulkan: Result := 'vulkan';
+  else
+    Result := 'auto';
+  end;
+end;
+
+{$if not (defined(ANDROID) or defined(CASTLE_IOS) or defined(CASTLE_NINTENDO_SWITCH) or defined(WASI))}
+function TryReadManifestRenderBackend(const AFileName: String; out ABackend: TRenderBackend): Boolean;
+const
+  MaxHeaderBytes = 4096;
+var
+  Stream: TFileStream;
+  RawBytes: TBytes;
+  ReadCount, AttrPos, QuotePos, EndQuotePos: Integer;
+  HeaderText, AttrValue: String;
+  QuoteChar: Char;
+begin
+  Result := False;
+  ABackend := backendAuto;
+  if not FileExists(AFileName) then Exit;
+  try
+    Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+    try
+      ReadCount := Stream.Size;
+      if ReadCount > MaxHeaderBytes then
+        ReadCount := MaxHeaderBytes;
+      if ReadCount <= 0 then Exit;
+      SetLength(RawBytes, ReadCount);
+      ReadCount := Stream.Read(RawBytes[0], ReadCount);
+      if ReadCount <= 0 then Exit;
+      SetString(HeaderText, PAnsiChar(@RawBytes[0]), ReadCount);
+    finally
+      FreeAndNil(Stream);
+    end;
+    AttrPos := Pos('render_backend=', LowerCase(HeaderText));
+    if AttrPos <= 0 then Exit;
+    QuotePos := AttrPos + Length('render_backend=');
+    while (QuotePos <= Length(HeaderText)) and (HeaderText[QuotePos] <= ' ') do
+      Inc(QuotePos);
+    if (QuotePos > Length(HeaderText)) or
+       not ((HeaderText[QuotePos] = '"') or (HeaderText[QuotePos] = '''')) then
+      Exit;
+    QuoteChar := HeaderText[QuotePos];
+    EndQuotePos := QuotePos + 1;
+    while (EndQuotePos <= Length(HeaderText)) and (HeaderText[EndQuotePos] <> QuoteChar) do
+      Inc(EndQuotePos);
+    if EndQuotePos > Length(HeaderText) then Exit;
+    AttrValue := Copy(HeaderText, QuotePos + 1, EndQuotePos - QuotePos - 1);
+    Result := ParseRenderBackendName(AttrValue, ABackend);
+  except
+    Result := False;
+  end;
+end;
+{$endif}
+
 constructor TCastleApplicationProperties.Create;
+var
+  EnvBackend: String;
+  ParsedBackend: TRenderBackend;
+  {$if not (defined(ANDROID) or defined(CASTLE_IOS) or defined(CASTLE_NINTENDO_SWITCH) or defined(WASI))}
+  ExeDir: String;
+  {$endif}
 begin
   inherited;
   FOnGLContextOpen := TGLContextEventList.Create;
@@ -517,6 +629,27 @@ begin
       true
     {$endif};
   FRenderBackend := backendAuto;
+  FRenderBackendOverridden := False;
+  EnvBackend := Trim(GetEnvironmentVariable('CASTLE_RENDER_BACKEND'));
+  if (EnvBackend <> '') and ParseRenderBackendName(EnvBackend, ParsedBackend) then
+  begin
+    FRenderBackend := ParsedBackend;
+    FRenderBackendOverridden := True;
+  end
+  {$if not (defined(ANDROID) or defined(CASTLE_IOS) or defined(CASTLE_NINTENDO_SWITCH) or defined(WASI))}
+  else
+  begin
+    if TryReadManifestRenderBackend('CastleEngineManifest.xml', ParsedBackend) then
+      FRenderBackend := ParsedBackend
+    else
+    begin
+      ExeDir := ExtractFilePath(ParamStr(0));
+      if (ExeDir <> '') and
+         TryReadManifestRenderBackend(ExeDir + 'CastleEngineManifest.xml', ParsedBackend) then
+        FRenderBackend := ParsedBackend;
+    end;
+  end
+  {$endif};
   FLimitFPS := DefaultLimitFPS;
 end;
 
@@ -568,6 +701,12 @@ begin
     if FOnRenderBackendChange <> nil then
       FOnRenderBackendChange.ExecuteAll(Self);
   end;
+end;
+
+procedure TCastleApplicationProperties.ApplyOverrideRenderBackend(const Value: TRenderBackend);
+begin
+  FRenderBackendOverridden := True;
+  SetRenderBackend(Value);
 end;
 
 procedure TCastleApplicationProperties._GLContextEarlyOpen;

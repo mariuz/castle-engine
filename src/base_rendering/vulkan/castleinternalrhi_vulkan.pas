@@ -8875,6 +8875,8 @@ var
   PipelineInfo: VkGraphicsPipelineCreateInfo;
   LibHandles: array[0..3] of VkPipeline;
   LinkInfo: VkPipelineLibraryCreateInfoKHR;
+  EmptySetLayoutInfo: VkDescriptorSetLayoutCreateInfo;
+  TempEmptySetLayout: VkDescriptorSetLayout;
   I: Integer;
 begin
   inherited Create(ADevice, ADesc);
@@ -8886,34 +8888,49 @@ begin
   { 1. Construct VkPipelineLayout from ADesc.DescriptorSetLayouts and PushConstants }
   if ADevice.Handle <> nil then
   begin
-    SetLength(SetLayouts, Length(ADesc.DescriptorSetLayouts));
-    for I := 0 to High(ADesc.DescriptorSetLayouts) do
-      if ADesc.DescriptorSetLayouts[I] <> nil then
-        SetLayouts[I] := (ADesc.DescriptorSetLayouts[I] as TVulkanRHIDescriptorSetLayout).Handle
-      else
-        SetLayouts[I] := VK_NULL_HANDLE;
+    TempEmptySetLayout := VK_NULL_HANDLE;
+    try
+      SetLength(SetLayouts, Length(ADesc.DescriptorSetLayouts));
+      for I := 0 to High(ADesc.DescriptorSetLayouts) do
+        if ADesc.DescriptorSetLayouts[I] <> nil then
+          SetLayouts[I] := (ADesc.DescriptorSetLayouts[I] as TVulkanRHIDescriptorSetLayout).Handle
+        else
+        begin
+          if TempEmptySetLayout = VK_NULL_HANDLE then
+          begin
+            FillChar(EmptySetLayoutInfo, SizeOf(EmptySetLayoutInfo), 0);
+            EmptySetLayoutInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+            CheckVk(vkCreateDescriptorSetLayout(ADevice.Handle, @EmptySetLayoutInfo, nil, @TempEmptySetLayout),
+              'vkCreateDescriptorSetLayout(EmptyPlaceholder)');
+          end;
+          SetLayouts[I] := TempEmptySetLayout;
+        end;
 
-    FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
-    LayoutInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    if ADevice.SupportsGraphicsPipelineLibrary then
-      LayoutInfo.flags := VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT;
-    LayoutInfo.setLayoutCount := Length(SetLayouts);
-    if Length(SetLayouts) > 0 then
-      LayoutInfo.pSetLayouts := @SetLayouts[0];
+      FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
+      LayoutInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+      if ADevice.SupportsGraphicsPipelineLibrary then
+        LayoutInfo.flags := VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT;
+      LayoutInfo.setLayoutCount := Length(SetLayouts);
+      if Length(SetLayouts) > 0 then
+        LayoutInfo.pSetLayouts := @SetLayouts[0];
 
-    if ADesc.PushConstantSize > 0 then
-    begin
-      FillChar(PushRange, SizeOf(PushRange), 0);
-      PushRange.stageFlags := RHIToVkShaderStageFlags(ADesc.PushConstantStages);
-      if PushRange.stageFlags = 0 then
-        PushRange.stageFlags := VK_SHADER_STAGE_ALL_GRAPHICS;
-      PushRange.offset := 0;
-      PushRange.size := ADesc.PushConstantSize;
-      LayoutInfo.pushConstantRangeCount := 1;
-      LayoutInfo.pPushConstantRanges := @PushRange;
+      if ADesc.PushConstantSize > 0 then
+      begin
+        FillChar(PushRange, SizeOf(PushRange), 0);
+        PushRange.stageFlags := RHIToVkShaderStageFlags(ADesc.PushConstantStages);
+        if PushRange.stageFlags = 0 then
+          PushRange.stageFlags := VK_SHADER_STAGE_ALL_GRAPHICS;
+        PushRange.offset := 0;
+        PushRange.size := ADesc.PushConstantSize;
+        LayoutInfo.pushConstantRangeCount := 1;
+        LayoutInfo.pPushConstantRanges := @PushRange;
+      end;
+
+      CheckVk(vkCreatePipelineLayout(ADevice.Handle, @LayoutInfo, nil, @FPipelineLayout), 'vkCreatePipelineLayout');
+    finally
+      if TempEmptySetLayout <> VK_NULL_HANDLE then
+        vkDestroyDescriptorSetLayout(ADevice.Handle, TempEmptySetLayout, nil);
     end;
-
-    CheckVk(vkCreatePipelineLayout(ADevice.Handle, @LayoutInfo, nil, @FPipelineLayout), 'vkCreatePipelineLayout');
   end;
 
   IsMeshPipeline := ADesc.MeshShader <> nil;
@@ -30178,12 +30195,64 @@ begin
   Result := TVulkanRHISampler.Create(Self, ADesc);
 end;
 
+function ShouldPreferBuiltInInternalPassSPIRV(const AGLSLSource, ADebugName: String): Boolean;
+const
+  InternalSubsystemPassNames: array[0..25] of String = (
+    'CastleBatch2D.vert',
+    'CastleBatch2D.frag',
+    'GpuCullingCS',
+    'HiZDownsampleCS',
+    'IBLBrdfLutComputeCS',
+    'IBLPrefilterEnvComputeCS',
+    'IBLIrradianceEnvComputeCS',
+    'ClusteredLightCullingCS',
+    'BloomDownsampleCS',
+    'BloomUpsampleCS',
+    'LuminanceHistogramCS',
+    'HDRCompositeVS',
+    'HDRCompositeFS',
+    'PostProcessModulateCS',
+    'GTAOHorizon_CS',
+    'GTAODenoise_CS',
+    'HiZSSR_CS',
+    'VolumetricFogInject_CS',
+    'VolumetricFogRaymarch_CS',
+    'TAAResolve_CS',
+    'ParticleSimulationCS',
+    'ContactShadowsCS',
+    'ComputeSkinningCS',
+    'MaterialBinHistogramCS',
+    'MaterialBinPrefixSumCS',
+    'CastleBindlessIndirectVS'
+  );
+var
+  PassName: String;
+begin
+  if (AGLSLSource <> '') and (Pos('#version', AGLSLSource) = 0) then
+    Exit(True);
+  if ADebugName = 'CastleBindlessIndirectFS' then
+    Exit(True);
+  for PassName in InternalSubsystemPassNames do
+    if ADebugName = PassName then
+      Exit(True);
+  Result := False;
+end;
+
 function TVulkanRHIDevice.CreateShaderModuleFromGLSL(const AStage: TRHIShaderStage;
   const AGLSLSource: String; const ADebugName: String): TRHIShaderModule;
 var
   SPIRV: TSPIRVBytecode;
 begin
   SPIRV := nil;
+  if (AGLSLSource <> '') and ShouldPreferBuiltInInternalPassSPIRV(AGLSLSource, ADebugName) then
+  begin
+    if not TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(
+         AStage, AGLSLSource, ADebugName, SPIRV) then
+      SPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(AStage);
+    if Length(SPIRV) > 0 then
+      Exit(CreateShaderModuleFromSPIRV(AStage, @SPIRV[0], Length(SPIRV), ADebugName));
+  end;
+
   try
     SPIRV := TCastleShaderCompiler.Instance.GetOrCompileSPIRV(AStage, AGLSLSource, ADebugName);
   except
@@ -30203,7 +30272,10 @@ begin
            AStage, AGLSLSource, ADebugName, SPIRV) then
         SPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(AStage);
       if Length(SPIRV) > 0 then
+      begin
+        TCastleShaderCompiler.Instance.RecordBuiltInFallbackHit;
         Exit(CreateShaderModuleFromSPIRV(AStage, @SPIRV[0], Length(SPIRV), ADebugName));
+      end;
     end;
     Exit(nil);
   end;

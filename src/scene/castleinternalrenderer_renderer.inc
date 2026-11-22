@@ -917,7 +917,7 @@ begin
     try
       if FRHIDefaultVertexShader = nil then
         FRHIDefaultVertexShader := RHIDevice.CreateShaderModuleFromGLSL(
-          ssVertex, Gen.GenerateDefault3DVertexShader(False, False), 'CastleDefault3DVert');
+          ssVertex, Gen.GenerateDefault3DVertexShader(False, False, False, False), 'CastleDefault3DVert');
       if FRHIDefaultFragmentShader = nil then
         FRHIDefaultFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(
           ssFragment, Gen.GenerateDefault3DFragmentShader(False, False, False, False, False, False, False, False, False), 'CastleDefault3DFrag');
@@ -981,6 +981,8 @@ begin
   FillChar(ADesc, SizeOf(ADesc), 0);
   EnsureRHIDefaultShaders;
   EnsureRHISceneDescriptorSet;
+  if (AShape <> nil) and (AShape.Cache <> nil) then
+    AShape.Cache.EnsureRHIDeviceMatch;
 
   if (AShape <> nil) and (AShape.Cache <> nil) and
      (AShape.Cache.RHIVertexShader <> nil) and (AShape.Cache.RHIFragmentShader <> nil) then
@@ -1037,6 +1039,7 @@ begin
         PtrUInt(Arrays.TexCoord(1, 0)), 'castle_MultiTexCoord1')
     else if (AShape <> nil) and (AShape.Cache <> nil) and
             (AShape.Cache.RHIHasSecondTexture or
+             AShape.Cache.RHIHasTextureTransform1 or
              (AShape.Cache.RHIBaseColorTexCoordIndex > 0) or
              (AShape.Cache.RHINormalTexCoordIndex > 0) or
              (AShape.Cache.RHIMetallicRoughnessTexCoordIndex > 0) or
@@ -1251,7 +1254,7 @@ begin
     Set1Layout := AShape.Cache.RHIMaterialDescriptorLayout;
     Set2Layout := AShape.Cache.RHISkinningDescriptorLayout;
     {$ifndef WASI}
-    if (Set2Layout <> nil) and (Set1Layout = nil) and
+    if (Set1Layout = nil) and
        (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
     begin
       AShape.Cache.UploadMaterialBlock(AShape.Cache.RHIMaterialBlock);

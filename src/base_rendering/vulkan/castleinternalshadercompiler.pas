@@ -83,16 +83,29 @@ type
       out AFound: TSPIRVReflectedStageIO): Boolean;
   end;
 
+  { Runtime compiler backend selection mode for TCastleShaderCompiler }
+  TShaderCompilerMode = (
+    scmAuto,            // Prefer in-process libshaderc, fall back to external CLI (glslangValidator/glslc), then built-in SPIR-V
+    scmShadercOnly,     // Only use in-process libshaderc
+    scmExternalCLIOnly, // Only use external CLI compiler (glslangValidator / glslc)
+    scmBuiltInOnly      // Force zero-dependency built-in SPIR-V fallback (simulates clean end-user machine)
+  );
+
   { Thread-safe GLSL-to-SPIR-V compiler with memory and disk caching. }
   TCastleShaderCompiler = class
   private
     class var FInstance: TCastleShaderCompiler;
   private
     FShadercLib: TDynLib;
+    FShadercLibName: String;
     FCompilerHandle: Pointer;
     FOptionsHandle: Pointer;
+    FOptionsVulkan13Handle: Pointer;
     FExternalCompilerPath: String;
     FExternalCompilerIsGlslc: Boolean;
+    FCompilerMode: TShaderCompilerMode;
+    FRuntimeCompiledCount: Cardinal;
+    FBuiltInFallbackCount: Cardinal;
     FLock: TCriticalSection;
     FMemoryCache: {$ifdef FPC}specialize{$endif} TDictionary<UInt64, TSPIRVBytecode>;
     FDiskCacheEnabled: Boolean;
@@ -160,12 +173,22 @@ type
     { Clears all cached SPIR-V binaries from memory (and optionally disk). }
     procedure ClearCache(const AlsoClearDisk: Boolean = False);
 
-    { True if libshaderc_shared or an external CLI compiler (glslangValidator/glslc) was found.
+    { True if libshaderc_shared/libshaderc or an external CLI compiler (glslangValidator/glslc)
+      is active under the current @link(CompilerMode).
       Even if False, pre-cached .spv files and built-in core SPIR-V shaders can still be loaded! }
     function IsRuntimeCompilationAvailable: Boolean;
+    function HasShadercLibrary: Boolean;
     function HasExternalCLICompiler: Boolean;
+    function ActiveCompilerBackendName: String;
+    procedure Reinitialize;
+    procedure ResetStats;
+    procedure RecordBuiltInFallbackHit;
 
+    property CompilerMode: TShaderCompilerMode read FCompilerMode write FCompilerMode default scmAuto;
+    property ShadercLibName: String read FShadercLibName;
     property ExternalCompilerPath: String read FExternalCompilerPath;
+    property RuntimeCompiledCount: Cardinal read FRuntimeCompiledCount;
+    property BuiltInFallbackCount: Cardinal read FBuiltInFallbackCount;
     property DiskCacheEnabled: Boolean read FDiskCacheEnabled write FDiskCacheEnabled default True;
     property DiskCacheBaseUrl: String read FDiskCacheBaseUrl write FDiskCacheBaseUrl;
     property BundledCacheBaseUrl: String read FBundledCacheBaseUrl write FBundledCacheBaseUrl;
@@ -2976,6 +2999,7 @@ const
 
   { shaderc_target_env & shaderc_env_version }
   shaderc_target_env_vulkan         = 0;
+  shaderc_env_version_vulkan_1_0    = (UInt32(1) shl 22);
   shaderc_env_version_vulkan_1_3    = (UInt32(1) shl 22) or (3 shl 12);
 
   { On-disk cache file magic header ('CSPV' + Version 1) }
@@ -8049,6 +8073,8 @@ var
 { ---------------------------------------------------------------------------- }
 
 constructor TCastleShaderCompiler.Create;
+var
+  EnvMode: String;
 begin
   inherited Create;
   FLock := TCriticalSection.Create;
@@ -8056,10 +8082,17 @@ begin
   FDiskCacheEnabled := True;
   FDiskCacheBaseUrl := DefaultDiskShaderCacheBaseUrl;
   FBundledCacheBaseUrl := DefaultBundledShaderCacheBaseUrl;
+  FCompilerMode := scmAuto;
+  EnvMode := LowerCase(Trim(GetEnvironmentVariable('CASTLE_SHADER_COMPILER')));
+  if (EnvMode = 'shaderc') or (EnvMode = 'libshaderc') then
+    FCompilerMode := scmShadercOnly
+  else if (EnvMode = 'cli') or (EnvMode = 'glslang') or (EnvMode = 'glslc') then
+    FCompilerMode := scmExternalCLIOnly
+  else if (EnvMode = 'builtin') or (EnvMode = 'built-in') or (EnvMode = 'none') then
+    FCompilerMode := scmBuiltInOnly;
 
   LoadShadercLibrary;
-  if FShadercLib = nil then
-    DetectExternalCompiler;
+  DetectExternalCompiler;
 end;
 
 destructor TCastleShaderCompiler.Destroy;
@@ -8085,60 +8118,145 @@ end;
 procedure TCastleShaderCompiler.LoadShadercLibrary;
 const
   {$if defined(MSWINDOWS)}
-  ShadercLibName = 'shaderc_shared.dll';
+  ShadercCandidates: array[0..3] of String = (
+    'shaderc_shared.dll',
+    'libshaderc_shared.dll',
+    'shaderc.dll',
+    'libshaderc.dll'
+  );
+  SdkRelDir = 'Bin';
   {$elseif defined(DARWIN)}
-  ShadercLibName = 'libshaderc_shared.1.dylib';
+  ShadercCandidates: array[0..3] of String = (
+    'libshaderc_shared.1.dylib',
+    'libshaderc_shared.dylib',
+    'libshaderc.1.dylib',
+    'libshaderc.dylib'
+  );
+  SdkRelDir = 'lib';
   {$else}
-  ShadercLibName = 'libshaderc_shared.so.1';
+  ShadercCandidates: array[0..3] of String = (
+    'libshaderc_shared.so.1',
+    'libshaderc_shared.so',
+    'libshaderc.so.1',
+    'libshaderc.so'
+  );
+  SdkRelDir = 'lib';
   {$endif}
+var
+  CustomPath, SdkRoot, CandidatePath, CandidateName: String;
 begin
-  FShadercLib := TDynLib.Load(ShadercLibName, False);
-  {$ifdef UNIX}
+  FShadercLibName := '';
+  CustomPath := Trim(GetEnvironmentVariable('CASTLE_SHADERC_PATH'));
+  if CustomPath <> '' then
+  begin
+    FShadercLib := TDynLib.Load(CustomPath, False);
+    if FShadercLib <> nil then
+      FShadercLibName := CustomPath;
+  end;
+
   if FShadercLib = nil then
-    FShadercLib := TDynLib.Load('libshaderc_shared.so', False);
-  {$endif}
+    for CandidateName in ShadercCandidates do
+    begin
+      FShadercLib := TDynLib.Load(CandidateName, False);
+      if FShadercLib <> nil then
+      begin
+        FShadercLibName := CandidateName;
+        Break;
+      end;
+    end;
+
+  if FShadercLib = nil then
+  begin
+    SdkRoot := Trim(GetEnvironmentVariable('VULKAN_SDK'));
+    if SdkRoot <> '' then
+      for CandidateName in ShadercCandidates do
+      begin
+        CandidatePath := IncludeTrailingPathDelimiter(SdkRoot) +
+          IncludeTrailingPathDelimiter(SdkRelDir) + CandidateName;
+        if FileExists(CandidatePath) then
+        begin
+          FShadercLib := TDynLib.Load(CandidatePath, False);
+          if FShadercLib <> nil then
+          begin
+            FShadercLibName := CandidatePath;
+            Break;
+          end;
+        end;
+      end;
+  end;
 
   if FShadercLib = nil then
   begin
     WritelnLog('RHI/ShaderCompiler',
-      'libshaderc_shared not found. Runtime GLSL-to-SPIR-V compilation disabled; relying on pre-cached .spv files.');
+      'libshaderc not found. Checking external CLI SPIR-V compilers / pre-cached .spv files.');
     Exit;
   end;
 
-  FShadercLib.SymbolError := seRaise;
-  Pointer(shaderc_compiler_initialize) := FShadercLib.Symbol('shaderc_compiler_initialize');
-  Pointer(shaderc_compiler_release) := FShadercLib.Symbol('shaderc_compiler_release');
-  Pointer(shaderc_compile_options_initialize) := FShadercLib.Symbol('shaderc_compile_options_initialize');
-  Pointer(shaderc_compile_options_release) := FShadercLib.Symbol('shaderc_compile_options_release');
-  Pointer(shaderc_compile_options_set_optimization_level) := FShadercLib.Symbol('shaderc_compile_options_set_optimization_level');
-  Pointer(shaderc_compile_options_set_target_env) := FShadercLib.Symbol('shaderc_compile_options_set_target_env');
-  Pointer(shaderc_compile_options_set_generate_debug_info) := FShadercLib.Symbol('shaderc_compile_options_set_generate_debug_info');
-  Pointer(shaderc_compile_into_spv) := FShadercLib.Symbol('shaderc_compile_into_spv');
-  Pointer(shaderc_result_release) := FShadercLib.Symbol('shaderc_result_release');
-  Pointer(shaderc_result_get_length) := FShadercLib.Symbol('shaderc_result_get_length');
-  Pointer(shaderc_result_get_num_warnings) := FShadercLib.Symbol('shaderc_result_get_num_warnings');
-  Pointer(shaderc_result_get_num_errors) := FShadercLib.Symbol('shaderc_result_get_num_errors');
-  Pointer(shaderc_result_get_compilation_status) := FShadercLib.Symbol('shaderc_result_get_compilation_status');
-  Pointer(shaderc_result_get_bytes) := FShadercLib.Symbol('shaderc_result_get_bytes');
-  Pointer(shaderc_result_get_error_message) := FShadercLib.Symbol('shaderc_result_get_error_message');
+  try
+    FShadercLib.SymbolError := seRaise;
+    Pointer(shaderc_compiler_initialize) := FShadercLib.Symbol('shaderc_compiler_initialize');
+    Pointer(shaderc_compiler_release) := FShadercLib.Symbol('shaderc_compiler_release');
+    Pointer(shaderc_compile_options_initialize) := FShadercLib.Symbol('shaderc_compile_options_initialize');
+    Pointer(shaderc_compile_options_release) := FShadercLib.Symbol('shaderc_compile_options_release');
+    Pointer(shaderc_compile_options_set_optimization_level) := FShadercLib.Symbol('shaderc_compile_options_set_optimization_level');
+    Pointer(shaderc_compile_options_set_target_env) := FShadercLib.Symbol('shaderc_compile_options_set_target_env');
+    Pointer(shaderc_compile_options_set_generate_debug_info) := FShadercLib.Symbol('shaderc_compile_options_set_generate_debug_info');
+    Pointer(shaderc_compile_into_spv) := FShadercLib.Symbol('shaderc_compile_into_spv');
+    Pointer(shaderc_result_release) := FShadercLib.Symbol('shaderc_result_release');
+    Pointer(shaderc_result_get_length) := FShadercLib.Symbol('shaderc_result_get_length');
+    Pointer(shaderc_result_get_num_warnings) := FShadercLib.Symbol('shaderc_result_get_num_warnings');
+    Pointer(shaderc_result_get_num_errors) := FShadercLib.Symbol('shaderc_result_get_num_errors');
+    Pointer(shaderc_result_get_compilation_status) := FShadercLib.Symbol('shaderc_result_get_compilation_status');
+    Pointer(shaderc_result_get_bytes) := FShadercLib.Symbol('shaderc_result_get_bytes');
+    Pointer(shaderc_result_get_error_message) := FShadercLib.Symbol('shaderc_result_get_error_message');
+  except
+    on E: Exception do
+    begin
+      WritelnWarning('RHI/ShaderCompiler',
+        'Failed to bind shaderc C symbols from "%s": %s', [FShadercLibName, E.Message]);
+      FreeAndNil(FShadercLib);
+      FShadercLibName := '';
+      Exit;
+    end;
+  end;
 
   FCompilerHandle := shaderc_compiler_initialize();
   FOptionsHandle := shaderc_compile_options_initialize();
+  FOptionsVulkan13Handle := shaderc_compile_options_initialize();
 
   if (FCompilerHandle <> nil) and (FOptionsHandle <> nil) then
   begin
     shaderc_compile_options_set_target_env(
-      FOptionsHandle, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
+      FOptionsHandle, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
     shaderc_compile_options_set_optimization_level(
       FOptionsHandle, shaderc_optimization_level_performance);
     {$ifdef DEBUG}
     shaderc_compile_options_set_generate_debug_info(FOptionsHandle);
     {$endif}
   end;
+
+  if (FCompilerHandle <> nil) and (FOptionsVulkan13Handle <> nil) then
+  begin
+    shaderc_compile_options_set_target_env(
+      FOptionsVulkan13Handle, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_3);
+    shaderc_compile_options_set_optimization_level(
+      FOptionsVulkan13Handle, shaderc_optimization_level_performance);
+    {$ifdef DEBUG}
+    shaderc_compile_options_set_generate_debug_info(FOptionsVulkan13Handle);
+    {$endif}
+  end;
+
+  WritelnLog('RHI/ShaderCompiler',
+    'Loaded in-process runtime GLSL->SPIR-V compiler: %s', [FShadercLibName]);
 end;
 
 procedure TCastleShaderCompiler.UnloadShadercLibrary;
 begin
+  if FOptionsVulkan13Handle <> nil then
+  begin
+    shaderc_compile_options_release(FOptionsVulkan13Handle);
+    FOptionsVulkan13Handle := nil;
+  end;
   if FOptionsHandle <> nil then
   begin
     shaderc_compile_options_release(FOptionsHandle);
@@ -8150,15 +8268,36 @@ begin
     FCompilerHandle := nil;
   end;
   FreeAndNil(FShadercLib);
+  FShadercLibName := '';
 end;
 
 procedure TCastleShaderCompiler.DetectExternalCompiler;
+const
+  {$ifdef MSWINDOWS}
+  ExeExt = '.exe';
+  SdkBinSubdir = 'Bin';
+  {$else}
+  ExeExt = '';
+  SdkBinSubdir = 'bin';
+  {$endif}
 var
-  Candidate: String;
+  CustomExe, SdkRoot, Candidate: String;
 begin
   FExternalCompilerPath := '';
   FExternalCompilerIsGlslc := False;
+
+  CustomExe := Trim(GetEnvironmentVariable('CASTLE_GLSLANG_PATH'));
+  if (CustomExe <> '') and FileExists(CustomExe) then
+  begin
+    FExternalCompilerPath := CustomExe;
+    FExternalCompilerIsGlslc := Pos('glslc', LowerCase(ExtractFileName(CustomExe))) > 0;
+    WritelnLog('RHI/ShaderCompiler', 'Using custom external SPIR-V compiler: %s', [FExternalCompilerPath]);
+    Exit;
+  end;
+
   Candidate := FindExe('glslangValidator');
+  if Candidate = '' then
+    Candidate := FindExe('glslang');
   if Candidate <> '' then
   begin
     FExternalCompilerPath := Candidate;
@@ -8166,13 +8305,42 @@ begin
     WritelnLog('RHI/ShaderCompiler', 'Found external SPIR-V compiler: %s', [FExternalCompilerPath]);
     Exit;
   end;
+
   Candidate := FindExe('glslc');
   if Candidate <> '' then
   begin
     FExternalCompilerPath := Candidate;
     FExternalCompilerIsGlslc := True;
     WritelnLog('RHI/ShaderCompiler', 'Found external SPIR-V compiler: %s', [FExternalCompilerPath]);
+    Exit;
   end;
+
+  SdkRoot := Trim(GetEnvironmentVariable('VULKAN_SDK'));
+  if SdkRoot <> '' then
+  begin
+    Candidate := IncludeTrailingPathDelimiter(SdkRoot) +
+      IncludeTrailingPathDelimiter(SdkBinSubdir) + 'glslangValidator' + ExeExt;
+    if FileExists(Candidate) then
+    begin
+      FExternalCompilerPath := Candidate;
+      FExternalCompilerIsGlslc := False;
+      WritelnLog('RHI/ShaderCompiler', 'Found Vulkan SDK SPIR-V compiler: %s', [FExternalCompilerPath]);
+      Exit;
+    end;
+    Candidate := IncludeTrailingPathDelimiter(SdkRoot) +
+      IncludeTrailingPathDelimiter(SdkBinSubdir) + 'glslc' + ExeExt;
+    if FileExists(Candidate) then
+    begin
+      FExternalCompilerPath := Candidate;
+      FExternalCompilerIsGlslc := True;
+      WritelnLog('RHI/ShaderCompiler', 'Found Vulkan SDK SPIR-V compiler: %s', [FExternalCompilerPath]);
+    end;
+  end;
+end;
+
+function TCastleShaderCompiler.HasShadercLibrary: Boolean;
+begin
+  Result := (FShadercLib <> nil) and (FCompilerHandle <> nil);
 end;
 
 function TCastleShaderCompiler.HasExternalCLICompiler: Boolean;
@@ -8182,7 +8350,78 @@ end;
 
 function TCastleShaderCompiler.IsRuntimeCompilationAvailable: Boolean;
 begin
-  Result := ((FShadercLib <> nil) and (FCompilerHandle <> nil)) or (FExternalCompilerPath <> '');
+  case FCompilerMode of
+    scmAuto:
+      Result := HasShadercLibrary or HasExternalCLICompiler;
+    scmShadercOnly:
+      Result := HasShadercLibrary;
+    scmExternalCLIOnly:
+      Result := HasExternalCLICompiler;
+    scmBuiltInOnly:
+      Result := False;
+  else
+    Result := False;
+  end;
+end;
+
+function TCastleShaderCompiler.ActiveCompilerBackendName: String;
+begin
+  case FCompilerMode of
+    scmAuto:
+      if HasShadercLibrary then
+        Result := 'libshaderc (' + ExtractFileName(FShadercLibName) + ')'
+      else if HasExternalCLICompiler then
+        Result := 'external CLI (' + ExtractFileName(FExternalCompilerPath) + ')'
+      else
+        Result := 'built-in SPIR-V (56 embedded modules)';
+    scmShadercOnly:
+      if HasShadercLibrary then
+        Result := 'libshaderc (' + ExtractFileName(FShadercLibName) + ')'
+      else
+        Result := 'unavailable (scmShadercOnly)';
+    scmExternalCLIOnly:
+      if HasExternalCLICompiler then
+        Result := 'external CLI (' + ExtractFileName(FExternalCompilerPath) + ')'
+      else
+        Result := 'unavailable (scmExternalCLIOnly)';
+    scmBuiltInOnly:
+      Result := 'built-in SPIR-V (forced scmBuiltInOnly)';
+  end;
+end;
+
+procedure TCastleShaderCompiler.Reinitialize;
+begin
+  FLock.Acquire;
+  try
+    UnloadShadercLibrary;
+    FExternalCompilerPath := '';
+    FExternalCompilerIsGlslc := False;
+    LoadShadercLibrary;
+    DetectExternalCompiler;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TCastleShaderCompiler.ResetStats;
+begin
+  FLock.Acquire;
+  try
+    FRuntimeCompiledCount := 0;
+    FBuiltInFallbackCount := 0;
+  finally
+    FLock.Release;
+  end;
+end;
+
+procedure TCastleShaderCompiler.RecordBuiltInFallbackHit;
+begin
+  FLock.Acquire;
+  try
+    Inc(FBuiltInFallbackCount);
+  finally
+    FLock.Release;
+  end;
 end;
 
 function TCastleShaderCompiler.BuildCacheFileUrl(const ABaseUrl: String;
@@ -8354,11 +8593,15 @@ begin
     Proc := TProcess.Create(nil);
     try
       Proc.Executable := FExternalCompilerPath;
-      Proc.Options := [poWaitOnExit, poUsePipes, poStderrToOutPut, poNoConsole];
+      Proc.Options := [poUsePipes, poStderrToOutPut, poNoConsole];
       if FExternalCompilerIsGlslc then
       begin
         Proc.Parameters.Add('-fshader-stage=' + StageNames[AStage]);
-        if AStage in [ssTask, ssMesh, ssRayGen, ssAnyHit, ssClosestHit, ssMiss, ssIntersection, ssCallable] then
+        if (AStage in [ssTask, ssMesh, ssRayGen, ssAnyHit, ssClosestHit, ssMiss, ssIntersection, ssCallable]) or
+           (Pos('GL_EXT_ray_', AGLSLSource) > 0) or
+           (Pos('GL_EXT_mesh_shader', AGLSLSource) > 0) or
+           (Pos('GL_KHR_shader_subgroup', AGLSLSource) > 0) or
+           (Pos('GL_EXT_nonuniform_qualifier', AGLSLSource) > 0) then
           Proc.Parameters.Add('--target-env=vulkan1.3')
         else
           Proc.Parameters.Add('--target-env=vulkan1.0');
@@ -8368,6 +8611,15 @@ begin
       end else
       begin
         Proc.Parameters.Add('-V');
+        if (AStage in [ssTask, ssMesh, ssRayGen, ssAnyHit, ssClosestHit, ssMiss, ssIntersection, ssCallable]) or
+           (Pos('GL_EXT_ray_', AGLSLSource) > 0) or
+           (Pos('GL_EXT_mesh_shader', AGLSLSource) > 0) or
+           (Pos('GL_KHR_shader_subgroup', AGLSLSource) > 0) or
+           (Pos('GL_EXT_nonuniform_qualifier', AGLSLSource) > 0) then
+        begin
+          Proc.Parameters.Add('--target-env');
+          Proc.Parameters.Add('vulkan1.3');
+        end;
         Proc.Parameters.Add('-S');
         Proc.Parameters.Add(StageNames[AStage]);
         Proc.Parameters.Add('-o');
@@ -8376,10 +8628,17 @@ begin
       end;
       Proc.Execute;
       CmdOutput := '';
-      if (Proc.Output <> nil) and (Proc.Output.NumBytesAvailable > 0) then
+      while Proc.Running or ((Proc.Output <> nil) and (Proc.Output.NumBytesAvailable > 0)) do
       begin
-        SetLength(CmdOutput, Proc.Output.NumBytesAvailable);
-        Proc.Output.Read(CmdOutput[1], Length(CmdOutput));
+        if (Proc.Output <> nil) and (Proc.Output.NumBytesAvailable > 0) then
+        begin
+          ExitCode := Proc.Output.NumBytesAvailable;
+          SetLength(AnsiSrc, ExitCode);
+          ExitCode := Proc.Output.Read(AnsiSrc[1], ExitCode);
+          if ExitCode > 0 then
+            CmdOutput := CmdOutput + Copy(AnsiSrc, 1, ExitCode);
+        end else
+          Sleep(1);
       end;
       ExitCode := Proc.ExitStatus;
     finally
@@ -8421,17 +8680,34 @@ var
   Kind: TShadercShaderKind;
   AnsiSrc, AnsiName: AnsiString;
   CompRes: PShadercCompilationResult;
+  SelectedOptions: PShadercCompileOptions;
   Status: TShadercCompilationStatus;
   ByteLen: PtrUInt;
   BytePtr: PByte;
   ErrMsg: String;
 begin
-  if (FShadercLib = nil) or (FCompilerHandle = nil) then
-  begin
-    if FExternalCompilerPath <> '' then
-      Exit(CompileGLSLWithExternalCLI(AStage, AGLSLSource, ADebugName));
+  if FCompilerMode = scmBuiltInOnly then
     raise ERHIShaderCompilationError.CreateFmt(
-      'Cannot compile shader "%s": libshaderc_shared is not loaded and shader was not found in disk cache.',
+      'Cannot runtime-compile shader "%s": CompilerMode is scmBuiltInOnly.',
+      [ADebugName]);
+
+  if FCompilerMode = scmExternalCLIOnly then
+  begin
+    Result := CompileGLSLWithExternalCLI(AStage, AGLSLSource, ADebugName);
+    Inc(FRuntimeCompiledCount);
+    Exit;
+  end;
+
+  if not HasShadercLibrary then
+  begin
+    if (FCompilerMode = scmAuto) and HasExternalCLICompiler then
+    begin
+      Result := CompileGLSLWithExternalCLI(AStage, AGLSLSource, ADebugName);
+      Inc(FRuntimeCompiledCount);
+      Exit;
+    end;
+    raise ERHIShaderCompilationError.CreateFmt(
+      'Cannot compile shader "%s": libshaderc is not loaded and shader was not found in disk cache.',
       [ADebugName]);
   end;
 
@@ -8451,6 +8727,16 @@ begin
     else            Kind := shaderc_vertex_shader;
   end;
 
+  if ((AStage in [ssTask, ssMesh, ssRayGen, ssAnyHit, ssClosestHit, ssMiss, ssIntersection, ssCallable]) or
+      (Pos('GL_EXT_ray_', AGLSLSource) > 0) or
+      (Pos('GL_EXT_mesh_shader', AGLSLSource) > 0) or
+      (Pos('GL_KHR_shader_subgroup', AGLSLSource) > 0) or
+      (Pos('GL_EXT_nonuniform_qualifier', AGLSLSource) > 0)) and
+     (FOptionsVulkan13Handle <> nil) then
+    SelectedOptions := FOptionsVulkan13Handle
+  else
+    SelectedOptions := FOptionsHandle;
+
   AnsiSrc := AnsiString(AGLSLSource);
   AnsiName := AnsiString(ADebugName);
 
@@ -8461,7 +8747,7 @@ begin
     Kind,
     PAnsiChar(AnsiName),
     'main',
-    FOptionsHandle);
+    SelectedOptions);
 
   if CompRes = nil then
     raise ERHIShaderCompilationError.CreateFmt('shaderc_compile_into_spv returned nil for %s', [ADebugName]);
@@ -8488,6 +8774,7 @@ begin
     SetLength(Result, ByteLen);
     if ByteLen > 0 then
       Move(BytePtr^, Result[0], ByteLen);
+    Inc(FRuntimeCompiledCount);
   finally
     shaderc_result_release(CompRes);
   end;
@@ -8607,6 +8894,7 @@ begin
           Exit;
         end;
         if (ADebugName = 'CastleBatch2D.frag') or
+           (Pos('.RHI2D.frag', ADebugName) > 0) or
            ((Pos('u_SpriteTexture', AGLSLSource) > 0) and (Pos('CastleDraw.u_ModelViewMatrix[1]', AGLSLSource) > 0)) then
         begin
           CopyWords(BuiltInBatch2DFragSPIRV);

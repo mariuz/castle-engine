@@ -2609,6 +2609,11 @@ end.
         @item(Set @link(TCastleApplicationProperties.TouchDevice
           ApplicationProperties.TouchDevice) to true.
           See @url(https://castle-engine.io/touch_input touch input documentation).)
+
+        @itemLabel @--render-backend auto|opengl|opengles|vulkan
+        @item(Select the active rendering backend
+          (@link(TCastleApplicationProperties.RenderBackend ApplicationProperties.RenderBackend))
+          without modifying @code(CastleEngineManifest.xml).)
       )
 
       Moreover this also handles parameters from @link(TCastleWindow.ParseParameters),
@@ -5253,7 +5258,8 @@ begin
     OptionDescription('--display X-DISPLAY-NAME', '(Unix) Display window on given X display.') + NL +
     OptionDescription('--no-limit-fps', 'Disable FPS limit. (We cap FPS by default, to save CPU and laptop battery.) Use this along with disabled V-Sync to see the maximum possible FPS.') + NL +
     OptionDescription('--capabilities automatic|force-fixed-function|force-modern', 'Force OpenGL context to have specific capabilities, to test rendering on modern or ancient GPUs.') + NL +
-    OptionDescription('--pretend-touch-device', 'Pretend this is a device with a touch screen, for debugging purposes.');
+    OptionDescription('--pretend-touch-device', 'Pretend this is a device with a touch screen, for debugging purposes.') + NL +
+    OptionDescription('--render-backend auto|opengl|opengles|vulkan', 'Force active rendering backend (Vulkan 1.3+, OpenGL, OpenGLES, or automatic).');
 end;
 
 // TODO: why this doesn't work as static TCastleApplication.OptionProc ?
@@ -5261,6 +5267,7 @@ procedure ApplicationOptionProc(OptionNum: Integer; HasArgument: boolean;
   const Argument: String; const SeparateArgs: TSeparateArgs; Data: Pointer);
 var
   HelpString: String;
+  ParsedBackend: TRenderBackend;
 begin
   case OptionNum of
     0:begin
@@ -5300,13 +5307,20 @@ begin
     4:ApplicationProperties.LimitFps := 0;
     5:TGLFeatures.RequestCapabilities := StrToCapabilities(Argument);
     6:ApplicationProperties.TouchDevice := true;
+    7:begin
+        if not ParseRenderBackendName(Argument, ParsedBackend) then
+          raise EInvalidParams.CreateFmt(
+            'Invalid --render-backend value "%s" (expected auto, opengl, opengles, or vulkan)',
+            [Argument]);
+        ApplicationProperties.ApplyOverrideRenderBackend(ParsedBackend);
+      end;
     else raise EInternalError.Create('ApplicationOptionProc: unhandled OptionNum');
   end;
 end;
 
 procedure TCastleApplication.ParseStandardParameters;
 const
-  Options: array [0..6] of TOption =
+  Options: array [0..7] of TOption =
   (
     (Short: 'h'; Long: 'help'; Argument: oaNone),
     (Short: 'v'; Long: 'version'; Argument: oaNone),
@@ -5314,7 +5328,8 @@ const
     (Short: #0 ; Long: 'display'; Argument: oaRequired),
     (Short: #0 ; Long: 'no-limit-fps'; Argument: oaNone),
     (Short: #0 ; Long: 'capabilities'; Argument: oaRequired),
-    (Short: #0 ; Long: 'pretend-touch-device'; Argument: oaNone)
+    (Short: #0 ; Long: 'pretend-touch-device'; Argument: oaNone),
+    (Short: #0 ; Long: 'render-backend'; Argument: oaRequired)
   );
 
   {$ifdef DARWIN}

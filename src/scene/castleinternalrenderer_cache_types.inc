@@ -192,6 +192,7 @@
     FRHISteepParallaxBumpMapping: Boolean;
     FRHISteepParallaxSelfShadowing: Boolean;
     FRHIParallaxHeight: Single;
+    FRHIIsPhysicalMaterial: Boolean;
     FRHIIsPhongMaterial: Boolean;
     FRHIPhongHasSpecularTex: Boolean;
     FRHIPhongHasShininessTex: Boolean;
@@ -208,10 +209,13 @@
     FRHIComposedVertSource: String;
     FRHIComposedFragSource: String;
     FRHIComposedGeomSource: String;
+    FRHIUserEffectLayout: TUserEffectShaderLayout;
+    FRHIAltUserEffectLayout: TUserEffectShaderLayout;
     FRHIUserEffectBuffer: TRHIBuffer;
+    FRHISet2FallbackUBO: TRHIBuffer;
     FRHIUserEffectUploadCount: Cardinal;
-    FRHIUserEffectTextures: array[0..3] of TRHITexture;
-    FRHIUserEffectSamplers: array[0..3] of TRHISampler;
+    FRHIUserEffectTextures: array[0..CASTLE_MAX_USER_EFFECT_SAMPLERS - 1] of TRHITexture;
+    FRHIUserEffectSamplers: array[0..CASTLE_MAX_USER_EFFECT_SAMPLERS - 1] of TRHISampler;
     FRHISkinningDescriptorLayout: TRHIDescriptorSetLayout;
     FRHISkinningDescriptorSet: TRHIDescriptorSet;
     FRHIVertexShader: TRHIShaderModule;
@@ -306,6 +310,7 @@
     procedure SetLineType(const ALineType: TLineType);
     procedure SetParallaxBumpMapping(const AEnabled, ASteep: Boolean; const AHeight: Single); overload;
     procedure SetParallaxBumpMapping(const AEnabled, ASteep, ASelfShadowing: Boolean; const AHeight: Single); overload;
+    procedure SetIsPhysicalMaterial(const AIsPhysical: Boolean);
     procedure SetPhongSurfaceParams(
       const AIsPhong, AHasSpecularTex, AHasShininessTex, AHasAmbientTex: Boolean;
       const AAmbientIntensity: Single);
@@ -409,6 +414,7 @@
     property RHIComposedVertSource: String read FRHIComposedVertSource;
     property RHIComposedFragSource: String read FRHIComposedFragSource;
     property RHIComposedGeomSource: String read FRHIComposedGeomSource;
+    property RHIUserEffectLayout: TUserEffectShaderLayout read FRHIUserEffectLayout;
     property RHIUserEffectBuffer: TRHIBuffer read FRHIUserEffectBuffer;
     property RHIUserEffectUploadCount: Cardinal read FRHIUserEffectUploadCount;
     property RHIUserEffectTexture[const AIndex: Cardinal]: TRHITexture read GetRHIUserEffectTexture;
@@ -496,6 +502,7 @@ begin
   FreeAndNil(FRHIJointBuffer);
   FreeAndNil(FRHISkinningUBOBuffer);
   FreeAndNil(FRHIUserEffectBuffer);
+  FreeAndNil(FRHISet2FallbackUBO);
   FreeAndNil(FRHIMaterialBuffer);
   FreeAndNil(FRHIMaterialDescriptorSet);
   FreeAndNil(FRHIMaterialDescriptorLayout);
@@ -534,6 +541,7 @@ begin
     FreeAndNil(FRHIJointBuffer);
     FreeAndNil(FRHISkinningUBOBuffer);
     FreeAndNil(FRHIUserEffectBuffer);
+    FreeAndNil(FRHISet2FallbackUBO);
     FillChar(FRHIUserEffectTextures, SizeOf(FRHIUserEffectTextures), 0);
     FillChar(FRHIUserEffectSamplers, SizeOf(FRHIUserEffectSamplers), 0);
     FreeAndNil(FRHIMaterialBuffer);
@@ -565,7 +573,9 @@ end;
 
 procedure TShapeCache.EnsureRHISet2DescriptorSet;
 var
-  Bindings: array[0..5] of TRHIDescriptorBindingDesc;
+  Bindings: array[0..CASTLE_MAX_USER_EFFECT_SAMPLERS + 1] of TRHIDescriptorBindingDesc;
+  FallbackBufDesc: TRHIBufferDesc;
+  ZeroBytes: array[0..63] of Byte;
   I: Integer;
 begin
   if RHIDevice = nil then
@@ -584,8 +594,8 @@ begin
     Bindings[1].DescriptorType := dtUniformBuffer;
     Bindings[1].Count := 1;
     Bindings[1].StageFlags := [ssVertex, ssGeometry, ssFragment];
-    { Bindings 2..5: Custom User Effect Samplers }
-    for I := 2 to 5 do
+    { Bindings 2..9: Custom User Effect Samplers }
+    for I := 2 to High(Bindings) do
     begin
       Bindings[I].Binding := Cardinal(I);
       Bindings[I].DescriptorType := dtCombinedImageSampler;
@@ -597,15 +607,26 @@ begin
   if (FRHISkinningDescriptorSet = nil) and (FRHISkinningDescriptorLayout <> nil) then
   begin
     FRHISkinningDescriptorSet := RHIDevice.CreateDescriptorSet(FRHISkinningDescriptorLayout);
-    {$ifndef WASI}
-    if (FRHISkinningDescriptorSet <> nil) and
-       (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+    if FRHISet2FallbackUBO = nil then
     begin
-      for I := 2 to 5 do
-        FRHISkinningDescriptorSet.BindTexture(Cardinal(I), TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
+      FillChar(ZeroBytes, SizeOf(ZeroBytes), 0);
+      FallbackBufDesc := TRHIBufferDesc.Create(SizeOf(ZeroBytes), [buUniform], muCpuToGpu, 'CastleSet2FallbackUBO');
+      FRHISet2FallbackUBO := RHIDevice.CreateBuffer(FallbackBufDesc, @ZeroBytes[0]);
+    end;
+    if FRHISkinningDescriptorSet <> nil then
+    begin
+      if FRHISet2FallbackUBO <> nil then
+      begin
+        FRHISkinningDescriptorSet.BindUniformBuffer(0, FRHISet2FallbackUBO);
+        FRHISkinningDescriptorSet.BindUniformBuffer(1, FRHISet2FallbackUBO);
+      end;
+      {$ifndef WASI}
+      if (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+        for I := 2 to High(Bindings) do
+          FRHISkinningDescriptorSet.BindTexture(Cardinal(I), TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
+      {$endif}
       FRHISkinningDescriptorSet.Update;
     end;
-    {$endif}
   end;
 end;
 
@@ -1235,6 +1256,16 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetIsPhysicalMaterial(const AIsPhysical: Boolean);
+begin
+  if FRHIIsPhysicalMaterial <> AIsPhysical then
+  begin
+    FRHIIsPhysicalMaterial := AIsPhysical;
+    FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.SetPhongSurfaceParams(
   const AIsPhong, AHasSpecularTex, AHasShininessTex, AHasAmbientTex: Boolean;
   const AAmbientIntensity: Single);
@@ -1506,7 +1537,8 @@ var
   FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, LineStippleSnippet, ShadowMapSnippet, ParallaxSnippet, SelfShadowSnippet, PhongSetupSnippet: String;
   SecondTexSnippet, SecondTexUV, AlphaTexSnippet, PlugTexColorCall, CubeCoordExpr, Tex3DCoordExpr, Tex3DMatExpr: String;
   UpgradedVertEffect, UpgradedFragEffect, DedupVertEffect, DedupFragEffect, DedupGeomEffect, PlugGeomSetCall, PlugGeomZeroCall, PlugGeomAddCall, PlugCandidate, SingleTexColorCall, EffectivePointSizeStr, AttribGLSLType, AttribDecl: String;
-  HasLinearColorSpace, HasGeomStage: Boolean;
+  TempLayout: TUserEffectShaderLayout;
+  HasLinearColorSpace, HasGeomStage, NeedTexCoord1Attr: Boolean;
   EffectiveToneMapping: TToneMapping;
   EffectiveShadowSampling: TShadowSampling;
   EffectiveShadowSize, ClipCount, TexCoord0Dim: Cardinal;
@@ -1518,7 +1550,9 @@ begin
     Exit;
   EnsureRHIDeviceMatch;
 
-  HasLinearColorSpace := CastleRenderOptions.ColorSpace = csLinear;
+  HasLinearColorSpace :=
+    (CastleRenderOptions.ColorSpace = csLinear) or
+    ((CastleRenderOptions.ColorSpace = csLinearWhenPhysicalMaterial) and FRHIIsPhysicalMaterial);
   EffectiveToneMapping := CastleRenderOptions.ToneMapping;
   if FRHIShadowSamplingExplicit then
     EffectiveShadowSampling := FRHIShadowSampling
@@ -1621,6 +1655,20 @@ begin
     Mask := Mask or (QWord(1) shl 48);
   if FRHILineType <> ltSolid then
     Mask := Mask or (QWord(Ord(FRHILineType) and 7) shl 49);
+  NeedTexCoord1Attr :=
+    ((Arrays <> nil) and (Arrays.TexCoords.Count > 1) and (Arrays.TexCoords[1] <> nil) and
+     (Arrays.TexCoords[1].Generation = tgExplicit)) or
+    FRHIHasSecondTexture or
+    FRHIHasTextureTransform1 or
+    (FRHIBaseColorTexCoordIndex > 0) or
+    (FRHINormalTexCoordIndex > 0) or
+    (FRHIMetallicRoughnessTexCoordIndex > 0) or
+    (FRHIEmissiveTexCoordIndex > 0) or
+    (FRHIOcclusionTexCoordIndex > 0);
+  if NeedTexCoord1Attr then
+    Mask := Mask or (QWord(1) shl 53);
+
+  EnsureRHIDeviceMatch;
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) and
@@ -1637,6 +1685,7 @@ begin
     TempSource := FRHIVertexShaderSource; FRHIVertexShaderSource := FRHIAltVertexShaderSource; FRHIAltVertexShaderSource := TempSource;
     TempSource := FRHIFragmentShaderSource; FRHIFragmentShaderSource := FRHIAltFragmentShaderSource; FRHIAltFragmentShaderSource := TempSource;
     TempSource := FRHIGeometryShaderSource; FRHIGeometryShaderSource := FRHIAltGeometryShaderSource; FRHIAltGeometryShaderSource := TempSource;
+    TempLayout := FRHIUserEffectLayout; FRHIUserEffectLayout := FRHIAltUserEffectLayout; FRHIAltUserEffectLayout := TempLayout;
     TempMask := FRHIShaderPermutationMask; FRHIShaderPermutationMask := FRHIAltShaderPermutationMask; FRHIAltShaderPermutationMask := TempMask;
     FRHIAltShadersInitialized := FRHIShadersInitialized;
     FRHIShadersInitialized := True;
@@ -1654,6 +1703,7 @@ begin
     FRHIAltVertexShaderSource := FRHIVertexShaderSource;
     FRHIAltFragmentShaderSource := FRHIFragmentShaderSource;
     FRHIAltGeometryShaderSource := FRHIGeometryShaderSource;
+    FRHIAltUserEffectLayout := FRHIUserEffectLayout;
     FRHIAltShaderPermutationMask := FRHIShaderPermutationMask;
     FRHIAltShadersInitialized := True;
     FRHIVertexShader := nil;
@@ -1700,7 +1750,26 @@ begin
       DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_texture_apply');
       DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_texture_color');
     end;
-    FRHIVertexShaderSource := Gen.GenerateDefault3DVertexShader(AHasSkinning, AHasTangents);
+    DedupGeomEffect := FRHIGeometryEffectCode;
+    if DedupGeomEffect <> '' then
+    begin
+      DeduplicatePlugDefinitions(DedupGeomEffect, 'PLUG_geometry_vertex_set');
+      DeduplicatePlugDefinitions(DedupGeomEffect, 'PLUG_geometry_vertex_zero');
+      DeduplicatePlugDefinitions(DedupGeomEffect, 'PLUG_geometry_vertex_add');
+    end;
+    if (FRHIComposedVertSource <> '') or (FRHIComposedFragSource <> '') or (FRHIComposedGeomSource <> '') then
+      FRHIUserEffectLayout := Gen.ExtractUserEffectLayout(
+        FRHIComposedVertSource, FRHIComposedFragSource, FRHIComposedGeomSource, 10)
+    else if (DedupVertEffect <> '') or (DedupFragEffect <> '') or (DedupGeomEffect <> '') then
+      FRHIUserEffectLayout := Gen.ExtractUserEffectLayout(
+        DedupVertEffect, DedupFragEffect, DedupGeomEffect, 10)
+    else
+      FRHIUserEffectLayout := Default(TUserEffectShaderLayout);
+    if (FRHIUserEffectLayout.TotalUBOSize > 0) or (Length(FRHIUserEffectLayout.Samplers) > 0) then
+      EnsureRHISet2DescriptorSet;
+
+    FRHIVertexShaderSource := Gen.GenerateDefault3DVertexShader(
+      AHasSkinning, AHasTangents, NeedTexCoord1Attr, AHasColorPerVertex);
     if AHasTexCoordGen or (FRHITexCoordGen <> tgExplicit) then
     begin
       case FRHITexCoordGen of
@@ -1831,7 +1900,8 @@ begin
     end;
     if DedupVertEffect <> '' then
     begin
-      UpgradedVertEffect := Gen.UpgradeUserEffectUniforms(DedupVertEffect);
+      UpgradedVertEffect := Gen.UpgradeUserEffectStageSource(
+        ssVertex, DedupVertEffect, FRHIUserEffectLayout);
       FRHIVertexShaderSource := StringReplace(
         FRHIVertexShaderSource,
         'void main() {',
@@ -1883,7 +1953,7 @@ begin
       FRHIVertexShaderSource := StringReplace(
         FRHIVertexShaderSource,
         'void main() {',
-        'CASTLE_LOCATION(7) out vec4 castle_tex_coord0_4d;' + LineEnding + 'void main() {',
+        'CASTLE_LOCATION(9) out vec4 castle_tex_coord0_4d;' + LineEnding + 'void main() {',
         []);
       if TexCoord0Dim = 3 then
         TexGenSnippet := '  vec4 rawTexCoord4D = vec4(castle_MultiTexCoord0, 1.0);'
@@ -1959,6 +2029,12 @@ begin
     FRHIFragmentShaderSource := Gen.GenerateDefault3DFragmentShader(
       AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
       AHasEmissiveTex, AHasOcclusionTex, AHasIBL, AUseAlphaTest, False, False);
+    if HasLinearColorSpace then
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '#define CASTLE_VULKAN 1',
+        '#define CASTLE_VULKAN 1' + LineEnding + '#define CASTLE_GAMMA_CORRECTION 1',
+        []);
     if (FRHILineType <> ltSolid) and (FRHILineStipplePattern <> $FFFF) then
     begin
       LineStippleSnippet := Format(
@@ -2343,18 +2419,19 @@ begin
     begin
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
-        '    unlitColor += texture(castle_emissive_texture, castle_tex_coord0).rgb;',
-        '    unlitColor += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
+        '    vec3 unlitColor = baseColor.rgb + castle_MaterialEmissive * texture(castle_emissive_texture, castle_tex_coord0).rgb;',
+        '    vec3 unlitColor = baseColor.rgb + castle_MaterialEmissive * pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
         []);
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
-        '  emissive += texture(castle_emissive_texture, castle_tex_coord0).rgb;',
-        '  emissive += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
+        '  emissive *= texture(castle_emissive_texture, castle_tex_coord0).rgb;',
+        '  emissive *= pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
         []);
     end;
     if DedupFragEffect <> '' then
     begin
-      UpgradedFragEffect := Gen.UpgradeUserEffectUniforms(DedupFragEffect);
+      UpgradedFragEffect := Gen.UpgradeUserEffectStageSource(
+        ssFragment, DedupFragEffect, FRHIUserEffectLayout);
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
         'void main() {',
@@ -2605,13 +2682,13 @@ begin
     begin
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
-        '    unlitColor += texture(castle_emissive_texture, castle_tex_coord0).rgb;',
-        '    unlitColor += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
+        '    vec3 unlitColor = baseColor.rgb + castle_MaterialEmissive * texture(castle_emissive_texture, castle_tex_coord0).rgb;',
+        '    vec3 unlitColor = baseColor.rgb + castle_MaterialEmissive * pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
         []);
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
-        '  emissive += texture(castle_emissive_texture, castle_tex_coord0).rgb;',
-        '  emissive += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
+        '  emissive *= texture(castle_emissive_texture, castle_tex_coord0).rgb;',
+        '  emissive *= pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
         []);
     end;
     if AHasTangents and AHasNormalTex then
@@ -2828,7 +2905,7 @@ begin
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
         'void main() {',
-        'CASTLE_LOCATION(7) in vec4 castle_tex_coord0_4d;' + LineEnding + 'void main() {',
+        'CASTLE_LOCATION(9) in vec4 castle_tex_coord0_4d;' + LineEnding + 'void main() {',
         []);
     if AHasBaseColorTex and (FRHIBaseColorTextureDimension = tdCube) then
     begin
@@ -2848,7 +2925,7 @@ begin
         tgCameraSpaceReflectionVector:
           CubeCoordExpr := '-reflect(-normalize(castle_vertex_eye.xyz), normalize(castle_normal_eye))';
         else
-          CubeCoordExpr := 'mat3(castle_ViewMatrixInverse) * (-reflect(-normalize(castle_vertex_eye.xyz), normalize(castle_normal_eye)))';
+          CubeCoordExpr := '((castle_MaterialShininess < 0.0) ? normalize(mat3(castle_ViewMatrixInverse) * normalize(castle_vertex_eye.xyz)) : (mat3(castle_ViewMatrixInverse) * (-reflect(-normalize(castle_vertex_eye.xyz), normalize(castle_normal_eye)))))';
       end;
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
@@ -2882,7 +2959,7 @@ begin
           tgCoordEye:
             Tex3DCoordExpr := 'castle_vertex_eye.xyz';
           else
-            Tex3DCoordExpr := '(castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)).xyz';
+            Tex3DCoordExpr := '((castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)).xyz * 0.5 + vec3(0.5))';
         end;
         if AHasTextureTransform then
         begin
@@ -2916,8 +2993,10 @@ begin
         []);
     if FRHIComposedVertSource <> '' then
       FRHIVertexShaderSource := Gen.FinalizeVertexShaderSource(
-        Gen.GeneratePreamble(ssVertex) +
-        Gen.UpgradeUserEffectUniforms(FRHIComposedVertSource));
+        Gen.GeneratePreambleFor3DVertex(
+          AHasSkinning, AHasTangents, NeedTexCoord1Attr, AHasColorPerVertex) +
+        Gen.UpgradeUserEffectStageSource(
+          ssVertex, FRHIComposedVertSource, FRHIUserEffectLayout));
     if (Arrays <> nil) and (Arrays.Attribs.Count > 0) then
     begin
       LocIdx := 9;
@@ -2955,25 +3034,32 @@ begin
       end;
     end;
     if FRHIComposedFragSource <> '' then
+    begin
       FRHIFragmentShaderSource :=
         Gen.GeneratePreamble(ssFragment) +
-        Gen.UpgradeUserEffectUniforms(FRHIComposedFragSource);
+        Gen.UpgradeUserEffectStageSource(
+          ssFragment, FRHIComposedFragSource, FRHIUserEffectLayout);
+      if HasLinearColorSpace then
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '#define CASTLE_VULKAN 1',
+          '#define CASTLE_VULKAN 1' + LineEnding + '#define CASTLE_GAMMA_CORRECTION 1',
+          []);
+    end;
     if FRHIComposedGeomSource <> '' then
       FRHIGeometryShaderSource := Gen.FinalizeGeometryShaderSource(
         Gen.GeneratePreamble(ssGeometry) +
-        Gen.UpgradeUserEffectUniforms(FRHIComposedGeomSource))
-    else if FRHIGeometryEffectCode <> '' then
+        Gen.UpgradeUserEffectStageSource(
+          ssGeometry, FRHIComposedGeomSource, FRHIUserEffectLayout))
+    else if DedupGeomEffect <> '' then
     begin
-      DedupGeomEffect := FRHIGeometryEffectCode;
-      DeduplicatePlugDefinitions(DedupGeomEffect, 'PLUG_geometry_vertex_set');
-      DeduplicatePlugDefinitions(DedupGeomEffect, 'PLUG_geometry_vertex_zero');
-      DeduplicatePlugDefinitions(DedupGeomEffect, 'PLUG_geometry_vertex_add');
       PlugGeomSetCall := BuildChainedPlugCalls(DedupGeomEffect, 'PLUG_geometry_vertex_set', 'index', '  ');
       PlugGeomZeroCall := BuildChainedPlugCalls(DedupGeomEffect, 'PLUG_geometry_vertex_zero', '', '  ');
       PlugGeomAddCall := BuildChainedPlugCalls(DedupGeomEffect, 'PLUG_geometry_vertex_add', 'index, scale', '  ');
       FRHIGeometryShaderSource := Gen.FinalizeGeometryShaderSource(
         Gen.GeneratePreamble(ssGeometry) +
-        Gen.UpgradeUserEffectUniforms(DedupGeomEffect),
+        Gen.UpgradeUserEffectStageSource(
+          ssGeometry, DedupGeomEffect, FRHIUserEffectLayout),
         PlugGeomSetCall, PlugGeomZeroCall, PlugGeomAddCall);
     end;
     FRHIVertexShader := RHIDevice.CreateShaderModuleFromGLSL(

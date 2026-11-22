@@ -25,6 +25,7 @@
   TTextureResource = class(TRendererResource)
   protected
     FRHISampler: TRHISampler;
+    FPreparedForRHI: Boolean;
     procedure CreateRHISampler(
       const AFilter: TTextureFilter;
       const ABoundaryS, ABoundaryT, ABoundaryR: TGLenum;
@@ -805,8 +806,11 @@ end;
 class function TTextureResources.Get(const ANode: TAbstractTextureNode): TTextureResource;
 begin
   if ANode <> nil then
-    Result := TTextureResource(ANode.InternalRendererResource)
-  else
+  begin
+    Result := TTextureResource(ANode.InternalRendererResource);
+    if (Result <> nil) and (Result.FPreparedForRHI <> (RHIDevice <> nil)) then
+      Result := nil;
+  end else
     Result := nil;
 end;
 
@@ -817,13 +821,18 @@ var
   TextureRes: TTextureResource;
   TextureResClass: TTextureResourceClass;
 begin
-  if (ANode <> nil) and
-     (ANode.InternalRendererResource = nil) then
+  if ANode = nil then
+    Exit;
+  if (ANode.InternalRendererResource <> nil) and
+     (TTextureResource(ANode.InternalRendererResource).FPreparedForRHI <> (RHIDevice <> nil)) then
+    ANode.InternalRendererResourceFree;
+  if ANode.InternalRendererResource = nil then
   begin
     TextureResClass := TTextureResourceClass.ClassForTextureNode(ANode);
     if TextureResClass <> nil { Ignore if not handled node. } then
     begin
       TextureRes := TextureResClass.Create(ANode);
+      TextureRes.FPreparedForRHI := RHIDevice <> nil;
       TextureRes.Prepare(RenderOptions);
       ANode.InternalRendererResource := TextureRes;
     end;

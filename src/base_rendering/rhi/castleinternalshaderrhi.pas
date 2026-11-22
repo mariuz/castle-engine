@@ -286,7 +286,46 @@ const
   CASTLE_VSM_PHYSICAL_TILES_PER_ROW   = 16;
   CASTLE_VSM_MAX_PHYSICAL_TILES       = 256;
 
+  { Maximum custom user sampler uniforms per Effect / ComposedShader / ScreenEffect (Set 2, Bindings 2..9) }
+  CASTLE_MAX_USER_EFFECT_SAMPLERS     = 8;
+
 type
+  { Reflected std140 member of CastleUserEffectBlock (Set 2, Binding 1) }
+  TUserEffectUniformDesc = record
+    Name: String;
+    GLSLType: String;
+    DeclSuffix: String;
+    ByteOffset: PtrUInt;
+    ByteSize: PtrUInt;
+    ArrayCount: Cardinal;
+  end;
+
+  { Reflected custom sampler uniform at Set 2, Binding (2 + SlotIndex) }
+  TUserEffectSamplerDesc = record
+    Name: String;
+    GLSLType: String;
+    SlotIndex: Integer;
+  end;
+
+  { Reflected custom inter-stage varying assigned deterministic location }
+  TUserEffectVaryingDesc = record
+    Name: String;
+    GLSLType: String;
+    InterpQual: String;
+    Location: Cardinal;
+    LocationSlots: Cardinal;
+  end;
+
+  { Unified cross-stage reflection layout for an X3D Effect / ComposedShader / ScreenEffect }
+  TUserEffectShaderLayout = record
+    Uniforms: array of TUserEffectUniformDesc;
+    Samplers: array of TUserEffectSamplerDesc;
+    Varyings: array of TUserEffectVaryingDesc;
+    TotalUBOSize: PtrUInt;
+    function FindUniform(const AName: String; out ADesc: TUserEffectUniformDesc): Boolean;
+    function FindSampler(const AName: String; out ADesc: TUserEffectSamplerDesc): Boolean;
+    function FindVarying(const AName: String; out ADesc: TUserEffectVaryingDesc): Boolean;
+  end;
   { HDR Tonemapping Operators (Phase 15.3) }
   TCastleTonemapOperator = (
     tmoLinear     = 0,
@@ -600,6 +639,24 @@ type
       OpenGL built-in uniforms/variables while auto-upgrading them to #version 450 }
     function UpgradeUserEffectUniforms(const UserEffectSource: String): String;
 
+    { Extracts a unified cross-stage std140 UBO, sampler-slot, and varying-location
+      layout across Vertex, Geometry, and Fragment Effect / ComposedShader parts so
+      interface declarations can be packed by uniform name (independent of X3D vs GLSL
+      declaration order) and custom varyings receive matching CASTLE_LOCATION indices. }
+    function ExtractUserEffectLayout(
+      const AVertSource, AFragSource: String;
+      const AGeomSource: String = '';
+      const AFirstVaryingLocation: Cardinal = 10): TUserEffectShaderLayout;
+
+    { Upgrades a single stage's Effect / ComposedShader / ScreenEffect GLSL source
+      against a unified cross-stage TUserEffectShaderLayout. }
+    function UpgradeUserEffectStageSource(
+      const AStage: TRHIShaderStage;
+      const AStageSource: String;
+      const ALayout: TUserEffectShaderLayout;
+      const AFirstSamplerBinding: Cardinal = 2;
+      const ASetIndex: Cardinal = 2): String;
+
     { Scans user Effect / EffectPart GLSL code for deprecated OpenGL built-in
       uniforms, attributes, outputs, and texture functions (e.g. gl_ModelViewProjectionMatrix,
       gl_ModelViewMatrix, gl_ProjectionMatrix, gl_NormalMatrix, gl_Vertex, gl_Normal,
@@ -629,6 +686,10 @@ type
     { Builds GLSL 450 preamble for post-processing screen effects (TCastleScreenEffects) }
     function GenerateScreenEffectPreamble(const AStage: TRHIShaderStage; const HasDepth: Boolean): String;
 
+    { Builds GLSL 450 preamble for custom 2D fragment shaders (TDrawableImage.CustomShader)
+      paired with TCastleBatch2DRenderer (64-byte push constants + location 0/1 stage IO). }
+    function GenerateBatch2DFragmentPreamble: String;
+
     { Generates a complete GLSL 450 compute shader for GPU-driven frustum & distance culling
       that populates VkDrawIndexedIndirectCommand entries and atomic visibility counters. }
     function GenerateComputeCullingShader(const AWorkgroupSizeX: Cardinal = 64): String;
@@ -656,7 +717,24 @@ type
       skinning (Set 2 CastleSkinningBlock) and tangent-space basis (castle_tangent_to_eye_space). }
     function GenerateDefault3DVertexShader(
       const HasSkinning: Boolean = False;
-      const HasTangents: Boolean = False): String;
+      const HasTangents: Boolean = False): String; overload;
+
+    { Generates a complete GLSL 450 3D vertex shader declaring only the vertex attributes
+      and Set 2 CastleSkinningBlock actually present on the shape, preventing Vulkan
+      VUID-VkGraphicsPipelineCreateInfo-Input-07904 on unprovided attributes while
+      aliasing absent attributes to safe defaults. }
+    function GenerateDefault3DVertexShader(
+      const HasSkinning, HasTangents, HasTexCoord1, HasColorPerVertex: Boolean): String; overload;
+
+    { Generates the 3D vertex shader preamble with conditional vertex input attributes
+      and conditional Set 2 CastleSkinningBlock. }
+    function GeneratePreambleFor3DVertex(
+      const AHasSkinning, AHasTangents, AHasTexCoord1, AHasColorPerVertex: Boolean): String;
+
+    { Generates standard Set 0..1 (and optional Set 2 CastleSkinningBlock) uniform blocks. }
+    function GenerateStandardUniformBlocksForStage(
+      const AStage: TRHIShaderStage;
+      const AIncludeSkinningUBO: Boolean): String;
 
     { Generates a complete GLSL 450 3D fragment shader supporting Cook-Torrance GGX PBR,
       Phong, and Unlit shading models, multi-texture sampling (BaseColor, Normal,
@@ -1901,17 +1979,25 @@ function TCastleShaderGeneratorRHI.GenerateVersionAndLayoutMacrosForStage(
 begin
   case FBackend of
     rbVulkan:
-      Result :=
-        '#version 450' + NL +
-        '#define CASTLE_VULKAN 1' + NL +
-        '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, set = SetIdx, binding = BindIdx)' + NL +
-        '#define CASTLE_SSBO(SetIdx, BindIdx) layout(std430, set = SetIdx, binding = BindIdx)' + NL +
-        '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(set = SetIdx, binding = BindIdx)' + NL +
-        '#define CASTLE_IMAGE(SetIdx, BindIdx, ImgFmt) layout(ImgFmt, set = SetIdx, binding = BindIdx)' + NL +
-        '#define CASTLE_PUSH_CONSTANT layout(push_constant)' + NL +
-        '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
-        '#define CASTLE_VERTEX_INDEX gl_VertexIndex' + NL +
-        '#define CASTLE_INSTANCE_INDEX gl_InstanceIndex' + NL;
+      begin
+        Result :=
+          '#version 450' + NL;
+        if AStage = ssFragment then
+          Result := Result +
+            'precision highp float;' + NL +
+            'precision highp int;' + NL;
+        Result := Result +
+          '#define CASTLE_VULKAN 1' + NL +
+          '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, set = SetIdx, binding = BindIdx)' + NL +
+          '#define CASTLE_SSBO(SetIdx, BindIdx) layout(std430, set = SetIdx, binding = BindIdx)' + NL +
+          '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(set = SetIdx, binding = BindIdx)' + NL +
+          '#define CASTLE_DESCRIPTOR_SET(SetIdx, BindIdx) layout(set = SetIdx, binding = BindIdx)' + NL +
+          '#define CASTLE_IMAGE(SetIdx, BindIdx, ImgFmt) layout(ImgFmt, set = SetIdx, binding = BindIdx)' + NL +
+          '#define CASTLE_PUSH_CONSTANT layout(push_constant)' + NL +
+          '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
+          '#define CASTLE_VERTEX_INDEX gl_VertexIndex' + NL +
+          '#define CASTLE_INSTANCE_INDEX gl_InstanceIndex' + NL;
+      end;
 
     rbOpenGL:
       begin
@@ -1932,6 +2018,7 @@ begin
           '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
           '#define CASTLE_SSBO(SetIdx, BindIdx) layout(std430, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
           '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+          '#define CASTLE_DESCRIPTOR_SET(SetIdx, BindIdx) layout(binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
           '#define CASTLE_IMAGE(SetIdx, BindIdx, ImgFmt) layout(ImgFmt, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
           { Maps Push Constants to reserved UBO slot 24 in OpenGL }
           '#define CASTLE_PUSH_CONSTANT layout(std140, binding = 24)' + NL +
@@ -1952,6 +2039,7 @@ begin
             '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
             '#define CASTLE_SSBO(SetIdx, BindIdx) layout(std430, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
             '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
+            '#define CASTLE_DESCRIPTOR_SET(SetIdx, BindIdx) layout(binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
             '#define CASTLE_IMAGE(SetIdx, BindIdx, ImgFmt) layout(ImgFmt, binding = CASTLE_GL_BIND(SetIdx, BindIdx))' + NL +
             '#define CASTLE_PUSH_CONSTANT layout(std140, binding = 24)' + NL +
             '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
@@ -1966,6 +2054,7 @@ begin
             '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140)' + NL +
             '#define CASTLE_SSBO(SetIdx, BindIdx) layout(std430)' + NL +
             '#define CASTLE_SAMPLER(SetIdx, BindIdx)' + NL +
+            '#define CASTLE_DESCRIPTOR_SET(SetIdx, BindIdx)' + NL +
             '#define CASTLE_IMAGE(SetIdx, BindIdx, ImgFmt) layout(ImgFmt)' + NL +
             '#define CASTLE_PUSH_CONSTANT layout(std140)' + NL +
             '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
@@ -1977,8 +2066,15 @@ end;
 
 function TCastleShaderGeneratorRHI.GenerateStandardUniformBlocks(
   const AStage: TRHIShaderStage): String;
+begin
+  Result := GenerateStandardUniformBlocksForStage(AStage, True);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateStandardUniformBlocksForStage(
+  const AStage: TRHIShaderStage;
+  const AIncludeSkinningUBO: Boolean): String;
 var
-  LightAliases: String;
+  LightAliases, SkinningSection: String;
   I: Integer;
 begin
   LightAliases := '';
@@ -1997,6 +2093,19 @@ begin
       Format('#define castle_LightSource%dAmbientColor CastleLights.u_Lights[%d].AmbientColor.rgb', [I, I]) + NL +
       Format('#define castle_projector_matrix_%d CastleLights.u_Lights[%d].ProjectorMatrix', [I, I]) + NL;
   end;
+
+  if AIncludeSkinningUBO then
+    SkinningSection :=
+      '/* --- Set 2: Per-Object / Skinning Uniforms --- */' + NL +
+      'CASTLE_UBO(2, 0) uniform CastleSkinningBlock {' + NL +
+      '  mat4 u_JointMatrices[256];' + NL +
+      '  uint u_JointCount;' + NL +
+      '} CastleSkinning;' + NL +
+      NL +
+      '#define castle_JointMatrix CastleSkinning.u_JointMatrices' + NL +
+      NL
+  else
+    SkinningSection := '';
 
   Result :=
     '/* --- Set 0, Binding 0: Global / Per-Pass Uniforms --- */' + NL +
@@ -2076,14 +2185,7 @@ begin
     'CASTLE_SAMPLER(1, 6) uniform sampler2D castle_brdf_lut_texture;' + NL +
     'CASTLE_SAMPLER(1, 7) uniform samplerCube castle_env_specular_texture;' + NL +
     NL +
-    '/* --- Set 2: Per-Object / Skinning Uniforms --- */' + NL +
-    'CASTLE_UBO(2, 0) uniform CastleSkinningBlock {' + NL +
-    '  mat4 u_JointMatrices[256];' + NL +
-    '  uint u_JointCount;' + NL +
-    '} CastleSkinning;' + NL +
-    NL +
-    '#define castle_JointMatrix CastleSkinning.u_JointMatrices' + NL +
-    NL +
+    SkinningSection +
     '/* --- Push Constants: Per-Draw Matrices --- */' + NL +
     'CASTLE_PUSH_CONSTANT uniform CastlePushConstants {' + NL +
     '  mat4 u_ModelViewMatrix;' + NL +
@@ -2123,7 +2225,9 @@ begin
         'CASTLE_LOCATION(2) out vec2 castle_tex_coord0;' + NL +
         'CASTLE_LOCATION(3) out vec2 castle_tex_coord1;' + NL +
         'CASTLE_LOCATION(4) out vec4 castle_color_per_vertex;' + NL +
-        'CASTLE_LOCATION(5) out mat3 castle_tangent_to_eye_space;' + NL;
+        'CASTLE_LOCATION(5) out mat3 castle_tangent_to_eye_space;' + NL +
+        '#define castle_TexCoord0 vec4(castle_tex_coord0, 0.0, 1.0)' + NL +
+        '#define castle_TexCoord1 vec4(castle_tex_coord1, 0.0, 1.0)' + NL;
 
     ssFragment:
       Result :=
@@ -2134,6 +2238,32 @@ begin
         'CASTLE_LOCATION(3) in vec2 castle_tex_coord1;' + NL +
         'CASTLE_LOCATION(4) in vec4 castle_color_per_vertex;' + NL +
         'CASTLE_LOCATION(5) in mat3 castle_tangent_to_eye_space;' + NL +
+        '#define castle_TexCoord0 vec4(castle_tex_coord0, 0.0, 1.0)' + NL +
+        '#define castle_TexCoord1 vec4(castle_tex_coord1, 0.0, 1.0)' + NL +
+        '#define castle_ColorPerVertex castle_color_per_vertex' + NL +
+        NL +
+        '/* --- CGE Color-Space Helper Functions (terrain.fs & Effect shaders) --- */' + NL +
+        'vec4 castle_texture_color_to_linear(const in vec4 srgbIn) {' + NL +
+        '#ifdef CASTLE_GAMMA_CORRECTION' + NL +
+        '  return vec4(pow(max(srgbIn.rgb, vec3(0.0)), vec3(2.2)), srgbIn.a);' + NL +
+        '#else' + NL +
+        '  return srgbIn;' + NL +
+        '#endif' + NL +
+        '}' + NL +
+        'vec3 castle_texture_color_to_linear(const in vec3 srgbIn) {' + NL +
+        '#ifdef CASTLE_GAMMA_CORRECTION' + NL +
+        '  return pow(max(srgbIn, vec3(0.0)), vec3(2.2));' + NL +
+        '#else' + NL +
+        '  return srgbIn;' + NL +
+        '#endif' + NL +
+        '}' + NL +
+        'vec3 castle_linear_to_screen(const in vec3 linearIn) {' + NL +
+        '#ifdef CASTLE_GAMMA_CORRECTION' + NL +
+        '  return pow(max(linearIn, vec3(0.0)), vec3(1.0 / 2.2));' + NL +
+        '#else' + NL +
+        '  return linearIn;' + NL +
+        '#endif' + NL +
+        '}' + NL +
         NL +
         '/* --- Fragment Color Output --- */' + NL +
         'CASTLE_LOCATION(0) out vec4 castle_FragColor;' + NL;
@@ -2181,6 +2311,54 @@ begin
       GenerateVersionAndLayoutMacrosForStage(AStage) + NL +
       GenerateStandardUniformBlocks(AStage) + NL +
       GenerateStageIO(AStage) + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GeneratePreambleFor3DVertex(
+  const AHasSkinning, AHasTangents, AHasTexCoord1, AHasColorPerVertex: Boolean): String;
+var
+  AttrIO: String;
+begin
+  AttrIO :=
+    '/* --- Active Standard Vertex Attributes --- */' + NL +
+    'CASTLE_LOCATION(0) in vec4 castle_Vertex;' + NL +
+    'CASTLE_LOCATION(1) in vec3 castle_Normal;' + NL +
+    'CASTLE_LOCATION(2) in vec2 castle_MultiTexCoord0;' + NL;
+
+  if AHasTexCoord1 then
+    AttrIO := AttrIO + 'CASTLE_LOCATION(3) in vec2 castle_MultiTexCoord1;' + NL
+  else
+    AttrIO := AttrIO + '#define castle_MultiTexCoord1 (castle_MultiTexCoord0.xy)' + NL;
+
+  if AHasColorPerVertex then
+    AttrIO := AttrIO + 'CASTLE_LOCATION(4) in vec4 castle_ColorPerVertex;' + NL
+  else
+    AttrIO := AttrIO + '#define castle_ColorPerVertex vec4(1.0)' + NL;
+
+  if AHasTangents then
+    AttrIO := AttrIO + 'CASTLE_LOCATION(5) in vec4 castle_Tangent;' + NL
+  else
+    AttrIO := AttrIO + '#define castle_Tangent vec4(1.0, 0.0, 0.0, 1.0)' + NL;
+
+  if AHasSkinning then
+    AttrIO := AttrIO +
+      'CASTLE_LOCATION(6) in vec4 castle_Joints0;' + NL +
+      'CASTLE_LOCATION(7) in vec4 castle_Weights0;' + NL;
+
+  AttrIO := AttrIO + NL +
+    '/* --- Vertex-to-Fragment Varyings --- */' + NL +
+    'CASTLE_LOCATION(0) out vec4 castle_vertex_eye;' + NL +
+    'CASTLE_LOCATION(1) out vec3 castle_normal_eye;' + NL +
+    'CASTLE_LOCATION(2) out vec2 castle_tex_coord0;' + NL +
+    'CASTLE_LOCATION(3) out vec2 castle_tex_coord1;' + NL +
+    'CASTLE_LOCATION(4) out vec4 castle_color_per_vertex;' + NL +
+    'CASTLE_LOCATION(5) out mat3 castle_tangent_to_eye_space;' + NL +
+    '#define castle_TexCoord0 vec4(castle_tex_coord0, 0.0, 1.0)' + NL +
+    '#define castle_TexCoord1 vec4(castle_tex_coord1, 0.0, 1.0)' + NL;
+
+  Result :=
+    GenerateVersionAndLayoutMacrosForStage(ssVertex) + NL +
+    GenerateStandardUniformBlocksForStage(ssVertex, AHasSkinning) + NL +
+    AttrIO + NL;
 end;
 
 function TCastleShaderGeneratorRHI.GenerateComputePreamble(const ALocalSizeX,
@@ -2517,6 +2695,724 @@ begin
   end;
 end;
 
+function TUserEffectShaderLayout.FindUniform(const AName: String;
+  out ADesc: TUserEffectUniformDesc): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(Uniforms) do
+    if Uniforms[I].Name = AName then
+    begin
+      ADesc := Uniforms[I];
+      Exit(True);
+    end;
+  FillChar(ADesc, SizeOf(ADesc), 0);
+  Result := False;
+end;
+
+function TUserEffectShaderLayout.FindSampler(const AName: String;
+  out ADesc: TUserEffectSamplerDesc): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(Samplers) do
+    if Samplers[I].Name = AName then
+    begin
+      ADesc := Samplers[I];
+      Exit(True);
+    end;
+  FillChar(ADesc, SizeOf(ADesc), 0);
+  Result := False;
+end;
+
+function TUserEffectShaderLayout.FindVarying(const AName: String;
+  out ADesc: TUserEffectVaryingDesc): Boolean;
+var
+  I: Integer;
+  LookupName: String;
+begin
+  LookupName := AName;
+  for I := 0 to High(Varyings) do
+    if Varyings[I].Name = LookupName then
+    begin
+      ADesc := Varyings[I];
+      Exit(True);
+    end;
+  if IsSuffix('_geoshader', LookupName, False) then
+  begin
+    LookupName := Copy(LookupName, 1, Length(LookupName) - Length('_geoshader'));
+    for I := 0 to High(Varyings) do
+      if Varyings[I].Name = LookupName then
+      begin
+        ADesc := Varyings[I];
+        Exit(True);
+      end;
+  end;
+  FillChar(ADesc, SizeOf(ADesc), 0);
+  Result := False;
+end;
+
+function IsBuiltInCastleVaryingName(const AName: String): Boolean;
+const
+  BuiltInVaryings: array[0..17] of String = (
+    'castle_vertex_eye',
+    'castle_normal_eye',
+    'castle_tex_coord0',
+    'castle_tex_coord1',
+    'castle_TexCoord0',
+    'castle_TexCoord1',
+    'castle_color_per_vertex',
+    'castle_ColorPerVertex',
+    'castle_tangent_to_eye_space',
+    'castle_fog_frag_coord',
+    'castle_tex_coord0_4d',
+    'castle_FragColor',
+    'castle_vertex_eye_geoshader',
+    'castle_normal_eye_geoshader',
+    'castle_tex_coord0_geoshader',
+    'castle_tex_coord1_geoshader',
+    'castle_color_per_vertex_geoshader',
+    'castle_tangent_to_eye_space_geoshader'
+  );
+var
+  S: String;
+begin
+  for S in BuiltInVaryings do
+    if S = AName then
+      Exit(True);
+  Result := False;
+end;
+
+function IsBuiltInScreenEffectSamplerName(const AName: String): Boolean;
+begin
+  Result := (AName = 'screen') or (AName = 'screen_depth');
+end;
+
+function IsBuiltInCastleVertexAttrName(const AName: String): Boolean;
+const
+  BuiltInAttrs: array[0..12] of String = (
+    'castle_Vertex',
+    'castle_Normal',
+    'castle_MultiTexCoord0',
+    'castle_MultiTexCoord1',
+    'castle_ColorPerVertex',
+    'castle_Tangent',
+    'castle_Joints0',
+    'castle_Weights0',
+    'castle_SkinJoints0',
+    'castle_SkinWeights0',
+    'castle_FogCoord',
+    'vertex',
+    'tex_coord'
+  );
+var
+  S: String;
+begin
+  for S in BuiltInAttrs do
+    if S = AName then
+      Exit(True);
+  Result := False;
+end;
+
+procedure ComputeStd140TypeLayout(const AGLSLType: String;
+  const AArrayCount: Cardinal; out ABaseAlign, AByteSize: PtrUInt);
+begin
+  if AArrayCount > 0 then
+  begin
+    ABaseAlign := 16;
+    if AGLSLType = 'mat4' then
+      AByteSize := PtrUInt(AArrayCount) * 64
+    else if AGLSLType = 'mat3' then
+      AByteSize := PtrUInt(AArrayCount) * 48
+    else if AGLSLType = 'mat2' then
+      AByteSize := PtrUInt(AArrayCount) * 32
+    else
+      AByteSize := PtrUInt(AArrayCount) * 16;
+    Exit;
+  end;
+
+  if (AGLSLType = 'float') or (AGLSLType = 'int') or
+     (AGLSLType = 'uint') or (AGLSLType = 'bool') then
+  begin
+    ABaseAlign := 4;
+    AByteSize := 4;
+  end else
+  if (AGLSLType = 'vec2') or (AGLSLType = 'ivec2') or
+     (AGLSLType = 'uvec2') or (AGLSLType = 'bvec2') then
+  begin
+    ABaseAlign := 8;
+    AByteSize := 8;
+  end else
+  if (AGLSLType = 'vec3') or (AGLSLType = 'ivec3') or
+     (AGLSLType = 'uvec3') or (AGLSLType = 'bvec3') then
+  begin
+    ABaseAlign := 16;
+    AByteSize := 12;
+  end else
+  if (AGLSLType = 'vec4') or (AGLSLType = 'ivec4') or
+     (AGLSLType = 'uvec4') or (AGLSLType = 'bvec4') then
+  begin
+    ABaseAlign := 16;
+    AByteSize := 16;
+  end else
+  if AGLSLType = 'mat2' then
+  begin
+    ABaseAlign := 16;
+    AByteSize := 32;
+  end else
+  if AGLSLType = 'mat3' then
+  begin
+    ABaseAlign := 16;
+    AByteSize := 48;
+  end else
+  if AGLSLType = 'mat4' then
+  begin
+    ABaseAlign := 16;
+    AByteSize := 64;
+  end else
+  begin
+    ABaseAlign := 16;
+    AByteSize := 16;
+  end;
+end;
+
+function ComputeVaryingLocationSlots(const AGLSLType: String): Cardinal;
+begin
+  if AGLSLType = 'mat4' then
+    Result := 4
+  else if AGLSLType = 'mat3' then
+    Result := 3
+  else if AGLSLType = 'mat2' then
+    Result := 2
+  else
+    Result := 1;
+end;
+
+function StripGLSLLineCommentAndTrackState(const ALine: String;
+  var AInBlockComment: Boolean; var ABraceDepth: Integer): String;
+var
+  I, Len: Integer;
+  C, NextC: Char;
+  InSingleLineComment: Boolean;
+  SB: TStringBuilder;
+begin
+  Len := Length(ALine);
+  if Len = 0 then Exit('');
+  SB := TStringBuilder.Create(Len);
+  try
+    I := 1;
+    InSingleLineComment := False;
+    while I <= Len do
+    begin
+      C := ALine[I];
+      if I < Len then NextC := ALine[I + 1] else NextC := #0;
+      if AInBlockComment then
+      begin
+        if (C = '*') and (NextC = '/') then
+        begin
+          AInBlockComment := False;
+          Inc(I, 2);
+          Continue;
+        end;
+        Inc(I);
+        Continue;
+      end;
+      if InSingleLineComment then
+        Break;
+      if (C = '/') and (NextC = '*') then
+      begin
+        AInBlockComment := True;
+        Inc(I, 2);
+        Continue;
+      end;
+      if (C = '/') and (NextC = '/') then
+        Break;
+      if C = '{' then
+        Inc(ABraceDepth)
+      else if (C = '}') and (ABraceDepth > 0) then
+        Dec(ABraceDepth);
+      SB.Append(C);
+      Inc(I);
+    end;
+    Result := Trim(SB.ToString);
+  finally
+    FreeAndNil(SB);
+  end;
+end;
+
+procedure StripGLSLStorageAndPrecisionQualifiers(var ADeclBody: String;
+  out AInterpQual: String);
+var
+  Changed: Boolean;
+begin
+  AInterpQual := '';
+  repeat
+    Changed := False;
+    ADeclBody := Trim(ADeclBody);
+    if IsPrefix('centroid ', ADeclBody, False) then
+    begin
+      ADeclBody := Trim(SEnding(ADeclBody, Length('centroid ') + 1));
+      Changed := True;
+    end else
+    if IsPrefix('flat ', ADeclBody, False) then
+    begin
+      AInterpQual := 'flat ';
+      ADeclBody := Trim(SEnding(ADeclBody, Length('flat ') + 1));
+      Changed := True;
+    end else
+    if IsPrefix('noperspective ', ADeclBody, False) then
+    begin
+      AInterpQual := 'noperspective ';
+      ADeclBody := Trim(SEnding(ADeclBody, Length('noperspective ') + 1));
+      Changed := True;
+    end else
+    if IsPrefix('smooth ', ADeclBody, False) then
+    begin
+      AInterpQual := '';
+      ADeclBody := Trim(SEnding(ADeclBody, Length('smooth ') + 1));
+      Changed := True;
+    end else
+    if IsPrefix('lowp ', ADeclBody, False) then
+    begin
+      ADeclBody := Trim(SEnding(ADeclBody, Length('lowp ') + 1));
+      Changed := True;
+    end else
+    if IsPrefix('mediump ', ADeclBody, False) then
+    begin
+      ADeclBody := Trim(SEnding(ADeclBody, Length('mediump ') + 1));
+      Changed := True;
+    end else
+    if IsPrefix('highp ', ADeclBody, False) then
+    begin
+      ADeclBody := Trim(SEnding(ADeclBody, Length('highp ') + 1));
+      Changed := True;
+    end;
+  until not Changed;
+end;
+
+function TryMatchVaryingDeclarationPrefix(const ATrimmed: String;
+  const AStage: TRHIShaderStage; out ADeclBody: String;
+  out AExplicitDir: String): Boolean;
+begin
+  Result := False;
+  ADeclBody := '';
+  AExplicitDir := '';
+  if (Pos('(', ATrimmed) > 0) or (Pos('{', ATrimmed) > 0) or
+     (Pos(';', ATrimmed) = 0) or IsPrefix('#', ATrimmed, False) then
+    Exit;
+
+  if IsPrefix('varying in ', ATrimmed, False) then
+  begin
+    ADeclBody := Trim(SEnding(ATrimmed, Length('varying in ') + 1));
+    AExplicitDir := 'in';
+    Exit(True);
+  end;
+  if IsPrefix('varying out ', ATrimmed, False) then
+  begin
+    ADeclBody := Trim(SEnding(ATrimmed, Length('varying out ') + 1));
+    AExplicitDir := 'out';
+    Exit(True);
+  end;
+  if IsPrefix('varying ', ATrimmed, False) then
+  begin
+    ADeclBody := Trim(SEnding(ATrimmed, Length('varying ') + 1));
+    Exit(True);
+  end;
+  if IsPrefix('flat out ', ATrimmed, False) or IsPrefix('noperspective out ', ATrimmed, False) or
+     IsPrefix('smooth out ', ATrimmed, False) or
+     ((AStage in [ssVertex, ssGeometry]) and IsPrefix('out ', ATrimmed, False)) then
+  begin
+    if IsPrefix('out ', ATrimmed, False) then
+      ADeclBody := Trim(SEnding(ATrimmed, Length('out ') + 1))
+    else if IsPrefix('flat out ', ATrimmed, False) then
+      ADeclBody := 'flat ' + Trim(SEnding(ATrimmed, Length('flat out ') + 1))
+    else if IsPrefix('noperspective out ', ATrimmed, False) then
+      ADeclBody := 'noperspective ' + Trim(SEnding(ATrimmed, Length('noperspective out ') + 1))
+    else
+      ADeclBody := Trim(SEnding(ATrimmed, Length('smooth out ') + 1));
+    AExplicitDir := 'out';
+    Exit(True);
+  end;
+  if IsPrefix('flat in ', ATrimmed, False) or IsPrefix('noperspective in ', ATrimmed, False) or
+     IsPrefix('smooth in ', ATrimmed, False) or
+     ((AStage in [ssFragment, ssGeometry]) and IsPrefix('in ', ATrimmed, False)) then
+  begin
+    if IsPrefix('in ', ATrimmed, False) then
+      ADeclBody := Trim(SEnding(ATrimmed, Length('in ') + 1))
+    else if IsPrefix('flat in ', ATrimmed, False) then
+      ADeclBody := 'flat ' + Trim(SEnding(ATrimmed, Length('flat in ') + 1))
+    else if IsPrefix('noperspective in ', ATrimmed, False) then
+      ADeclBody := 'noperspective ' + Trim(SEnding(ATrimmed, Length('noperspective in ') + 1))
+    else
+      ADeclBody := Trim(SEnding(ATrimmed, Length('smooth in ') + 1));
+    AExplicitDir := 'in';
+    Exit(True);
+  end;
+end;
+
+function TCastleShaderGeneratorRHI.ExtractUserEffectLayout(
+  const AVertSource, AFragSource: String;
+  const AGeomSource: String;
+  const AFirstVaryingLocation: Cardinal): TUserEffectShaderLayout;
+var
+  UBOCursor: PtrUInt;
+  NextVaryingLoc: Cardinal;
+
+  procedure ScanStage(const AStage: TRHIShaderStage; const ASource: String);
+  var
+    Sanitized, Line, CleanLine, DeclBody, ExplicitDir, InterpQual, VarType,
+      Declarators, OneDecl, BaseName, SuffixStr, CountStr: String;
+    Lines: TStringList;
+    InBlockComment: Boolean;
+    BraceDepth, DepthBefore, SemiPos, SpacePos, CommaPos, BracketPos, EndBracketPos: Integer;
+    ArrCount: Cardinal;
+    BaseAlign, ByteSize: PtrUInt;
+    ExistingUniform: TUserEffectUniformDesc;
+    ExistingSampler: TUserEffectSamplerDesc;
+    ExistingVarying: TUserEffectVaryingDesc;
+    NewIdx: Integer;
+  begin
+    if Trim(ASource) = '' then Exit;
+    Sanitized := SanitizeVulkanShaderSource(ASource);
+    Lines := TStringList.Create;
+    try
+      Lines.Text := Sanitized;
+      InBlockComment := False;
+      BraceDepth := 0;
+      for Line in Lines do
+      begin
+        DepthBefore := BraceDepth;
+        CleanLine := StripGLSLLineCommentAndTrackState(Line, InBlockComment, BraceDepth);
+        if (CleanLine = '') or (DepthBefore <> 0) then
+          Continue;
+
+        if IsPrefix('uniform ', CleanLine, False) and (Pos('{', CleanLine) = 0) and
+           (Pos('(', CleanLine) = 0) then
+        begin
+          DeclBody := Trim(SEnding(CleanLine, Length('uniform ') + 1));
+          SemiPos := Pos(';', DeclBody);
+          if SemiPos > 0 then
+            DeclBody := Trim(Copy(DeclBody, 1, SemiPos - 1));
+          StripGLSLStorageAndPrecisionQualifiers(DeclBody, InterpQual);
+          SpacePos := Pos(' ', DeclBody);
+          if SpacePos > 0 then
+          begin
+            VarType := Trim(Copy(DeclBody, 1, SpacePos - 1));
+            Declarators := Trim(Copy(DeclBody, SpacePos + 1, MaxInt));
+            while Declarators <> '' do
+            begin
+              CommaPos := Pos(',', Declarators);
+              if CommaPos > 0 then
+              begin
+                OneDecl := Trim(Copy(Declarators, 1, CommaPos - 1));
+                Declarators := Trim(Copy(Declarators, CommaPos + 1, MaxInt));
+              end else
+              begin
+                OneDecl := Trim(Declarators);
+                Declarators := '';
+              end;
+              if OneDecl = '' then Continue;
+              BracketPos := Pos('[', OneDecl);
+              ArrCount := 0;
+              SuffixStr := '';
+              if BracketPos > 0 then
+              begin
+                BaseName := Trim(Copy(OneDecl, 1, BracketPos - 1));
+                SuffixStr := Trim(Copy(OneDecl, BracketPos, MaxInt));
+                EndBracketPos := Pos(']', SuffixStr);
+                if EndBracketPos > 1 then
+                begin
+                  CountStr := Trim(Copy(SuffixStr, 2, EndBracketPos - 2));
+                  ArrCount := Max(1, StrToIntDef(CountStr, 1));
+                end else
+                  ArrCount := 1;
+              end else
+                BaseName := OneDecl;
+
+              if (BaseName = '') or IsBuiltInScreenEffectSamplerName(BaseName) then
+                Continue;
+
+              if IsPrefix('sampler', VarType, False) then
+              begin
+                if (not Result.FindSampler(BaseName, ExistingSampler)) and
+                   (Length(Result.Samplers) < CASTLE_MAX_USER_EFFECT_SAMPLERS) then
+                begin
+                  NewIdx := Length(Result.Samplers);
+                  SetLength(Result.Samplers, NewIdx + 1);
+                  Result.Samplers[NewIdx].Name := BaseName;
+                  Result.Samplers[NewIdx].GLSLType := VarType;
+                  Result.Samplers[NewIdx].SlotIndex := NewIdx;
+                end;
+              end else
+              begin
+                if not Result.FindUniform(BaseName, ExistingUniform) then
+                begin
+                  ComputeStd140TypeLayout(VarType, ArrCount, BaseAlign, ByteSize);
+                  UBOCursor := (UBOCursor + BaseAlign - 1) and not (BaseAlign - 1);
+                  NewIdx := Length(Result.Uniforms);
+                  SetLength(Result.Uniforms, NewIdx + 1);
+                  Result.Uniforms[NewIdx].Name := BaseName;
+                  Result.Uniforms[NewIdx].GLSLType := VarType;
+                  Result.Uniforms[NewIdx].DeclSuffix := SuffixStr;
+                  Result.Uniforms[NewIdx].ByteOffset := UBOCursor;
+                  Result.Uniforms[NewIdx].ByteSize := ByteSize;
+                  Result.Uniforms[NewIdx].ArrayCount := ArrCount;
+                  Inc(UBOCursor, ByteSize);
+                end;
+              end;
+            end;
+          end;
+        end else
+        if TryMatchVaryingDeclarationPrefix(CleanLine, AStage, DeclBody, ExplicitDir) then
+        begin
+          SemiPos := Pos(';', DeclBody);
+          if SemiPos > 0 then
+            DeclBody := Trim(Copy(DeclBody, 1, SemiPos - 1));
+          StripGLSLStorageAndPrecisionQualifiers(DeclBody, InterpQual);
+          SpacePos := Pos(' ', DeclBody);
+          if SpacePos > 0 then
+          begin
+            VarType := Trim(Copy(DeclBody, 1, SpacePos - 1));
+            Declarators := Trim(Copy(DeclBody, SpacePos + 1, MaxInt));
+            while Declarators <> '' do
+            begin
+              CommaPos := Pos(',', Declarators);
+              if CommaPos > 0 then
+              begin
+                OneDecl := Trim(Copy(Declarators, 1, CommaPos - 1));
+                Declarators := Trim(Copy(Declarators, CommaPos + 1, MaxInt));
+              end else
+              begin
+                OneDecl := Trim(Declarators);
+                Declarators := '';
+              end;
+              BracketPos := Pos('[', OneDecl);
+              if BracketPos > 0 then
+                BaseName := Trim(Copy(OneDecl, 1, BracketPos - 1))
+              else
+                BaseName := OneDecl;
+              if IsSuffix('_geoshader', BaseName, False) then
+                BaseName := Copy(BaseName, 1, Length(BaseName) - Length('_geoshader'));
+              if (BaseName = '') or IsBuiltInCastleVaryingName(BaseName) then
+                Continue;
+              if not Result.FindVarying(BaseName, ExistingVarying) then
+              begin
+                NewIdx := Length(Result.Varyings);
+                SetLength(Result.Varyings, NewIdx + 1);
+                Result.Varyings[NewIdx].Name := BaseName;
+                Result.Varyings[NewIdx].GLSLType := VarType;
+                Result.Varyings[NewIdx].InterpQual := InterpQual;
+                Result.Varyings[NewIdx].Location := NextVaryingLoc;
+                Result.Varyings[NewIdx].LocationSlots := ComputeVaryingLocationSlots(VarType);
+                Inc(NextVaryingLoc, Result.Varyings[NewIdx].LocationSlots);
+              end;
+            end;
+          end;
+        end;
+      end;
+    finally
+      FreeAndNil(Lines);
+    end;
+  end;
+
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  UBOCursor := 0;
+  NextVaryingLoc := AFirstVaryingLocation;
+  ScanStage(ssVertex, AVertSource);
+  ScanStage(ssGeometry, AGeomSource);
+  ScanStage(ssFragment, AFragSource);
+  if Length(Result.Uniforms) > 0 then
+  begin
+    Result.TotalUBOSize := (UBOCursor + 15) and not PtrUInt(15);
+    if Result.TotalUBOSize = 0 then
+      Result.TotalUBOSize := 16;
+  end;
+end;
+
+function TCastleShaderGeneratorRHI.UpgradeUserEffectStageSource(
+  const AStage: TRHIShaderStage;
+  const AStageSource: String;
+  const ALayout: TUserEffectShaderLayout;
+  const AFirstSamplerBinding: Cardinal;
+  const ASetIndex: Cardinal): String;
+var
+  Sanitized, Line, CleanLine, DeclBody, ExplicitDir, InterpQual, VarType,
+    Declarators, OneDecl, BaseName, SuffixStr, DirKeyword, HeaderDecls: String;
+  Lines: TStringList;
+  UBOMembers, AliasDefines, SamplerDecls, BodyBuilder: TStringBuilder;
+  InBlockComment: Boolean;
+  BraceDepth, DepthBefore, SemiPos, SpacePos, CommaPos, BracketPos, I: Integer;
+  VDesc: TUserEffectVaryingDesc;
+begin
+  if FBackend <> rbVulkan then
+    Exit(AStageSource);
+  if Trim(AStageSource) = '' then
+    Exit('');
+
+  Sanitized := SanitizeVulkanShaderSource(AStageSource);
+
+  Lines := TStringList.Create;
+  UBOMembers := TStringBuilder.Create;
+  AliasDefines := TStringBuilder.Create;
+  SamplerDecls := TStringBuilder.Create;
+  BodyBuilder := TStringBuilder.Create;
+  try
+    for I := 0 to High(ALayout.Uniforms) do
+    begin
+      UBOMembers.AppendLine(Format('  %s u_user_%s%s;',
+        [ALayout.Uniforms[I].GLSLType, ALayout.Uniforms[I].Name, ALayout.Uniforms[I].DeclSuffix]));
+      AliasDefines.AppendLine(Format('#undef %s', [ALayout.Uniforms[I].Name]));
+      AliasDefines.AppendLine(Format('#define %s CastleUserEffect.u_user_%s',
+        [ALayout.Uniforms[I].Name, ALayout.Uniforms[I].Name]));
+    end;
+
+    for I := 0 to High(ALayout.Samplers) do
+      SamplerDecls.AppendLine(Format('CASTLE_SAMPLER(%d, %d) uniform %s %s;',
+        [ASetIndex, Integer(AFirstSamplerBinding) + ALayout.Samplers[I].SlotIndex,
+         ALayout.Samplers[I].GLSLType, ALayout.Samplers[I].Name]));
+
+    Lines.Text := Sanitized;
+    InBlockComment := False;
+    BraceDepth := 0;
+    for Line in Lines do
+    begin
+      DepthBefore := BraceDepth;
+      CleanLine := StripGLSLLineCommentAndTrackState(Line, InBlockComment, BraceDepth);
+      if (CleanLine <> '') and (DepthBefore = 0) and
+         IsPrefix('uniform ', CleanLine, False) and (Pos('{', CleanLine) = 0) and
+         (Pos('(', CleanLine) = 0) then
+      begin
+        DeclBody := Trim(SEnding(CleanLine, Length('uniform ') + 1));
+        SemiPos := Pos(';', DeclBody);
+        if SemiPos > 0 then
+          DeclBody := Trim(Copy(DeclBody, 1, SemiPos - 1));
+        StripGLSLStorageAndPrecisionQualifiers(DeclBody, InterpQual);
+        SpacePos := Pos(' ', DeclBody);
+        if SpacePos > 0 then
+        begin
+          Declarators := Trim(Copy(DeclBody, SpacePos + 1, MaxInt));
+          if IsBuiltInScreenEffectSamplerName(Declarators) then
+            BodyBuilder.AppendLine('// [Vulkan RHI screen sampler]: ' + Line)
+          else
+            BodyBuilder.AppendLine('// [Vulkan RHI Set 2 uniform]: ' + Line);
+        end else
+          BodyBuilder.AppendLine(Line);
+      end else
+      if (CleanLine <> '') and (DepthBefore = 0) and
+         TryMatchVaryingDeclarationPrefix(CleanLine, AStage, DeclBody, ExplicitDir) then
+      begin
+        SemiPos := Pos(';', DeclBody);
+        if SemiPos > 0 then
+          DeclBody := Trim(Copy(DeclBody, 1, SemiPos - 1));
+        StripGLSLStorageAndPrecisionQualifiers(DeclBody, InterpQual);
+        SpacePos := Pos(' ', DeclBody);
+        if SpacePos > 0 then
+        begin
+          VarType := Trim(Copy(DeclBody, 1, SpacePos - 1));
+          Declarators := Trim(Copy(DeclBody, SpacePos + 1, MaxInt));
+          while Declarators <> '' do
+          begin
+            CommaPos := Pos(',', Declarators);
+            if CommaPos > 0 then
+            begin
+              OneDecl := Trim(Copy(Declarators, 1, CommaPos - 1));
+              Declarators := Trim(Copy(Declarators, CommaPos + 1, MaxInt));
+            end else
+            begin
+              OneDecl := Trim(Declarators);
+              Declarators := '';
+            end;
+            BracketPos := Pos('[', OneDecl);
+            if BracketPos > 0 then
+            begin
+              BaseName := Trim(Copy(OneDecl, 1, BracketPos - 1));
+              SuffixStr := Trim(Copy(OneDecl, BracketPos, MaxInt));
+              if SuffixStr = '[CASTLE_GEOMETRY_INPUT_SIZE]' then
+                SuffixStr := '[]';
+            end else
+            begin
+              BaseName := OneDecl;
+              SuffixStr := '';
+            end;
+            if IsBuiltInCastleVaryingName(BaseName) then
+              BodyBuilder.AppendLine('// [Vulkan RHI built-in varying]: ' + BaseName)
+            else if ALayout.FindVarying(BaseName, VDesc) then
+            begin
+              if ExplicitDir <> '' then
+                DirKeyword := ExplicitDir
+              else if AStage = ssVertex then
+                DirKeyword := 'out'
+              else
+                DirKeyword := 'in';
+              BodyBuilder.AppendLine(Format('CASTLE_LOCATION(%d) %s%s %s %s%s;',
+                [VDesc.Location, VDesc.InterpQual, DirKeyword, VarType, BaseName, SuffixStr]));
+            end else
+              BodyBuilder.AppendLine(Line);
+          end;
+        end else
+          BodyBuilder.AppendLine(Line);
+      end else
+      if (CleanLine <> '') and (DepthBefore = 0) and (AStage = ssVertex) and
+         (Pos('(', CleanLine) = 0) and (Pos('{', CleanLine) = 0) and (Pos(';', CleanLine) > 0) and
+         (IsPrefix('attribute ', CleanLine, False) or IsPrefix('in ', CleanLine, False)) then
+      begin
+        if IsPrefix('attribute ', CleanLine, False) then
+          DeclBody := Trim(SEnding(CleanLine, Length('attribute ') + 1))
+        else
+          DeclBody := Trim(SEnding(CleanLine, Length('in ') + 1));
+        SemiPos := Pos(';', DeclBody);
+        if SemiPos > 0 then
+          DeclBody := Trim(Copy(DeclBody, 1, SemiPos - 1));
+        StripGLSLStorageAndPrecisionQualifiers(DeclBody, InterpQual);
+        SpacePos := Pos(' ', DeclBody);
+        if SpacePos > 0 then
+        begin
+          BaseName := Trim(Copy(DeclBody, SpacePos + 1, MaxInt));
+          BracketPos := Pos('[', BaseName);
+          if BracketPos > 0 then
+            BaseName := Trim(Copy(BaseName, 1, BracketPos - 1));
+          if IsBuiltInCastleVertexAttrName(BaseName) then
+            BodyBuilder.AppendLine('// [Vulkan RHI built-in attribute]: ' + BaseName)
+          else
+            BodyBuilder.AppendLine(Line);
+        end else
+          BodyBuilder.AppendLine(Line);
+      end else
+        BodyBuilder.AppendLine(Line);
+    end;
+
+    HeaderDecls := '';
+    if UBOMembers.Length > 0 then
+      HeaderDecls := HeaderDecls +
+        '/* --- Auto-Generated Set 2 UBO for User X3D Effect Node --- */' + NL +
+        Format('CASTLE_UBO(%d, 1) uniform CastleUserEffectBlock {', [ASetIndex]) + NL +
+        UBOMembers.ToString +
+        '} CastleUserEffect;' + NL +
+        AliasDefines.ToString + NL;
+    if SamplerDecls.Length > 0 then
+      HeaderDecls := HeaderDecls + SamplerDecls.ToString + NL;
+
+    Result := HeaderDecls + UpgradeLegacyGLSLBuiltIns(BodyBuilder.ToString, 'Effect');
+    { Isolate user EffectPart uniform macros (e.g. terrain.fs uniform vec4 metallic/roughness)
+      from CGE's own local variables inside main(), while keeping macros active when AStageSource
+      itself defines main() (ComposedShader / ScreenEffect). }
+    if (Length(ALayout.Uniforms) > 0) and (Pos('main(', AStageSource) = 0) and
+       (Pos('main (', AStageSource) = 0) then
+    begin
+      Result := Result + NL;
+      for I := 0 to High(ALayout.Uniforms) do
+        Result := Result + Format('#undef %s', [ALayout.Uniforms[I].Name]) + NL;
+    end;
+  finally
+    FreeAndNil(BodyBuilder);
+    FreeAndNil(SamplerDecls);
+    FreeAndNil(AliasDefines);
+    FreeAndNil(UBOMembers);
+    FreeAndNil(Lines);
+  end;
+end;
+
 function TCastleShaderGeneratorRHI.FinalizeVertexShaderSource(
   const StitchedSource: String): String;
 var
@@ -2556,7 +3452,15 @@ begin
 
   if not HasInputLayout then
   begin
-    if HasMain then
+    if Pos('void geometryVertexAdd(const int index, const float scale);', Result) > 0 then
+      Result := StringReplace(
+        Result,
+        'void geometryVertexAdd(const int index, const float scale);',
+        'void geometryVertexAdd(const int index, const float scale);' + NL +
+        'layout(triangles) in;' + NL +
+        'layout(triangle_strip, max_vertices = 3) out;',
+        [])
+    else if HasMain then
       Result := StringReplace(
         Result,
         'void main',
@@ -2565,19 +3469,23 @@ begin
         'void main',
         [])
     else
-      Result := Result + NL +
+      Result :=
         'layout(triangles) in;' + NL +
         'layout(triangle_strip, max_vertices = 3) out;' + NL +
-        'void main()' + NL +
-        '{' + NL +
-        '  for (int i = 0; i < 3; ++i) {' + NL +
-        '    gl_Position = gl_in[i].gl_Position;' + NL +
-        '    geometryVertexSet(i);' + NL +
-        '    EmitVertex();' + NL +
-        '  }' + NL +
-        '  EndPrimitive();' + NL +
-        '}' + NL;
+        Result;
   end;
+
+  if not HasMain then
+    Result := Result + NL +
+      'void main()' + NL +
+      '{' + NL +
+      '  for (int i = 0; i < 3; ++i) {' + NL +
+      '    gl_Position = gl_in[i].gl_Position;' + NL +
+      '    geometryVertexSet(i);' + NL +
+      '    EmitVertex();' + NL +
+      '  }' + NL +
+      '  EndPrimitive();' + NL +
+      '}' + NL;
 
   Result := Result + NL +
     '/* --- CGE Geometry Shader Varying Pass-Through & Blending Implementations --- */' + NL +
@@ -2659,6 +3567,11 @@ begin
       if IsBuiltIn then
         ResultBuilder.AppendLine('// [Vulkan RHI UBO]: ' + Line)
       else
+      if (Pos('{', Trimmed) = 0) and IsSuffix(');', Trimmed, False) and
+         ((Pos('castle_texture_color_to_linear(', Trimmed) > 0) or
+          (Pos('castle_linear_to_screen(', Trimmed) > 0)) then
+        ResultBuilder.AppendLine('// [Vulkan RHI built-in helper]: ' + Line)
+      else
         ResultBuilder.AppendLine(Line);
     end;
     Result := ResultBuilder.ToString;
@@ -2679,6 +3592,8 @@ begin
     '#extension GL_ARB_separate_shader_objects : enable' + NL +
     '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, set = SetIdx, binding = BindIdx)' + NL +
     '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(set = SetIdx, binding = BindIdx)' + NL +
+    '#define CASTLE_DESCRIPTOR_SET(SetIdx, BindIdx) layout(set = SetIdx, binding = BindIdx)' + NL +
+    '#define CASTLE_LOCATION(LocIdx) layout(location = LocIdx)' + NL +
     NL +
     '/* --- Screen Effect Push Constants --- */' + NL +
     'layout(push_constant) uniform CastleScreenPushConstants {' + NL +
@@ -2721,6 +3636,22 @@ begin
         '#define gl_FragColor castle_FragColor' + NL +
         '#define screenf_01_position tex_coord' + NL;
   end;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateBatch2DFragmentPreamble: String;
+begin
+  Result :=
+    GenerateVersionAndLayoutMacrosForStage(ssFragment) + NL +
+    '/* --- 2D Batch Push Constants (64 bytes, matches TCastle2DPushConstants) --- */' + NL +
+    'CASTLE_PUSH_CONSTANT uniform Castle2DPushConstants {' + NL +
+    '  mat4 u_ModelViewMatrix;' + NL +
+    '} CastleDraw;' + NL +
+    NL +
+    '/* --- 2D Batch Fragment Inputs & Output (matches BuiltInBatch2DVertSPIRV) --- */' + NL +
+    'CASTLE_LOCATION(0) in vec2 castle_tex_coord0;' + NL +
+    'CASTLE_LOCATION(1) in vec4 castle_color_per_vertex;' + NL +
+    'CASTLE_LOCATION(0) out vec4 castle_FragColor;' + NL +
+    NL;
 end;
 
 function TCastleShaderGeneratorRHI.GenerateComputeCullingShader(
@@ -3001,11 +3932,22 @@ end;
 
 function TCastleShaderGeneratorRHI.GenerateDefault3DVertexShader(
   const HasSkinning: Boolean; const HasTangents: Boolean): String;
-var
-  Body: String;
 begin
+  Result := GenerateDefault3DVertexShader(HasSkinning, HasTangents, True, True);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateDefault3DVertexShader(
+  const HasSkinning, HasTangents, HasTexCoord1, HasColorPerVertex: Boolean): String;
+var
+  PreambleText, Body: String;
+begin
+  if HasSkinning and HasTangents and HasTexCoord1 and HasColorPerVertex then
+    PreambleText := GeneratePreamble(ssVertex)
+  else
+    PreambleText := GeneratePreambleFor3DVertex(HasSkinning, HasTangents, HasTexCoord1, HasColorPerVertex);
+
   Body :=
-    GeneratePreamble(ssVertex) +
+    PreambleText +
     'void main() {' + NL +
     '  vec4 localPos = castle_Vertex;' + NL +
     '  vec3 localNormal = castle_Normal;' + NL +
@@ -3271,11 +4213,13 @@ begin
 
   Result := Result +
     '  /* Unlit Material Early Out (SpecularColor.a < 0.0) */' + NL +
-    '  if (castle_MaterialShininess < 0.0) {' + NL +
-    '    vec3 unlitColor = baseColor.rgb + castle_MaterialEmissive;' + NL;
+    '  if (castle_MaterialShininess < 0.0) {' + NL;
   if HasEmissiveTex then
     Result := Result +
-      '    unlitColor += texture(castle_emissive_texture, castle_tex_coord0).rgb;' + NL;
+      '    vec3 unlitColor = baseColor.rgb + castle_MaterialEmissive * texture(castle_emissive_texture, castle_tex_coord0).rgb;' + NL
+  else
+    Result := Result +
+      '    vec3 unlitColor = baseColor.rgb + castle_MaterialEmissive;' + NL;
   Result := Result +
     '    castle_FragColor = vec4(unlitColor, baseColor.a);' + NL +
     '    return;' + NL +
@@ -3331,7 +4275,7 @@ begin
       '    vec3 L;' + NL +
       '    float attenuation = 1.0;' + NL +
       '    if (light.Position.w == 0.0) {' + NL +
-      '      L = normalize(light.Position.xyz);' + NL +
+      '      L = normalize(-light.Position.xyz);' + NL +
       '    } else {' + NL +
       '      vec3 toLight = light.Position.xyz - castle_vertex_eye.xyz;' + NL +
       '      float dist = length(toLight);' + NL +
@@ -3378,7 +4322,7 @@ begin
     '  vec3 emissive = castle_MaterialEmissive;' + NL;
   if HasEmissiveTex then
     Result := Result +
-      '  emissive += texture(castle_emissive_texture, castle_tex_coord0).rgb;' + NL;
+      '  emissive *= texture(castle_emissive_texture, castle_tex_coord0).rgb;' + NL;
 
   Result := Result +
     '  castle_FragColor = vec4(Lo + emissive, baseColor.a);' + NL +
@@ -8614,9 +9558,10 @@ var
   SkinMode, SpecAA: Single;
 begin
   Result.ModelViewMatrix := AShapeModelView;
-  Result.NormalMatrixRow0 := Vector4(ANormalMatrix.Rows[0], 0.0);
-  Result.NormalMatrixRow1 := Vector4(ANormalMatrix.Rows[1], 0.0);
-  Result.NormalMatrixRow2 := Vector4(ANormalMatrix.Rows[2], 0.0);
+  { GLSL mat3(v0, v1, v2) constructs a matrix from three COLUMN vectors }
+  Result.NormalMatrixRow0 := Vector4(ANormalMatrix.Columns[0], 0.0);
+  Result.NormalMatrixRow1 := Vector4(ANormalMatrix.Columns[1], 0.0);
+  Result.NormalMatrixRow2 := Vector4(ANormalMatrix.Columns[2], 0.0);
   if not AHasSkinJoints then
     SkinMode := 0.0
   else if ADualQuaternionSkinning then

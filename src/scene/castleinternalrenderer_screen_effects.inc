@@ -38,8 +38,10 @@
     FRHIUserEffectBuffer: TRHIBuffer;
     FRHIUserEffectDescriptorLayout: TRHIDescriptorSetLayout;
     FRHIUserEffectDescriptorSet: TRHIDescriptorSet;
-    FRHIUserEffectTextures: array[0..3] of TRHITexture;
-    FRHIUserEffectSamplers: array[0..3] of TRHISampler;
+    FRHIUserEffectLayout: TUserEffectShaderLayout;
+    FRHIUserEffectFallbackUBO: TRHIBuffer;
+    FRHIUserEffectTextures: array[0..CASTLE_MAX_USER_EFFECT_SAMPLERS - 1] of TRHITexture;
+    FRHIUserEffectSamplers: array[0..CASTLE_MAX_USER_EFFECT_SAMPLERS - 1] of TRHISampler;
     FRHIUserEffectUniformCount: Cardinal;
     FRHIUserEffectUploadCount: Cardinal;
     function GetRHIUserEffectTexture(const AIndex: Cardinal): TRHITexture;
@@ -153,13 +155,15 @@ end;
 
 function TScreenEffectResource.UpdateRHIUniforms: Cardinal;
 var
-  UBOData: array[0..1023] of Byte;
-  UBOOffset: PtrUInt;
+  UBOData: array[0..4095] of Byte;
+  UBOOffset, UnreferencedOffset, MaxUploadEnd: PtrUInt;
   TexSlotCount: Cardinal;
+  UseNamedLayout, CurrentFieldIsNamed: Boolean;
 
   procedure AlignOffset(const AAlignment: PtrUInt);
   begin
-    UBOOffset := (UBOOffset + AAlignment - 1) and not (AAlignment - 1);
+    if not CurrentFieldIsNamed then
+      UBOOffset := (UBOOffset + AAlignment - 1) and not (AAlignment - 1);
   end;
 
   procedure WriteBytes(const ASource; const ASize, AAlignment: PtrUInt);
@@ -169,18 +173,32 @@ var
     begin
       Move(ASource, UBOData[UBOOffset], ASize);
       Inc(UBOOffset, ASize);
+      if UBOOffset > MaxUploadEnd then
+        MaxUploadEnd := UBOOffset;
       Inc(Result);
     end;
   end;
 
-  procedure ResolveAndBindTextureNode(const ANode: TX3DNode);
+  procedure ResolveAndBindTextureNodeAtSlot(const ANode: TX3DNode; const AExplicitSlot: Integer);
   var
     Res: TTextureResource;
     Tex: TRHITexture;
     Samp: TRHISampler;
+    TargetSlot: Cardinal;
   begin
-    if (ANode = nil) or (not (ANode is TAbstractTextureNode)) or (TexSlotCount >= 4) then
+    if (ANode = nil) or (not (ANode is TAbstractTextureNode)) then
       Exit;
+    if AExplicitSlot >= 0 then
+    begin
+      if AExplicitSlot >= CASTLE_MAX_USER_EFFECT_SAMPLERS then
+        Exit;
+      TargetSlot := Cardinal(AExplicitSlot);
+    end else
+    begin
+      if TexSlotCount >= CASTLE_MAX_USER_EFFECT_SAMPLERS then
+        Exit;
+      TargetSlot := TexSlotCount;
+    end;
     Res := TTextureResources.Get(TAbstractTextureNode(ANode));
     if (Res = nil) and (RHIDevice <> nil) then
     begin
@@ -205,9 +223,10 @@ var
     Samp := Res.RHISampler;
     if Tex <> nil then
     begin
-      FRHIUserEffectTextures[TexSlotCount] := Tex;
-      FRHIUserEffectSamplers[TexSlotCount] := Samp;
-      Inc(TexSlotCount);
+      FRHIUserEffectTextures[TargetSlot] := Tex;
+      FRHIUserEffectSamplers[TargetSlot] := Samp;
+      if AExplicitSlot < 0 then
+        Inc(TexSlotCount);
       Inc(Result);
     end;
   end;
@@ -216,6 +235,9 @@ var
   var
     I, J, K: Integer;
     Field: TX3DField;
+    FieldName: String;
+    UDesc: TUserEffectUniformDesc;
+    SDesc: TUserEffectSamplerDesc;
     FVal: Single;
     IVal: Int32;
     IVec4: array[0..3] of Int32;
@@ -232,13 +254,34 @@ var
       Field := AIDecls[I].FieldOrLastEventValue;
       if Field = nil then
         Continue;
+      FieldName := Field.X3DName;
+      if FieldName = '' then
+        FieldName := AIDecls[I].FieldOrEvent.X3DName;
       if Field is TSFNode then
-        ResolveAndBindTextureNode(TSFNode(Field).Value)
-      else if Field is TMFNode then
+      begin
+        if UseNamedLayout and FRHIUserEffectLayout.FindSampler(FieldName, SDesc) then
+          ResolveAndBindTextureNodeAtSlot(TSFNode(Field).Value, SDesc.SlotIndex)
+        else
+          ResolveAndBindTextureNodeAtSlot(TSFNode(Field).Value, -1);
+        Continue;
+      end else if Field is TMFNode then
       begin
         for J := 0 to TMFNode(Field).Count - 1 do
-          ResolveAndBindTextureNode(TMFNode(Field)[J]);
-      end else if Field is TSFBool then
+          if UseNamedLayout and FRHIUserEffectLayout.FindSampler(FieldName, SDesc) then
+            ResolveAndBindTextureNodeAtSlot(TMFNode(Field)[J], SDesc.SlotIndex + J)
+          else
+            ResolveAndBindTextureNodeAtSlot(TMFNode(Field)[J], -1);
+        Continue;
+      end;
+
+      CurrentFieldIsNamed := UseNamedLayout and
+        FRHIUserEffectLayout.FindUniform(FieldName, UDesc);
+      if CurrentFieldIsNamed then
+        UBOOffset := UDesc.ByteOffset
+      else
+        UBOOffset := UnreferencedOffset;
+
+      if Field is TSFBool then
       begin
         IVal := Ord(TSFBool(Field).Value);
         WriteBytes(IVal, SizeOf(Int32), 4);
@@ -457,6 +500,8 @@ var
           end;
         end;
       end;
+      if not CurrentFieldIsNamed then
+        UnreferencedOffset := UBOOffset;
     end;
   end;
 
@@ -465,15 +510,29 @@ var
   AlignedSize: PtrUInt;
   BufDesc: TRHIBufferDesc;
   Mapped: Pointer;
-  Set2Bindings: array[0..4] of TRHIDescriptorBindingDesc;
+  Set2Bindings: array[0..CASTLE_MAX_USER_EFFECT_SAMPLERS] of TRHIDescriptorBindingDesc;
+  ZeroBytes: array[0..15] of Byte;
 begin
   Result := 0;
   if (RHIDevice = nil) or (Node = nil) then
     Exit;
 
   UBOOffset := 0;
+  UnreferencedOffset := 0;
+  MaxUploadEnd := 0;
   TexSlotCount := 0;
+  CurrentFieldIsNamed := False;
   FillChar(UBOData, SizeOf(UBOData), 0);
+  UseNamedLayout := (FRHIUserEffectLayout.TotalUBOSize > 0) or
+    (Length(FRHIUserEffectLayout.Samplers) > 0);
+  if UseNamedLayout then
+  begin
+    TexSlotCount := Length(FRHIUserEffectLayout.Samplers);
+    if Length(FRHIUserEffectLayout.Uniforms) > 0 then
+      UnreferencedOffset :=
+        FRHIUserEffectLayout.Uniforms[High(FRHIUserEffectLayout.Uniforms)].ByteOffset +
+        FRHIUserEffectLayout.Uniforms[High(FRHIUserEffectLayout.Uniforms)].ByteSize;
+  end;
   for I := 0 to High(FRHIUserEffectTextures) do
   begin
     FRHIUserEffectTextures[I] := nil;
@@ -489,13 +548,18 @@ begin
       Break;
     end;
 
+  if UseNamedLayout and
+     (FRHIUserEffectLayout.TotalUBOSize > MaxUploadEnd) and
+     (FRHIUserEffectLayout.TotalUBOSize <= SizeOf(UBOData)) then
+    MaxUploadEnd := FRHIUserEffectLayout.TotalUBOSize;
+
   FRHIUserEffectUniformCount := Result;
-  if Result = 0 then
+  if (Result = 0) and (not UseNamedLayout) then
     Exit;
 
-  if UBOOffset > 0 then
+  if MaxUploadEnd > 0 then
   begin
-    AlignedSize := (UBOOffset + 15) and not PtrUInt(15);
+    AlignedSize := (MaxUploadEnd + 15) and not PtrUInt(15);
     if AlignedSize = 0 then
       AlignedSize := 16;
     if (FRHIUserEffectBuffer = nil) or (FRHIUserEffectBuffer.Desc.Size < AlignedSize) then
@@ -509,7 +573,7 @@ begin
     if Mapped <> nil then
     try
       FillChar(Mapped^, AlignedSize, 0);
-      Move(UBOData[0], Mapped^, UBOOffset);
+      Move(UBOData[0], Mapped^, MaxUploadEnd);
     finally
       FRHIUserEffectBuffer.Unmap;
     end;
@@ -523,9 +587,9 @@ begin
     Set2Bindings[0].DescriptorType := dtUniformBuffer;
     Set2Bindings[0].Count := 1;
     Set2Bindings[0].StageFlags := [ssVertex, ssFragment];
-    for I := 0 to 3 do
+    for I := 0 to CASTLE_MAX_USER_EFFECT_SAMPLERS - 1 do
     begin
-      Set2Bindings[I + 1].Binding := 2 + I;
+      Set2Bindings[I + 1].Binding := 2 + Cardinal(I);
       Set2Bindings[I + 1].DescriptorType := dtCombinedImageSampler;
       Set2Bindings[I + 1].Count := 1;
       Set2Bindings[I + 1].StageFlags := [ssVertex, ssFragment];
@@ -537,10 +601,26 @@ begin
     FRHIUserEffectDescriptorSet := RHIDevice.CreateDescriptorSet(FRHIUserEffectDescriptorLayout);
 
   if FRHIUserEffectBuffer <> nil then
-    FRHIUserEffectDescriptorSet.BindUniformBuffer(1, FRHIUserEffectBuffer, 0, FRHIUserEffectBuffer.Desc.Size);
-  for I := 0 to 3 do
+    FRHIUserEffectDescriptorSet.BindUniformBuffer(1, FRHIUserEffectBuffer, 0, FRHIUserEffectBuffer.Desc.Size)
+  else
+  begin
+    if FRHIUserEffectFallbackUBO = nil then
+    begin
+      FillChar(ZeroBytes, SizeOf(ZeroBytes), 0);
+      BufDesc := TRHIBufferDesc.Create(SizeOf(ZeroBytes), [buUniform], muCpuToGpu,
+        'ScreenEffect.FallbackUBO');
+      FRHIUserEffectFallbackUBO := RHIDevice.CreateBuffer(BufDesc, @ZeroBytes[0]);
+    end;
+    if FRHIUserEffectFallbackUBO <> nil then
+      FRHIUserEffectDescriptorSet.BindUniformBuffer(1, FRHIUserEffectFallbackUBO, 0, FRHIUserEffectFallbackUBO.Desc.Size);
+  end;
+  for I := 0 to CASTLE_MAX_USER_EFFECT_SAMPLERS - 1 do
     if FRHIUserEffectTextures[I] <> nil then
-      FRHIUserEffectDescriptorSet.BindTexture(2 + I, FRHIUserEffectTextures[I], FRHIUserEffectSamplers[I]);
+      FRHIUserEffectDescriptorSet.BindTexture(2 + Cardinal(I), FRHIUserEffectTextures[I], FRHIUserEffectSamplers[I])
+    {$ifndef WASI}
+    else if (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+      FRHIUserEffectDescriptorSet.BindTexture(2 + Cardinal(I), TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil)
+    {$endif};
   FRHIUserEffectDescriptorSet.Update;
 end;
 
@@ -638,9 +718,13 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
         '  gl_Position = vec4(vertex, 0.0, 1.0);' + LineEnding +
         '}' + LineEnding;
 
+      FRHIUserEffectLayout := ShaderGen.ExtractUserEffectLayout(
+        UserVertSource, UserFragSource, '', 4);
+
       if Trim(UserVertSource) <> '' then
       begin
-        UpgradedVertSource := ShaderGen.UpgradeUserEffectUniforms(UserVertSource);
+        UpgradedVertSource := ShaderGen.UpgradeUserEffectStageSource(
+          ssVertex, UserVertSource, FRHIUserEffectLayout);
         if Pos('main(', UpgradedVertSource) = 0 then
           UpgradedVertSource := UpgradedVertSource + LineEnding + DefaultMainVS;
         FRHIVertexGLSL :=
@@ -674,7 +758,7 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
       FRHIFragmentGLSL :=
         ShaderGen.GenerateScreenEffectPreamble(ssFragment, NeedsDepth) + LineEnding +
         ScreenLibFrag + LineEnding +
-        ShaderGen.UpgradeUserEffectUniforms(UserFragSource);
+        ShaderGen.UpgradeUserEffectStageSource(ssFragment, UserFragSource, FRHIUserEffectLayout);
     finally
       FreeAndNil(ShaderGen);
     end;
@@ -835,6 +919,8 @@ begin
   FreeAndNil(FRHIUserEffectDescriptorSet);
   FreeAndNil(FRHIUserEffectDescriptorLayout);
   FreeAndNil(FRHIUserEffectBuffer);
+  FreeAndNil(FRHIUserEffectFallbackUBO);
+  FRHIUserEffectLayout := Default(TUserEffectShaderLayout);
   for I := 0 to High(FRHIUserEffectTextures) do
   begin
     FRHIUserEffectTextures[I] := nil;

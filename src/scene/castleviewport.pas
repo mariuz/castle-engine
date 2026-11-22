@@ -3623,6 +3623,10 @@ begin
   FreeAndNil(SSRShader);
   SSRShaderInitialized := false;
 
+  if (Background <> nil) and (Background.InternalBackgroundRenderer <> nil) and
+     (Background.InternalBackgroundRenderer.RHIScene is TCastleScene) then
+    TCastleScene(Background.InternalBackgroundRenderer.RHIScene).GLContextClose;
+
   if ShapesRenderer <> nil then
     ShapesRenderer.GLContextClose;
 

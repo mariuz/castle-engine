@@ -2271,13 +2271,15 @@ end;
 
 function TX3DRendererShape.ExtractRHIUserEffectUniforms: Cardinal;
 var
-  UBOData: array[0..1023] of Byte;
-  UBOOffset: PtrUInt;
+  UBOData: array[0..4095] of Byte;
+  UBOOffset, UnreferencedOffset, MaxUploadEnd: PtrUInt;
   TexSlotCount: Cardinal;
+  UseNamedLayout, CurrentFieldIsNamed: Boolean;
 
   procedure AlignOffset(const AAlignment: PtrUInt);
   begin
-    UBOOffset := (UBOOffset + AAlignment - 1) and not (AAlignment - 1);
+    if not CurrentFieldIsNamed then
+      UBOOffset := (UBOOffset + AAlignment - 1) and not (AAlignment - 1);
   end;
 
   procedure WriteBytes(const ASource; const ASize, AAlignment: PtrUInt);
@@ -2287,18 +2289,32 @@ var
     begin
       Move(ASource, UBOData[UBOOffset], ASize);
       Inc(UBOOffset, ASize);
+      if UBOOffset > MaxUploadEnd then
+        MaxUploadEnd := UBOOffset;
       Inc(Result);
     end;
   end;
 
-  procedure ResolveAndBindTextureNode(const ANode: TX3DNode);
+  procedure ResolveAndBindTextureNodeAtSlot(const ANode: TX3DNode; const AExplicitSlot: Integer);
   var
     Res: TTextureResource;
     Tex: TRHITexture;
     Samp: TRHISampler;
+    TargetSlot: Cardinal;
   begin
-    if (ANode = nil) or (not (ANode is TAbstractTextureNode)) or (TexSlotCount >= 4) then
+    if (ANode = nil) or (not (ANode is TAbstractTextureNode)) then
       Exit;
+    if AExplicitSlot >= 0 then
+    begin
+      if AExplicitSlot >= CASTLE_MAX_USER_EFFECT_SAMPLERS then
+        Exit;
+      TargetSlot := Cardinal(AExplicitSlot);
+    end else
+    begin
+      if TexSlotCount >= CASTLE_MAX_USER_EFFECT_SAMPLERS then
+        Exit;
+      TargetSlot := TexSlotCount;
+    end;
     Res := TTextureResources.Get(TAbstractTextureNode(ANode));
     if (Res = nil) and (RHIDevice <> nil) then
     begin
@@ -2326,8 +2342,9 @@ var
     Samp := Res.RHISampler;
     if (Tex <> nil) and (Cache <> nil) then
     begin
-      Cache.BindUserEffectTexture(TexSlotCount, Tex, Samp);
-      Inc(TexSlotCount);
+      Cache.BindUserEffectTexture(TargetSlot, Tex, Samp);
+      if AExplicitSlot < 0 then
+        Inc(TexSlotCount);
       Inc(Result);
     end;
   end;
@@ -2336,6 +2353,9 @@ var
   var
     I, J, K: Integer;
     Field: TX3DField;
+    FieldName: String;
+    UDesc: TUserEffectUniformDesc;
+    SDesc: TUserEffectSamplerDesc;
     FVal: Single;
     IVal: Int32;
     IVec4: array[0..3] of Int32;
@@ -2352,13 +2372,34 @@ var
       Field := AIDecls[I].FieldOrLastEventValue;
       if Field = nil then
         Continue;
+      FieldName := Field.X3DName;
+      if FieldName = '' then
+        FieldName := AIDecls[I].FieldOrEvent.X3DName;
       if Field is TSFNode then
-        ResolveAndBindTextureNode(TSFNode(Field).Value)
-      else if Field is TMFNode then
+      begin
+        if UseNamedLayout and Cache.RHIUserEffectLayout.FindSampler(FieldName, SDesc) then
+          ResolveAndBindTextureNodeAtSlot(TSFNode(Field).Value, SDesc.SlotIndex)
+        else
+          ResolveAndBindTextureNodeAtSlot(TSFNode(Field).Value, -1);
+        Continue;
+      end else if Field is TMFNode then
       begin
         for J := 0 to TMFNode(Field).Count - 1 do
-          ResolveAndBindTextureNode(TMFNode(Field)[J]);
-      end else if Field is TSFBool then
+          if UseNamedLayout and Cache.RHIUserEffectLayout.FindSampler(FieldName, SDesc) then
+            ResolveAndBindTextureNodeAtSlot(TMFNode(Field)[J], SDesc.SlotIndex + J)
+          else
+            ResolveAndBindTextureNodeAtSlot(TMFNode(Field)[J], -1);
+        Continue;
+      end;
+
+      CurrentFieldIsNamed := UseNamedLayout and
+        Cache.RHIUserEffectLayout.FindUniform(FieldName, UDesc);
+      if CurrentFieldIsNamed then
+        UBOOffset := UDesc.ByteOffset
+      else
+        UBOOffset := UnreferencedOffset;
+
+      if Field is TSFBool then
       begin
         IVal := Ord(TSFBool(Field).Value);
         WriteBytes(IVal, SizeOf(Int32), 4);
@@ -2577,6 +2618,8 @@ var
           end;
         end;
       end;
+      if not CurrentFieldIsNamed then
+        UnreferencedOffset := UBOOffset;
     end;
   end;
 
@@ -2620,8 +2663,22 @@ var
 begin
   Result := 0;
   UBOOffset := 0;
+  UnreferencedOffset := 0;
+  MaxUploadEnd := 0;
   TexSlotCount := 0;
+  CurrentFieldIsNamed := False;
   FillChar(UBOData, SizeOf(UBOData), 0);
+  UseNamedLayout := (Cache <> nil) and
+    ((Cache.RHIUserEffectLayout.TotalUBOSize > 0) or
+     (Length(Cache.RHIUserEffectLayout.Samplers) > 0));
+  if UseNamedLayout then
+  begin
+    TexSlotCount := Length(Cache.RHIUserEffectLayout.Samplers);
+    if Length(Cache.RHIUserEffectLayout.Uniforms) > 0 then
+      UnreferencedOffset :=
+        Cache.RHIUserEffectLayout.Uniforms[High(Cache.RHIUserEffectLayout.Uniforms)].ByteOffset +
+        Cache.RHIUserEffectLayout.Uniforms[High(Cache.RHIUserEffectLayout.Uniforms)].ByteSize;
+  end;
 
   ShapeState := OriginalState;
   if ShapeState = nil then
@@ -2672,8 +2729,13 @@ begin
           ProcessEffectList(State.Lights.L[I].Node.FdEffects.InternalItems);
   end;
 
-  if (UBOOffset > 0) and (Cache <> nil) then
-    Cache.UploadUserEffectBlock(@UBOData[0], UBOOffset);
+  if UseNamedLayout and
+     (Cache.RHIUserEffectLayout.TotalUBOSize > MaxUploadEnd) and
+     (Cache.RHIUserEffectLayout.TotalUBOSize <= SizeOf(UBOData)) then
+    MaxUploadEnd := Cache.RHIUserEffectLayout.TotalUBOSize;
+
+  if (MaxUploadEnd > 0) and (Cache <> nil) then
+    Cache.UploadUserEffectBlock(@UBOData[0], MaxUploadEnd);
 end;
 
 function TX3DRendererShape.BuildRHIBindlessMaterialEntry(
@@ -2813,6 +2875,7 @@ begin
     HasComposedShader := ExtractRHIComposedShader(ComposedVertCode, ComposedFragCode, ComposedGeomCode);
     if Cache <> nil then
     begin
+      Cache.SetIsPhysicalMaterial(AShadingModel = smPBRMetallicRoughness);
       Cache.SetPhongSurfaceParams(
         IsPhongMat and (AShadingModel = smPhong),
         PhongHasSpecTex, PhongHasShinTex, PhongHasAmbTex, PhongAmbIntensity);
@@ -2851,28 +2914,6 @@ begin
       Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, SelfShadowParallax, ParallaxHeight);
       Cache.SetShaderEffects(VertEffectCode, FragEffectCode, GeomEffectCode);
       Cache.SetComposedShader(ComposedVertCode, ComposedFragCode, ComposedGeomCode);
-      UserUniformCount := ExtractRHIUserEffectUniforms;
-      if UserUniformCount = 0 then
-      begin
-        if HasSecondTex and (SecondTex <> nil) then
-          Cache.BindUserEffectTexture(0, SecondTex, SecondSampler);
-        if HasMultiTex2 and (MultiTex2 <> nil) then
-          Cache.BindUserEffectTexture(1, MultiTex2, MultiSamp2)
-        else if AlphaTex <> nil then
-          Cache.BindUserEffectTexture(1, AlphaTex, AlphaSamp);
-        if HasMultiTex3 and (MultiTex3 <> nil) then
-          Cache.BindUserEffectTexture(2, MultiTex3, MultiSamp3)
-        else if SepShinTex <> nil then
-          Cache.BindUserEffectTexture(2, SepShinTex, SepShinSamp);
-      end else
-      begin
-        if AlphaTex <> nil then
-          Cache.BindUserEffectTexture(1, AlphaTex, AlphaSamp);
-        if SepShinTex <> nil then
-          Cache.BindUserEffectTexture(2, SepShinTex, SepShinSamp);
-      end;
-      if (EnvDiffuseTex <> nil) and (EnvDiffuseTex <> EnvCubemapTex) then
-        Cache.BindUserEffectTexture(3, EnvDiffuseTex, EnvDiffuseSampler);
       Cache.BindMaterialTexturesToDescriptorSet(
         BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
         BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
@@ -2894,6 +2935,29 @@ begin
         HasTexCoordGen,
         HasShaderEffects or HasPointSize or HasLineStipple,
         HasComposedShader);
+      UserUniformCount := ExtractRHIUserEffectUniforms;
+      if (UserUniformCount = 0) and (Length(Cache.RHIUserEffectLayout.Samplers) = 0) then
+      begin
+        if HasSecondTex and (SecondTex <> nil) then
+          Cache.BindUserEffectTexture(0, SecondTex, SecondSampler);
+        if HasMultiTex2 and (MultiTex2 <> nil) then
+          Cache.BindUserEffectTexture(1, MultiTex2, MultiSamp2)
+        else if AlphaTex <> nil then
+          Cache.BindUserEffectTexture(1, AlphaTex, AlphaSamp);
+        if HasMultiTex3 and (MultiTex3 <> nil) then
+          Cache.BindUserEffectTexture(2, MultiTex3, MultiSamp3)
+        else if SepShinTex <> nil then
+          Cache.BindUserEffectTexture(2, SepShinTex, SepShinSamp);
+      end else
+      begin
+        if (AlphaTex <> nil) and (1 >= Length(Cache.RHIUserEffectLayout.Samplers)) then
+          Cache.BindUserEffectTexture(1, AlphaTex, AlphaSamp);
+        if (SepShinTex <> nil) and (2 >= Length(Cache.RHIUserEffectLayout.Samplers)) then
+          Cache.BindUserEffectTexture(2, SepShinTex, SepShinSamp);
+      end;
+      if (EnvDiffuseTex <> nil) and (EnvDiffuseTex <> EnvCubemapTex) and
+         (3 >= Length(Cache.RHIUserEffectLayout.Samplers)) then
+        Cache.BindUserEffectTexture(3, EnvDiffuseTex, EnvDiffuseSampler);
     end;
     if BaseColorTex <> nil then
       BaseColorIdx := RHIDevice.RegisterBindlessTexture(BaseColorTex)
@@ -2944,9 +3008,9 @@ begin
 
   PushConstants.ModelViewMatrix := AModelView;
   NormalMat := ModelViewToNormalMatrix(AModelView);
-  PushConstants.NormalMatrixRow0 := Vector4(NormalMat.Rows[0], 0);
-  PushConstants.NormalMatrixRow1 := Vector4(NormalMat.Rows[1], 0);
-  PushConstants.NormalMatrixRow2 := Vector4(NormalMat.Rows[2], 0);
+  PushConstants.NormalMatrixRow0 := Vector4(NormalMat.Columns[0], 0);
+  PushConstants.NormalMatrixRow1 := Vector4(NormalMat.Columns[1], 0);
+  PushConstants.NormalMatrixRow2 := Vector4(NormalMat.Columns[2], 0);
   if Cache.RHIJointBuffer <> nil then
     PushConstants.ObjectParams := Vector4(Single(AMaterialIndex), 1.0, 0.0, 0.0)
   else
