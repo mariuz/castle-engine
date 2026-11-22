@@ -10428,6 +10428,8 @@ var
   HasColorResolve, HasAnyResolve: Boolean;
   EffResolveMode: TRHIResolveMode;
   VkRenderAreaRect: VkRect2D;
+  WawImgBarrier: VkImageMemoryBarrier;
+  WawVkTex: TVulkanRHITexture;
   AttCount, ResolveBaseIdx, I: Integer;
 begin
   { Flush any pending staged buffer/image uploads outside the render pass instance
@@ -10436,16 +10438,73 @@ begin
     FDevice.StagingUploader.FlushPendingUploads(Self);
 
   { On real Vulkan devices, ensure attachment images are transitioned into attachment-optimal layouts
-    before beginning the render pass instance }
+    before beginning the render pass instance. When an attachment is ALREADY in attachment-optimal
+    layout from an earlier dynamic rendering pass (e.g. suspended/resumed outer pass around RTT),
+    VK_KHR_dynamic_rendering provides zero implicit synchronization between passes, so emit an
+    explicit same-layout WAW/RAW VkImageMemoryBarrier to prevent TBDR / Apple Paravirtual tile races. }
   if FHandle <> nil then
   begin
     for I := 0 to High(Info.ColorAttachments) do
-      if (Info.ColorAttachments[I].Texture <> nil) and
-         (Info.ColorAttachments[I].Texture.CurrentState <> rsColorAttachment) then
-        TransitionTexture(Info.ColorAttachments[I].Texture, rsColorAttachment);
-    if Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil) and
-       (Info.DepthAttachment.Texture.CurrentState <> rsDepthStencilWrite) then
-      TransitionTexture(Info.DepthAttachment.Texture, rsDepthStencilWrite);
+      if Info.ColorAttachments[I].Texture <> nil then
+      begin
+        if Info.ColorAttachments[I].Texture.CurrentState <> rsColorAttachment then
+          TransitionTexture(Info.ColorAttachments[I].Texture, rsColorAttachment)
+        else if Assigned(vkCmdPipelineBarrier) then
+        begin
+          WawVkTex := Info.ColorAttachments[I].Texture as TVulkanRHITexture;
+          if WawVkTex.Image <> VK_NULL_HANDLE then
+          begin
+            FillChar(WawImgBarrier, SizeOf(WawImgBarrier), 0);
+            WawImgBarrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            WawImgBarrier.srcAccessMask := VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            WawImgBarrier.dstAccessMask := VK_ACCESS_COLOR_ATTACHMENT_READ_BIT or VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            WawImgBarrier.oldLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            WawImgBarrier.newLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            WawImgBarrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+            WawImgBarrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+            WawImgBarrier.image := WawVkTex.Image;
+            WawImgBarrier.subresourceRange.aspectMask := WawVkTex.AspectMask;
+            WawImgBarrier.subresourceRange.baseMipLevel := 0;
+            WawImgBarrier.subresourceRange.levelCount := WawVkTex.Desc.MipLevels;
+            WawImgBarrier.subresourceRange.baseArrayLayer := 0;
+            WawImgBarrier.subresourceRange.layerCount := WawVkTex.Desc.DepthOrArrayLayers;
+            vkCmdPipelineBarrier(FHandle,
+              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+              0, 0, nil, 0, nil, 1, @WawImgBarrier);
+          end;
+        end;
+      end;
+    if Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil) then
+    begin
+      if Info.DepthAttachment.Texture.CurrentState <> rsDepthStencilWrite then
+        TransitionTexture(Info.DepthAttachment.Texture, rsDepthStencilWrite)
+      else if Assigned(vkCmdPipelineBarrier) then
+      begin
+        WawVkTex := Info.DepthAttachment.Texture as TVulkanRHITexture;
+        if WawVkTex.Image <> VK_NULL_HANDLE then
+        begin
+          FillChar(WawImgBarrier, SizeOf(WawImgBarrier), 0);
+          WawImgBarrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+          WawImgBarrier.srcAccessMask := VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+          WawImgBarrier.dstAccessMask := VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT or VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+          WawImgBarrier.oldLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+          WawImgBarrier.newLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+          WawImgBarrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+          WawImgBarrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+          WawImgBarrier.image := WawVkTex.Image;
+          WawImgBarrier.subresourceRange.aspectMask := WawVkTex.AspectMask;
+          WawImgBarrier.subresourceRange.baseMipLevel := 0;
+          WawImgBarrier.subresourceRange.levelCount := WawVkTex.Desc.MipLevels;
+          WawImgBarrier.subresourceRange.baseArrayLayer := 0;
+          WawImgBarrier.subresourceRange.layerCount := WawVkTex.Desc.DepthOrArrayLayers;
+          vkCmdPipelineBarrier(FHandle,
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT or VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT or VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            0, 0, nil, 0, nil, 1, @WawImgBarrier);
+        end;
+      end;
+    end;
   end;
 
   FIsRendering := True;

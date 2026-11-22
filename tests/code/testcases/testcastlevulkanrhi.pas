@@ -28679,7 +28679,9 @@ var
   ScreenEffect: TScreenEffectNode;
   CompShader: TComposedShaderNode;
   FragPart: TShaderPartNode;
-  Readback, SrcReadback: TRGBAlphaImage;
+  DirectColorTex: TRHITexture;
+  Readback, SrcReadback, DirectReadback: TRGBAlphaImage;
+  DiagExtra: String;
 begin
   if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
     Exit;
@@ -28693,10 +28695,12 @@ begin
   Container := TTestSizedVulkanContainer.Create(nil);
   ColorTex := nil;
   DepthTex := nil;
+  DirectColorTex := nil;
   Viewport := nil;
   Scene := nil;
   Readback := nil;
   SrcReadback := nil;
+  DirectReadback := nil;
   try
     GLFeatures := nil;
     ApplicationProperties.RenderBackend := backendVulkan;
@@ -28786,16 +28790,37 @@ begin
     AssertEquals('Offscreen ScreenEffect Src (32,32) B must be 255',
       255, Integer(SrcReadback.PixelPtr(32, 32)^.Z));
 
+    DiagExtra := '';
+    if Readback.PixelPtr(4, 4)^.Y <> 255 then
+    begin
+      DirectColorTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+        [tuColorAttachment, tuSampled, tuTransferSrc]));
+      RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+      SetActiveCommandList(RealCmd);
+      Viewport.ExecuteRHIScreenEffectPasses(
+        [Viewport.GetScreenEffectRHIPipeline(0)], 64, 64, False, DirectColorTex, 0.1, 100.0);
+      RealDev.EndFrameAndPresent;
+      DirectReadback := RealDev.GrabTextureImage(DirectColorTex, Rectangle(0, 0, 64, 64));
+      DiagExtra := Format(', direct=(%d,%d,%d,%d), directCenter=(%d,%d,%d,%d), vpY=%.1f, scY=%d, draws=%d', [
+        DirectReadback.PixelPtr(4, 4)^.X, DirectReadback.PixelPtr(4, 4)^.Y,
+        DirectReadback.PixelPtr(4, 4)^.Z, DirectReadback.PixelPtr(4, 4)^.W,
+        DirectReadback.PixelPtr(32, 32)^.X, DirectReadback.PixelPtr(32, 32)^.Y,
+        DirectReadback.PixelPtr(32, 32)^.Z, DirectReadback.PixelPtr(32, 32)^.W,
+        RealCmd.LastVkViewportY, RealCmd.LastVkScissorOffsetY, Integer(Viewport.RHIScreenDrawCount)]);
+    end;
+
     { Corner (4, 4): Viewport Red background (1, 0, 0) inverted by TScreenEffectNode -> Cyan (0, 255, 255) }
-    AssertEquals(Format('Inverted background (4,4) R must be 0 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d), src=(%d,%d,%d,%d)]', [
+    AssertEquals(Format('Inverted background (4,4) R must be 0 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d), src=(%d,%d,%d,%d)%s]', [
       Readback.PixelPtr(4, 4)^.X, Readback.PixelPtr(4, 4)^.Y, Readback.PixelPtr(4, 4)^.Z, Readback.PixelPtr(4, 4)^.W,
       Readback.PixelPtr(32, 32)^.X, Readback.PixelPtr(32, 32)^.Y, Readback.PixelPtr(32, 32)^.Z, Readback.PixelPtr(32, 32)^.W,
-      SrcReadback.PixelPtr(4, 4)^.X, SrcReadback.PixelPtr(4, 4)^.Y, SrcReadback.PixelPtr(4, 4)^.Z, SrcReadback.PixelPtr(4, 4)^.W]),
+      SrcReadback.PixelPtr(4, 4)^.X, SrcReadback.PixelPtr(4, 4)^.Y, SrcReadback.PixelPtr(4, 4)^.Z, SrcReadback.PixelPtr(4, 4)^.W,
+      DiagExtra]),
       0, Integer(Readback.PixelPtr(4, 4)^.X));
-    AssertEquals(Format('Inverted background (4,4) G must be 255 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d), src=(%d,%d,%d,%d)]', [
+    AssertEquals(Format('Inverted background (4,4) G must be 255 [got RGBA=(%d,%d,%d,%d), center=(%d,%d,%d,%d), src=(%d,%d,%d,%d)%s]', [
       Readback.PixelPtr(4, 4)^.X, Readback.PixelPtr(4, 4)^.Y, Readback.PixelPtr(4, 4)^.Z, Readback.PixelPtr(4, 4)^.W,
       Readback.PixelPtr(32, 32)^.X, Readback.PixelPtr(32, 32)^.Y, Readback.PixelPtr(32, 32)^.Z, Readback.PixelPtr(32, 32)^.W,
-      SrcReadback.PixelPtr(4, 4)^.X, SrcReadback.PixelPtr(4, 4)^.Y, SrcReadback.PixelPtr(4, 4)^.Z, SrcReadback.PixelPtr(4, 4)^.W]),
+      SrcReadback.PixelPtr(4, 4)^.X, SrcReadback.PixelPtr(4, 4)^.Y, SrcReadback.PixelPtr(4, 4)^.Z, SrcReadback.PixelPtr(4, 4)^.W,
+      DiagExtra]),
       255, Integer(Readback.PixelPtr(4, 4)^.Y));
     AssertEquals('Inverted background (4,4) B must be 255', 255, Integer(Readback.PixelPtr(4, 4)^.Z));
 
@@ -28804,6 +28829,8 @@ begin
     AssertEquals('Inverted 3D Blue box (32,32) G must be 255', 255, Integer(Readback.PixelPtr(32, 32)^.Y));
     AssertEquals('Inverted 3D Blue box (32,32) B must be 0', 0, Integer(Readback.PixelPtr(32, 32)^.Z));
   finally
+    FreeAndNil(DirectReadback);
+    FreeAndNil(DirectColorTex);
     FreeAndNil(SrcReadback);
     FreeAndNil(Readback);
     FreeAndNil(Scene);
