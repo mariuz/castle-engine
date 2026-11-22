@@ -374,6 +374,7 @@ contains
   castleballisticsolver in '..\..\src\scene\castleballisticsolver.pas',
   castleacousticspace in '..\..\src\scene\castleacousticspace.pas',
   castleblueprint in '..\..\src\scene\castleblueprint.pas',
+  castlepcggraph in '..\..\src\scene\castlepcggraph.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

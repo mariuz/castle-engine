@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="235">
+    <Units Count="237">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1257,6 +1257,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormBlueprintEditor"/>
       </Unit234>
+      <Unit235>
+        <Filename Value="../common-code/toolpcggraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPcgGraph"/>
+      </Unit235>
+      <Unit236>
+        <Filename Value="code/formpcggraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPcgGraph"/>
+      </Unit236>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

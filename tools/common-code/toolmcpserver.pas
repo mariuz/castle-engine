@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1080,6 +1080,16 @@ begin
   AddToolDef('cge_compile_blueprint',
     'Compile, inspect, run Construction Script, dispatch EventGraph events, or generate nativized Pascal code for TCastleBlueprint visual scripts.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'PCG operation: status, execute, inspect_node, reseed, or spawn_preset (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastlePcgGraph name (defaults to first PCG graph in design).'));
+  P.Add('nodeId', MakePropSchema('string', 'NodeId to inspect for inspect_node (e.g. "Diff_ClearRoad" or "Prune_NoOverlap").'));
+  P.Add('seed', MakePropSchema('integer', 'New deterministic seed for reseed (default 4242).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: forest_road, rock_union, or spline_posts (default forest_road).'));
+  AddToolDef('cge_execute_pcg_graph',
+    'Execute, re-seed, spawn, or inspect intermediate per-node point clouds of TCastlePcgGraph visual PCG pipelines.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1216,6 +1226,11 @@ var
   BpComp: TCastleBlueprint;
   BpPresetVal: TBlueprintPreset;
   BpErrStr, BpEventStr, ActionStr: String;
+  PcgAudit: TPcgSceneAuditReport;
+  PcgComp: TCastlePcgGraph;
+  PcgPresetVal: TPcgGraphPreset;
+  PcgPts: TPcgPointArray;
+  PcgNodeIdStr: String;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2411,6 +2426,91 @@ begin
         OutPayload.Add('summaryBadge', BpComp.BlueprintSummaryBadge);
         if SameText(ActionStr, 'generate_pascal') then
           OutPayload.Add('pascalUnit', BpComp.GeneratePascalUnit);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_execute_pcg_graph' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    PcgNodeIdStr := '';
+    DetSeed := 4242;
+    PcgPresetVal := pgpForestWithRoadClearing;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      PcgNodeIdStr := Trim(ArgsObj.Get('nodeId', ''));
+      DetSeed := ArgsObj.Get('seed', 4242);
+      if SameText(ArgsObj.Get('preset', ''), 'rock_union') then
+        PcgPresetVal := pgpRockOutcropAndShrubUnion
+      else if SameText(ArgsObj.Get('preset', ''), 'spline_posts') then
+        PcgPresetVal := pgpSplineFenceColonnade;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'execute') or
+       SameText(ActionStr, 'reseed') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      PcgComp := TPcgGraphHelper.SpawnPcgPresetInDesign(
+        DesignRoot, DesignOwner, PcgPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn PCG Graph');
+    end else
+      PcgComp := TPcgGraphHelper.FindPcgGraphByName(DesignRoot, DesignOwner, CompName);
+
+    BpErrStr := '';
+    if SameText(ActionStr, 'execute') then
+      PcgAudit := TPcgGraphHelper.ExecuteAllPcgGraphsInDesign(DesignRoot, BpErrStr)
+    else
+    begin
+      if (PcgComp <> nil) and SameText(ActionStr, 'reseed') then
+        PcgComp.GraphSeed := DetSeed;
+      PcgAudit := TPcgGraphHelper.AuditPcgGraphsInDesign(DesignRoot);
+    end;
+
+    PcgPts := nil;
+    if (PcgComp <> nil) and SameText(ActionStr, 'inspect_node') and (PcgNodeIdStr <> '') then
+      PcgComp.EvaluateNodeOutput(PcgNodeIdStr, PcgPts);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('graphCount', PcgAudit.GraphCount);
+      OutPayload.Add('validGraphCount', PcgAudit.ValidGraphCount);
+      OutPayload.Add('errorGraphCount', PcgAudit.ErrorGraphCount);
+      OutPayload.Add('totalNodeCount', PcgAudit.TotalNodeCount);
+      OutPayload.Add('totalSpawnedInstances', PcgAudit.TotalSpawnedInstances);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('validationErrors', BpErrStr);
+      if PcgComp <> nil then
+      begin
+        OutPayload.Add('activeGraph', PcgComp.Name);
+        OutPayload.Add('summaryBadge', PcgComp.PcgSummaryBadge);
+        if SameText(ActionStr, 'inspect_node') then
+        begin
+          OutPayload.Add('inspectedNodeId', PcgNodeIdStr);
+          OutPayload.Add('inspectedPointCount', Length(PcgPts));
+        end;
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

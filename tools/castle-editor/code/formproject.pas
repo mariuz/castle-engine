@@ -695,6 +695,7 @@ type
       MenuItemLodInstancing: TMenuItem;
       MenuItemShaderComplexity: TMenuItem;
       MenuItemBlueprintEditor: TMenuItem;
+      MenuItemPcgGraph: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -810,6 +811,7 @@ type
     procedure MenuItemLodInstancingClick(Sender: TObject);
     procedure MenuItemShaderComplexityClick(Sender: TObject);
     procedure MenuItemBlueprintEditorClick(Sender: TObject);
+    procedure MenuItemPcgGraphClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2945,6 +2947,11 @@ begin
   MenuItemBlueprintEditor.Caption := 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)...';
   MenuItemBlueprintEditor.OnClick := @MenuItemBlueprintEditorClick;
   MenuItemDesign.Add(MenuItemBlueprintEditor);
+
+  MenuItemPcgGraph := TMenuItem.Create(MenuItemDesign);
+  MenuItemPcgGraph.Caption := 'PCG Visual Node Graph Editor (Point-Cloud DAG & Inspector)...';
+  MenuItemPcgGraph.OnClick := @MenuItemPcgGraphClick;
+  MenuItemDesign.Add(MenuItemPcgGraph);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6527,6 +6534,12 @@ procedure TProjectForm.MenuItemBlueprintEditorClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowBlueprintEditorDialog;
+end;
+
+procedure TProjectForm.MenuItemPcgGraphClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPcgGraphDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

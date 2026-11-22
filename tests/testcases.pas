@@ -208,6 +208,7 @@ uses
   TestToolLodInstancing,
   TestToolShaderComplexity,
   TestToolBlueprintEditor,
+  TestToolPcgGraph,
   TestCastleVulkanRHI;
 
 implementation
