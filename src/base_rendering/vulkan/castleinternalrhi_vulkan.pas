@@ -340,6 +340,9 @@ type
     FHandle: VkQueryPool;
     FSimulatedResults: array of UInt64;
     FQueryWritten: array of Boolean;
+    FQueryResetReady: array of Boolean;
+    FQueryRecordedGeneration: array of UInt64;
+    FQueryActiveInCmd: array of Boolean;
     FResetCount: Cardinal;
     FHostResetCount: Cardinal;
   protected
@@ -416,6 +419,7 @@ type
     FDebugGroupPopCount: Cardinal;
     FDebugMarkerCount: Cardinal;
     FLastDebugLabelName: String;
+    FRecordingGeneration: UInt64;
     procedure ResetCommandTrackingState;
     function GetBoundDescriptorSet(const ASetIndex: Cardinal): TRHIDescriptorSet;
     procedure ComputeVkScissorRect(const ARect: TRectangle; out AVkRect: VkRect2D);
@@ -4568,6 +4572,7 @@ type
     FDescriptorSetAllocations: Cardinal;
     FFallbackRenderPassBeginCount: Cardinal;
     FMSAAResolvePassCount: Cardinal;
+    FCommandRecordingGeneration: UInt64;
     FComputeDispatchCount: Cardinal;
     FSync2BarrierCount: Cardinal;
     FAllocatedMemoryBytes: Int64;
@@ -9350,12 +9355,15 @@ constructor TVulkanRHIQueryPool.Create(const ADevice: TVulkanRHIDevice;
   const ADesc: TRHIQueryPoolDesc);
 var
   PoolInfo: VkQueryPoolCreateInfo;
-  Count: Cardinal;
+  Count, I: Cardinal;
 begin
   inherited Create(ADevice, ADesc);
   Count := Max(Cardinal(1), ADesc.QueryCount);
   SetLength(FSimulatedResults, Count);
   SetLength(FQueryWritten, Count);
+  SetLength(FQueryResetReady, Count);
+  SetLength(FQueryRecordedGeneration, Count);
+  SetLength(FQueryActiveInCmd, Count);
 
   if (ADevice <> nil) and (ADevice.Handle <> nil) and Assigned(vkCreateQueryPool) then
   begin
@@ -9377,10 +9385,16 @@ begin
     if ADevice.SupportsHostQueryReset and Assigned(vkResetQueryPool) then
     begin
       vkResetQueryPool(ADevice.Handle, FHandle, 0, Count);
+      for I := 0 to Count - 1 do
+        FQueryResetReady[I] := True;
       Inc(FHostResetCount);
     end;
   end else
+  begin
     FHandle := VkQueryPool(PtrUInt(Self));
+    for I := 0 to Count - 1 do
+      FQueryResetReady[I] := True;
+  end;
 end;
 
 procedure TVulkanRHIQueryPool.ReleaseDeviceResources;
@@ -9395,6 +9409,9 @@ destructor TVulkanRHIQueryPool.Destroy;
 begin
   SetLength(FSimulatedResults, 0);
   SetLength(FQueryWritten, 0);
+  SetLength(FQueryResetReady, 0);
+  SetLength(FQueryRecordedGeneration, 0);
+  SetLength(FQueryActiveInCmd, 0);
   inherited;
 end;
 
@@ -9562,6 +9579,12 @@ begin
   FActiveRenderingHasDepth := False;
   FActiveRenderingDepthFormat := pfUndefined;
   FActiveRenderingSampleCount := 1;
+  if FDevice <> nil then
+  begin
+    Inc(FDevice.FCommandRecordingGeneration);
+    FRecordingGeneration := FDevice.FCommandRecordingGeneration;
+  end else
+    Inc(FRecordingGeneration);
 end;
 
 procedure TVulkanRHICommandList.BeginRecording;
@@ -10740,28 +10763,62 @@ procedure TVulkanRHICommandList.ResetQueryPool(const QueryPool: TRHIQueryPool;
   const FirstQuery, QueryCount: Cardinal);
 var
   VkPool: TVulkanRHIQueryPool;
-  I: Cardinal;
+  EndExclusive, I: Cardinal;
+  DidHostReset: Boolean;
 begin
   if (QueryPool = nil) or (QueryCount = 0) then Exit;
   VkPool := QueryPool as TVulkanRHIQueryPool;
   Inc(VkPool.FResetCount);
-  for I := FirstQuery to Min(FirstQuery + QueryCount, Cardinal(Length(VkPool.FQueryWritten))) - 1 do
-  begin
-    VkPool.FQueryWritten[I] := False;
-    VkPool.FSimulatedResults[I] := 0;
-  end;
+  EndExclusive := Min(FirstQuery + QueryCount, Cardinal(Length(VkPool.FQueryWritten)));
   { VUID-vkCmdResetQueryPool-renderpass: vkCmdResetQueryPool is illegal inside an active
     render pass instance. When called mid-pass (e.g. TShape.OcclusionQueryId lazy init
-    inside TCastleViewport), use VK_EXT_host_query_reset / Vulkan 1.2 vkResetQueryPool. }
+    inside TCastleViewport), use VK_EXT_host_query_reset / Vulkan 1.2 vkResetQueryPool.
+    Never host-reset a query that was already recorded in the current VkCommandBuffer
+    (e.g. multi-pass or shared shapes), because host resets occur before vkQueueSubmit
+    and cannot reset a query between two vkCmdBeginQuery calls in the same command buffer. }
   if FIsRendering then
   begin
     if (FDevice <> nil) and FDevice.SupportsHostQueryReset then
     begin
-      if (FDevice.Handle <> nil) and (VkPool.Handle <> VK_NULL_HANDLE) and Assigned(vkResetQueryPool) then
-        vkResetQueryPool(FDevice.Handle, VkPool.Handle, FirstQuery, QueryCount);
-      Inc(VkPool.FHostResetCount);
+      DidHostReset := False;
+      for I := FirstQuery to EndExclusive - 1 do
+      begin
+        if (FRecordingGeneration <> 0) and
+           (VkPool.FQueryRecordedGeneration[I] = FRecordingGeneration) then
+          Continue;
+        VkPool.FQueryWritten[I] := False;
+        VkPool.FSimulatedResults[I] := 0;
+        VkPool.FQueryActiveInCmd[I] := False;
+        if (FDevice.Handle <> nil) and (VkPool.Handle <> VK_NULL_HANDLE) and Assigned(vkResetQueryPool) then
+        begin
+          vkResetQueryPool(FDevice.Handle, VkPool.Handle, I, 1);
+          VkPool.FQueryResetReady[I] := True;
+          DidHostReset := True;
+        end else if (FDevice.Handle = nil) then
+        begin
+          VkPool.FQueryResetReady[I] := True;
+          DidHostReset := True;
+        end;
+      end;
+      if DidHostReset then
+        Inc(VkPool.FHostResetCount);
+    end else
+    begin
+      for I := FirstQuery to EndExclusive - 1 do
+      begin
+        VkPool.FQueryWritten[I] := False;
+        VkPool.FSimulatedResults[I] := 0;
+      end;
     end;
     Exit;
+  end;
+  for I := FirstQuery to EndExclusive - 1 do
+  begin
+    VkPool.FQueryWritten[I] := False;
+    VkPool.FSimulatedResults[I] := 0;
+    VkPool.FQueryResetReady[I] := True;
+    VkPool.FQueryRecordedGeneration[I] := 0;
+    VkPool.FQueryActiveInCmd[I] := False;
   end;
   if (FHandle <> nil) and Assigned(vkCmdResetQueryPool) then
     vkCmdResetQueryPool(FHandle, VkPool.Handle, FirstQuery, QueryCount);
@@ -10775,17 +10832,30 @@ var
 begin
   if QueryPool = nil then Exit;
   VkPool := QueryPool as TVulkanRHIQueryPool;
-  if QueryIndex < Cardinal(Length(VkPool.FQueryWritten)) then
+  if QueryIndex >= Cardinal(Length(VkPool.FQueryWritten)) then
+    Exit;
+  if (FHandle <> nil) and Assigned(vkCmdBeginQuery) then
   begin
+    if (not VkPool.FQueryResetReady[QueryIndex]) or
+       ((FRecordingGeneration <> 0) and
+        (VkPool.FQueryRecordedGeneration[QueryIndex] = FRecordingGeneration)) then
+      Exit;
+    VkPool.FQueryResetReady[QueryIndex] := False;
+    VkPool.FQueryRecordedGeneration[QueryIndex] := FRecordingGeneration;
+    VkPool.FQueryActiveInCmd[QueryIndex] := True;
     VkPool.FQueryWritten[QueryIndex] := True;
     if VkPool.FSimulatedResults[QueryIndex] = 0 then
       VkPool.FSimulatedResults[QueryIndex] := 128;
-  end;
-  Flags := 0;
-  if Precise then
-    Flags := VK_QUERY_CONTROL_PRECISE_BIT;
-  if (FHandle <> nil) and Assigned(vkCmdBeginQuery) then
+    Flags := 0;
+    if Precise then
+      Flags := VK_QUERY_CONTROL_PRECISE_BIT;
     vkCmdBeginQuery(FHandle, VkPool.Handle, QueryIndex, Flags);
+    Exit;
+  end;
+  VkPool.FQueryWritten[QueryIndex] := True;
+  if VkPool.FSimulatedResults[QueryIndex] = 0 then
+    VkPool.FSimulatedResults[QueryIndex] := 128;
+  VkPool.FQueryActiveInCmd[QueryIndex] := True;
 end;
 
 procedure TVulkanRHICommandList.EndQuery(const QueryPool: TRHIQueryPool;
@@ -10795,10 +10865,19 @@ var
 begin
   if QueryPool = nil then Exit;
   VkPool := QueryPool as TVulkanRHIQueryPool;
-  if QueryIndex < Cardinal(Length(VkPool.FQueryWritten)) then
-    VkPool.FQueryWritten[QueryIndex] := True;
+  if QueryIndex >= Cardinal(Length(VkPool.FQueryWritten)) then
+    Exit;
   if (FHandle <> nil) and Assigned(vkCmdEndQuery) then
+  begin
+    if not VkPool.FQueryActiveInCmd[QueryIndex] then
+      Exit;
+    VkPool.FQueryActiveInCmd[QueryIndex] := False;
+    VkPool.FQueryWritten[QueryIndex] := True;
     vkCmdEndQuery(FHandle, VkPool.Handle, QueryIndex);
+    Exit;
+  end;
+  VkPool.FQueryActiveInCmd[QueryIndex] := False;
+  VkPool.FQueryWritten[QueryIndex] := True;
 end;
 
 procedure TVulkanRHICommandList.WriteTimestamp(const QueryPool: TRHIQueryPool;
@@ -10812,6 +10891,7 @@ begin
   if QueryIndex < Cardinal(Length(VkPool.FQueryWritten)) then
   begin
     VkPool.FQueryWritten[QueryIndex] := True;
+    VkPool.FQueryResetReady[QueryIndex] := False;
     if VkPool.FSimulatedResults[QueryIndex] = 0 then
       VkPool.FSimulatedResults[QueryIndex] := UInt64(QueryIndex + 1) * UInt64(1000000);
   end;

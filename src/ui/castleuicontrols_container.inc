@@ -3139,6 +3139,7 @@ begin
     DepthDesc.DebugName := 'ContainerSaveScreenDepth';
     OffscreenDepthTex := RHIDevice.CreateTexture(DepthDesc);
 
+    RHIDevice.WaitIdle;
     EventBeforeRender;
 
     Cmd := RHIDevice.BeginOffscreenFrame;

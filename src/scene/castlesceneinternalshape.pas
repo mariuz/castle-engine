@@ -53,6 +53,9 @@ type
       1-based query slot index allocated from TOcclusionCullingRenderer (0 = unallocated). }
     OcclusionQueryId: TGLQuery;
     RHIQuerySlot: Cardinal;
+    RHILastAskedBank: Byte;
+    RHIBankAsked: array[0..1] of Boolean;
+    RHIBankAskedFrameId: array[0..1] of TFrameId;
     OcclusionQueryAsked: boolean;
     OcclusionQueryAskedFrameId: TFrameId;
 
@@ -343,6 +346,11 @@ begin
   FreeCaches;
   FreeQuery(OcclusionQueryId);
   RHIQuerySlot := 0;
+  RHILastAskedBank := 0;
+  RHIBankAsked[0] := False;
+  RHIBankAsked[1] := False;
+  RHIBankAskedFrameId[0] := 0;
+  RHIBankAskedFrameId[1] := 0;
   OcclusionQueryAsked := false;
 end;
 

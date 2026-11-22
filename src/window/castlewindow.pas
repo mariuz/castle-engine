@@ -4704,6 +4704,7 @@ type
     Win: TCastleWindow;
     Left, Top, Width, Height: Integer;
     FullScreen: Boolean;
+    Visible: Boolean;
   end;
 var
   Saved: array of TSavedWindowGeom;
@@ -4728,6 +4729,7 @@ begin
       Saved[I].Width := OpenWindows[I].FWidth;
       Saved[I].Height := OpenWindows[I].FHeight;
       Saved[I].FullScreen := OpenWindows[I].FFullScreenWanted;
+      Saved[I].Visible := OpenWindows[I].FVisible;
     end;
 
     { 1. Tear down all open windows in reverse order so the final Close(false)
@@ -4752,6 +4754,7 @@ begin
       Saved[I].Win.FHeight := Saved[I].Height;
       Saved[I].Win.FFullScreenWanted := Saved[I].FullScreen;
       Saved[I].Win.FFullScreenBackend := Saved[I].FullScreen;
+      Saved[I].Win.Visible := Saved[I].Visible;
       Saved[I].Win.Open;
       Inc(Saved[I].Win.FBackendSwitchCount);
       Saved[I].Win.Invalidate;

@@ -63,14 +63,16 @@ type
   TOcclusionCullingRenderer = class
   strict private
     FUtils: TOcclusionCullingUtilsRenderer;
-    FRHIQueryPools: array of TRHIQueryPool;
+    FRHIQueryPools: array[0..MaxFramesInFlight - 1] of array of TRHIQueryPool;
     FRHIQueryPageCapacity: Cardinal;
     FNextRHIQuerySlot: Cardinal;
     FRHIQueriesIssuedCount: Cardinal;
     FRHIQueriesHitCount: Cardinal;
+    function CurrentRHIQueryBank: Cardinal;
+    procedure EnsureRHIQueryPoolPage(const ABank, ARequiredPage: Cardinal);
     function GetRHIQueryPoolCount: Cardinal;
     function AllocateRHIQuerySlot: Cardinal;
-    function GetRHIQueryPoolAndLocalIndex(const ASlot: Cardinal;
+    function GetRHIQueryPoolAndLocalIndex(const ABank, ASlot: Cardinal;
       out ALocalIndex: Cardinal): TRHIQueryPool;
   public
     constructor Create;
@@ -327,33 +329,60 @@ end;
 
 procedure TOcclusionCullingRenderer.GLContextClose;
 var
-  I: Integer;
+  Bank, I: Integer;
 begin
   if FUtils <> nil then
     FUtils.GLContextClose;
-  for I := 0 to High(FRHIQueryPools) do
-    FreeAndNil(FRHIQueryPools[I]);
-  SetLength(FRHIQueryPools, 0);
+  for Bank := 0 to MaxFramesInFlight - 1 do
+  begin
+    for I := 0 to High(FRHIQueryPools[Bank]) do
+      FreeAndNil(FRHIQueryPools[Bank][I]);
+    SetLength(FRHIQueryPools[Bank], 0);
+  end;
   FNextRHIQuerySlot := 0;
+end;
+
+function TOcclusionCullingRenderer.CurrentRHIQueryBank: Cardinal;
+begin
+  if RHIDevice <> nil then
+    Result := RHIDevice.FrameIndex mod MaxFramesInFlight
+  else
+    Result := 0;
+end;
+
+procedure TOcclusionCullingRenderer.EnsureRHIQueryPoolPage(const ABank, ARequiredPage: Cardinal);
+var
+  Capacity, PageIdx: Cardinal;
+begin
+  if (RHIDevice = nil) or (ABank >= MaxFramesInFlight) then
+    Exit;
+  Capacity := Max(Cardinal(1), FRHIQueryPageCapacity);
+  while Cardinal(Length(FRHIQueryPools[ABank])) <= ARequiredPage do
+  begin
+    PageIdx := Cardinal(Length(FRHIQueryPools[ABank]));
+    SetLength(FRHIQueryPools[ABank], PageIdx + 1);
+    FRHIQueryPools[ABank][PageIdx] := RHIDevice.CreateQueryPool(
+      TRHIQueryPoolDesc.Create(qtOcclusion, Capacity,
+        Format('OcclusionCullingQueryPool_Bank%d_Page%d', [ABank, PageIdx])));
+  end;
 end;
 
 function TOcclusionCullingRenderer.GetRHIQueryPoolCount: Cardinal;
 begin
-  Result := Cardinal(Length(FRHIQueryPools));
+  Result := Cardinal(Length(FRHIQueryPools[0]));
 end;
 
 function TOcclusionCullingRenderer.GetRHIQueryPool(const APageIndex: Cardinal): TRHIQueryPool;
 begin
-  if APageIndex < Cardinal(Length(FRHIQueryPools)) then
-    Result := FRHIQueryPools[APageIndex]
+  if APageIndex < Cardinal(Length(FRHIQueryPools[0])) then
+    Result := FRHIQueryPools[0][APageIndex]
   else
     Result := nil;
 end;
 
 function TOcclusionCullingRenderer.AllocateRHIQuerySlot: Cardinal;
 var
-  Capacity: Cardinal;
-  RequiredPage, PageIdx: Cardinal;
+  Capacity, RequiredPage: Cardinal;
 begin
   Inc(FNextRHIQuerySlot);
   Result := FNextRHIQuerySlot; // 1-based slot index
@@ -363,31 +392,25 @@ begin
 
   Capacity := Max(Cardinal(1), FRHIQueryPageCapacity);
   RequiredPage := (Result - 1) div Capacity;
-  while Cardinal(Length(FRHIQueryPools)) <= RequiredPage do
-  begin
-    PageIdx := Cardinal(Length(FRHIQueryPools));
-    SetLength(FRHIQueryPools, PageIdx + 1);
-    FRHIQueryPools[PageIdx] := RHIDevice.CreateQueryPool(
-      TRHIQueryPoolDesc.Create(qtOcclusion, Capacity,
-        Format('OcclusionCullingQueryPool_Page%d', [PageIdx])));
-  end;
+  EnsureRHIQueryPoolPage(CurrentRHIQueryBank, RequiredPage);
 end;
 
 function TOcclusionCullingRenderer.GetRHIQueryPoolAndLocalIndex(
-  const ASlot: Cardinal; out ALocalIndex: Cardinal): TRHIQueryPool;
+  const ABank, ASlot: Cardinal; out ALocalIndex: Cardinal): TRHIQueryPool;
 var
   Capacity, ZeroBased, PageIdx: Cardinal;
 begin
   Result := nil;
   ALocalIndex := 0;
-  if ASlot = 0 then
+  if (ASlot = 0) or (ABank >= MaxFramesInFlight) then
     Exit;
   Capacity := Max(Cardinal(1), FRHIQueryPageCapacity);
   ZeroBased := ASlot - 1;
   PageIdx := ZeroBased div Capacity;
   ALocalIndex := ZeroBased mod Capacity;
-  if PageIdx < Cardinal(Length(FRHIQueryPools)) then
-    Result := FRHIQueryPools[PageIdx];
+  EnsureRHIQueryPoolPage(ABank, PageIdx);
+  if PageIdx < Cardinal(Length(FRHIQueryPools[ABank])) then
+    Result := FRHIQueryPools[ABank][PageIdx];
 end;
 
 procedure TOcclusionCullingRenderer.Render(const CollectedShape: TCollectedShape;
@@ -454,33 +477,49 @@ const
   { On WebGL, we sometimes get occlusion query results after many frames
     since asking. Ignore them in such case. }
   MaxOcclusionQueryResultAge = 1; // frames
+  MaxRHIOcclusionQueryResultAge = MaxFramesInFlight; // double-buffered frame-in-flight banks
 var
   Shape: TGLShape;
   WasVisible: Boolean;
   QueryResultAvailable, OcclusionQueryAsk: Boolean;
   QueryResultAge: Int64;
   RHIQueryPool: TRHIQueryPool;
-  LocalQueryIdx: Cardinal;
+  RHIBank, ReadBank, LocalQueryIdx: Cardinal;
   RHISampleCounts: array[0..0] of UInt64;
 begin
   Shape := CollectedShape.Shape;
+  RHIBank := 0;
 
-  { Get occlusion query result from previous render. }
+  { Get occlusion query result from previous render.
+    Prefer the most recently issued bank (1-frame latency when ready, and matches
+    headless SetSimulatedResult tests), falling back to the fence-retired current bank
+    when the previous frame is still executing on the GPU. }
   if RHIDevice <> nil then
   begin
-    if Shape.OcclusionQueryAsked and (Shape.RHIQuerySlot > 0) then
+    RHIBank := CurrentRHIQueryBank;
+    ReadBank := Shape.RHILastAskedBank;
+    if (Shape.RHIQuerySlot > 0) and Shape.RHIBankAsked[ReadBank] then
     begin
-      RHIQueryPool := GetRHIQueryPoolAndLocalIndex(Shape.RHIQuerySlot, LocalQueryIdx);
+      RHIQueryPool := GetRHIQueryPoolAndLocalIndex(ReadBank, Shape.RHIQuerySlot, LocalQueryIdx);
+      RHISampleCounts[0] := 0;
+      QueryResultAvailable := (RHIQueryPool <> nil) and
+        RHIQueryPool.GetResults(LocalQueryIdx, 1, RHISampleCounts, False);
+      if (not QueryResultAvailable) and (ReadBank <> RHIBank) and Shape.RHIBankAsked[RHIBank] then
+      begin
+        ReadBank := RHIBank;
+        RHIQueryPool := GetRHIQueryPoolAndLocalIndex(ReadBank, Shape.RHIQuerySlot, LocalQueryIdx);
+        RHISampleCounts[0] := 0;
+        QueryResultAvailable := (RHIQueryPool <> nil) and
+          RHIQueryPool.GetResults(LocalQueryIdx, 1, RHISampleCounts, False);
+      end;
       if RHIQueryPool <> nil then
       begin
-        RHISampleCounts[0] := 0;
-        QueryResultAvailable := RHIQueryPool.GetResults(LocalQueryIdx, 1, RHISampleCounts, False);
         if not QueryResultAvailable then
           WasVisible := true // assume is visible until GPU finishes query
         else
         begin
-          QueryResultAge := TFramesPerSecond.RenderFrameId - Shape.OcclusionQueryAskedFrameId;
-          if QueryResultAge > MaxOcclusionQueryResultAge then
+          QueryResultAge := TFramesPerSecond.RenderFrameId - Shape.RHIBankAskedFrameId[ReadBank];
+          if QueryResultAge > MaxRHIOcclusionQueryResultAge then
             WasVisible := true // assume is visible, query result is too old to trust it
           else
           begin
@@ -489,6 +528,10 @@ begin
               Inc(FRHIQueriesHitCount);
           end;
         end;
+        { Current bank is guaranteed fence-retired by BeginFrame, so we can always
+          issue a new query into RHIBank even if PrevBank was still in flight. }
+        if ReadBank <> RHIBank then
+          QueryResultAvailable := True;
       end else
       begin
         WasVisible := true;
@@ -541,7 +584,7 @@ begin
       if Shape.RHIQuerySlot = 0 then
         Shape.RHIQuerySlot := AllocateRHIQuerySlot;
 
-      RHIQueryPool := GetRHIQueryPoolAndLocalIndex(Shape.RHIQuerySlot, LocalQueryIdx);
+      RHIQueryPool := GetRHIQueryPoolAndLocalIndex(RHIBank, Shape.RHIQuerySlot, LocalQueryIdx);
       if (RHIQueryPool <> nil) and (ActiveCommandList <> nil) then
       begin
         ActiveCommandList.ResetQueryPool(RHIQueryPool, LocalQueryIdx, 1);
@@ -563,6 +606,9 @@ begin
         ActiveCommandList.EndQuery(RHIQueryPool, LocalQueryIdx);
 
       Inc(FRHIQueriesIssuedCount);
+      Shape.RHILastAskedBank := RHIBank;
+      Shape.RHIBankAsked[RHIBank] := True;
+      Shape.RHIBankAskedFrameId[RHIBank] := TFramesPerSecond.RenderFrameId;
       Shape.OcclusionQueryAskedFrameId := TFramesPerSecond.RenderFrameId;
     end else
     begin
