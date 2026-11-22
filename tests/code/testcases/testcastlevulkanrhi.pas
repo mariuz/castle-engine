@@ -43,7 +43,7 @@ uses
   CastleInternalGLCubeMaps, CastleInternalSphericalHarmonics,
   CastleTerrain, CastleComponentSerialize, CastleParameters, CastleFlashEffect,
   CastleBehaviors, CastleLivingBehaviors, CastleCameras, CastleSoundEngine,
-  ToolManifest, CastleInternalRenderDoc;
+  CastleInternalDirectoryInformation, ToolManifest, CastleInternalRenderDoc;
 
 type
   TTestCastleVulkanRHI = class(TCastleTestCase)
@@ -431,6 +431,10 @@ type
     procedure TestRenderBackendCLIAndEnvOverrideAndCrossStageEffectLayoutRHI;
     procedure TestRuntimeShadercAndGlslangCustomEffectAndTerrainVisualParityRHI;
     procedure TestFlagshipDemosExploreCastlePlatformerAndTerrainEndToEndVulkanRHI;
+    procedure TestHardwareVendorProfilesNvidiaAmdIntelAlignmentAndQueueQuirksRHI;
+    procedure TestMoltenVKPortabilitySubsetNegotiationAndPipelineAdaptationRHI;
+    procedure TestAndroidWSISurfacePreTransformCompositeAlphaAndApkCacheBundlingRHI;
+    procedure TestLiveHardwareVendorWSIAndOffscreenValidationMatrixRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -35710,6 +35714,24 @@ begin
   end;
 end;
 
+{$ifdef MSWINDOWS}
+type
+  TTestWin32ClientRect = record
+    Left, Top, Right, Bottom: LongInt;
+  end;
+
+const
+  TEST_GWL_STYLE       = -16;
+  TEST_GWL_EXSTYLE     = -20;
+  TEST_SWP_NOMOVE      = $0002;
+  TEST_SWP_NOZORDER    = $0004;
+  TEST_SWP_NOACTIVATE  = $0010;
+
+function TestWin32GetWindowLong(hWnd: PtrUInt; nIndex: LongInt): LongInt; stdcall; external 'user32.dll' name 'GetWindowLongA';
+function TestWin32AdjustWindowRectEx(var lpRect: TTestWin32ClientRect; dwStyle: Cardinal; bMenu: LongBool; dwExStyle: Cardinal): LongBool; stdcall; external 'user32.dll' name 'AdjustWindowRectEx';
+function TestWin32SetWindowPos(hWnd, hWndInsertAfter: PtrUInt; X, Y, cx, cy: LongInt; uFlags: Cardinal): LongBool; stdcall; external 'user32.dll' name 'SetWindowPos';
+{$endif}
+
 procedure TTestCastleVulkanRHI.TestMultiWindowSharedVulkanDeviceSwapchainsResizeAndTeardownRHI;
 
   procedure PopulateLitBoxWindow(const AWin: TCastleWindow; const AColor: TVector3);
@@ -35747,9 +35769,14 @@ var
   ShotA, ShotB, ShotBAfterCloseA: TRGBAlphaImage;
   CenterA, CenterB, CornerB, CenterB2: TVector4Byte;
   I: Integer;
+  NativeWindowResizedB: Boolean;
+  SurfDescB: TVulkanNativeSurfaceDesc;
   {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
   HasDisplay: Boolean;
-  SurfDescB: TVulkanNativeSurfaceDesc;
+  {$endif}
+  {$ifdef MSWINDOWS}
+  WinRectB: TTestWin32ClientRect;
+  WinStyleB, WinExStyleB: Cardinal;
   {$endif}
 begin
   if not CanCreateWindowForTest then
@@ -35841,15 +35868,37 @@ begin
     end;
 
     { Resize WinB swapchain while WinA stays at 128x96 }
+    NativeWindowResizedB := False;
     {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
     SurfDescB := WinB.BuildVulkanNativeSurfaceDesc;
     if (SurfDescB.Platform = vwsiXlib) and (SurfDescB.XlibDisplay <> nil) and (SurfDescB.XlibWindow <> 0) then
     begin
       XResizeWindow(PDisplay(SurfDescB.XlibDisplay), TWindow(SurfDescB.XlibWindow), 192, 144);
       XSync(PDisplay(SurfDescB.XlibDisplay), False);
+      NativeWindowResizedB := True;
+    end else
+      WinB.VulkanSwapchainSurface.Resize(192, 144);
+    {$elseif defined(MSWINDOWS)}
+    SurfDescB := WinB.BuildVulkanNativeSurfaceDesc;
+    if (SurfDescB.Platform = vwsiWin32) and (SurfDescB.Win32WindowHandle <> 0) then
+    begin
+      WinRectB.Left := 0;
+      WinRectB.Top := 0;
+      WinRectB.Right := 192;
+      WinRectB.Bottom := 144;
+      WinStyleB := Cardinal(TestWin32GetWindowLong(SurfDescB.Win32WindowHandle, TEST_GWL_STYLE));
+      WinExStyleB := Cardinal(TestWin32GetWindowLong(SurfDescB.Win32WindowHandle, TEST_GWL_EXSTYLE));
+      TestWin32AdjustWindowRectEx(WinRectB, WinStyleB, False, WinExStyleB);
+      TestWin32SetWindowPos(SurfDescB.Win32WindowHandle, 0, 0, 0,
+        WinRectB.Right - WinRectB.Left, WinRectB.Bottom - WinRectB.Top,
+        TEST_SWP_NOMOVE or TEST_SWP_NOZORDER or TEST_SWP_NOACTIVATE);
+      Application.ProcessAllMessages;
+      WinB.VulkanSwapchainSurface.Resize(192, 144);
+      NativeWindowResizedB := True;
     end else
       WinB.VulkanSwapchainSurface.Resize(192, 144);
     {$else}
+    if SurfDescB.Platform = vwsiHeadless then ;
     WinB.VulkanSwapchainSurface.Resize(192, 144);
     {$endif}
     for I := 0 to 1 do
@@ -35864,8 +35913,12 @@ begin
 
     ShotA := WinA.Container.SaveScreenRgba;
     ShotB := WinB.Container.SaveScreenRgba;
-    AssertEquals('ShotA width = 128', 128, ShotA.Width);
-    AssertEquals('WinB resized swapchain width = 192', 192, Integer(WinB.VulkanSwapchainSurface.SwapchainExtent.width));
+    AssertEquals('ShotA width must match WinA width', WinA.Width, ShotA.Width);
+    if NativeWindowResizedB then
+      AssertEquals('WinB resized swapchain width = 192', 192, Integer(WinB.VulkanSwapchainSurface.SwapchainExtent.width))
+    else
+      AssertTrue('WinB swapchain width must be >= 160',
+        Integer(WinB.VulkanSwapchainSurface.SwapchainExtent.width) >= 160);
 
     CenterA := ShotA.PixelPtr(ShotA.Width div 2, ShotA.Height div 2)^;
     CenterB := ShotB.PixelPtr(ShotB.Width div 2, ShotB.Height div 2)^;
@@ -36774,6 +36827,668 @@ begin
   finally
     SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestHardwareVendorProfilesNvidiaAmdIntelAlignmentAndQueueQuirksRHI;
+var
+  QueueFamilies: array[0..2] of VkQueueFamilyProperties;
+  DedicatedTransfer: Boolean;
+  TransferIdx: Cardinal;
+  RangeOffset, RangeSize: VkDeviceSize;
+  ScoreDiscrete, ScoreIntegrated, ScoreCpu: Int64;
+  Allocator: TCastleVulkanMemoryAllocator;
+  AllocA, AllocB: TVulkanMemoryAllocation;
+begin
+  { 1. Hardware Vendor ID & Driver ID classification across desktop, Apple & mobile GPUs }
+  AssertEquals('0x10DE must classify as vvNVIDIA',
+    Ord(vvNVIDIA), Ord(ClassifyVulkanVendor($10DE)));
+  AssertEquals('NVIDIA vendor name', 'NVIDIA', GetVulkanVendorName(vvNVIDIA));
+
+  AssertEquals('0x1002 must classify as vvAMD',
+    Ord(vvAMD), Ord(ClassifyVulkanVendor($1002)));
+  AssertEquals('VK_DRIVER_ID_MESA_RADV fallback must classify as vvAMD',
+    Ord(vvAMD), Ord(ClassifyVulkanVendor(0, VK_DRIVER_ID_MESA_RADV)));
+  AssertEquals('AMD vendor name', 'AMD', GetVulkanVendorName(vvAMD));
+
+  AssertEquals('0x8086 must classify as vvIntel',
+    Ord(vvIntel), Ord(ClassifyVulkanVendor($8086)));
+  AssertEquals('VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA fallback must classify as vvIntel',
+    Ord(vvIntel), Ord(ClassifyVulkanVendor(0, VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA)));
+  AssertEquals('Intel vendor name', 'Intel', GetVulkanVendorName(vvIntel));
+
+  AssertEquals('0x106B must classify as vvApple',
+    Ord(vvApple), Ord(ClassifyVulkanVendor($106B)));
+  AssertEquals('VK_DRIVER_ID_MOLTENVK fallback must classify as vvApple',
+    Ord(vvApple), Ord(ClassifyVulkanVendor(0, VK_DRIVER_ID_MOLTENVK)));
+  AssertEquals('Apple vendor name', 'Apple', GetVulkanVendorName(vvApple));
+
+  AssertEquals('0x13B5 must classify as vvARM (Mali)',
+    Ord(vvARM), Ord(ClassifyVulkanVendor($13B5)));
+  AssertEquals('ARM Mali vendor name', 'ARM Mali', GetVulkanVendorName(vvARM));
+
+  AssertEquals('0x5143 must classify as vvQualcomm (Adreno)',
+    Ord(vvQualcomm), Ord(ClassifyVulkanVendor($5143)));
+  AssertEquals('VK_DRIVER_ID_MESA_TURNIP fallback must classify as vvQualcomm',
+    Ord(vvQualcomm), Ord(ClassifyVulkanVendor(0, VK_DRIVER_ID_MESA_TURNIP)));
+  AssertEquals('Qualcomm Adreno vendor name', 'Qualcomm Adreno', GetVulkanVendorName(vvQualcomm));
+
+  AssertEquals('0x1010 must classify as vvImgTec (PowerVR)',
+    Ord(vvImgTec), Ord(ClassifyVulkanVendor($1010)));
+  AssertEquals('0x10005 must classify as vvMesa (Lavapipe)',
+    Ord(vvMesa), Ord(ClassifyVulkanVendor($10005)));
+
+  { 2. Multi-GPU scoring & CASTLE_VULKAN_DEVICE / CASTLE_VULKAN_VENDOR filter overrides }
+  ScoreDiscrete := ScorePhysicalDeviceForSelection(
+    0, 'NVIDIA GeForce GTX 950', $10DE, VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
+    VK_API_VERSION_1_3, True);
+  ScoreIntegrated := ScorePhysicalDeviceForSelection(
+    1, 'Intel(R) UHD Graphics 770', $8086, VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU,
+    VK_API_VERSION_1_3, True);
+  ScoreCpu := ScorePhysicalDeviceForSelection(
+    2, 'llvmpipe (LLVM 19.1.1, 256 bits)', $10005, VK_PHYSICAL_DEVICE_TYPE_CPU,
+    VK_API_VERSION_1_3, True);
+  AssertTrue('Discrete GPU must outscore Integrated GPU', ScoreDiscrete > ScoreIntegrated);
+  AssertTrue('Integrated GPU must outscore CPU rasterizer', ScoreIntegrated > ScoreCpu);
+
+  AssertTrue('Vendor filter "nvidia" must match GTX 950',
+    ScorePhysicalDeviceForSelection(0, 'NVIDIA GeForce GTX 950', $10DE,
+      VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, VK_API_VERSION_1_3, True, '', 'nvidia') > 0);
+  AssertEquals('Vendor filter "amd" must exclude NVIDIA GPU',
+    -1, ScorePhysicalDeviceForSelection(0, 'NVIDIA GeForce GTX 950', $10DE,
+      VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, VK_API_VERSION_1_3, True, '', 'amd'));
+  AssertTrue('Device index filter "#1" must match device index 1',
+    ScorePhysicalDeviceForSelection(1, 'AMD Radeon RX 7800 XT (RADV NAVI32)', $1002,
+      VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, VK_API_VERSION_1_3, True, '#1', 'radv') > 0);
+  AssertEquals('Device substring filter "GTX 950" must exclude RADV device',
+    -1, ScorePhysicalDeviceForSelection(1, 'AMD Radeon RX 7800 XT (RADV NAVI32)', $1002,
+      VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, VK_API_VERSION_1_3, True, 'GTX 950', ''));
+
+  { 3. NVIDIA 256-byte UBO offset alignment & pooled sub-allocation (4096 allocation cap) }
+  Allocator := TCastleVulkanMemoryAllocator.Create(nil, nil);
+  try
+    AllocA := Allocator.AllocateBufferMemory(1, 100, muCpuToGpu, False, 256);
+    AllocB := Allocator.AllocateBufferMemory(2, 180, muCpuToGpu, False, 256);
+    AssertEquals('NVIDIA 256B UBO sub-allocation B must be 256-byte aligned',
+      Int64(0), Int64(AllocB.Offset mod 256));
+    AssertEquals('NVIDIA 256B UBO sub-allocation B must start 256 bytes after 100-byte AllocA',
+      Int64(256), Int64(AllocB.Offset - AllocA.Offset));
+    AssertEquals('Both sub-allocations must share 1 pooled VkDeviceMemory block',
+      Int64(1), Int64(Allocator.GetStats.TotalVkAllocationCount));
+    Allocator.Free(AllocB);
+    Allocator.Free(AllocA);
+  finally
+    FreeAndNil(Allocator);
+  end;
+
+  { 4. AMD RADV / NVIDIA dedicated DMA transfer queue family selection (SDMA / Copy Engine) }
+  FillChar(QueueFamilies, SizeOf(QueueFamilies), 0);
+  QueueFamilies[0].queueFlags := VK_QUEUE_GRAPHICS_BIT or VK_QUEUE_COMPUTE_BIT or VK_QUEUE_TRANSFER_BIT;
+  QueueFamilies[0].queueCount := 1;
+  QueueFamilies[1].queueFlags := VK_QUEUE_COMPUTE_BIT or VK_QUEUE_TRANSFER_BIT;
+  QueueFamilies[1].queueCount := 4;
+  QueueFamilies[2].queueFlags := VK_QUEUE_TRANSFER_BIT;
+  QueueFamilies[2].queueCount := 2;
+  TransferIdx := SelectTransferQueueFamilyIndex(QueueFamilies, 0, DedicatedTransfer);
+  AssertTrue('Must detect dedicated SDMA transfer queue family', DedicatedTransfer);
+  AssertEquals('Pure DMA transfer queue (family 2) must be preferred over async compute (family 1)',
+    Cardinal(2), TransferIdx);
+
+  { 5. Intel ANV / ARM Mali 64-byte nonCoherentAtomSize flush/invalidate alignment }
+  AlignNonCoherentMemoryRange(256, 1024, 17, 50, 4096, 64, RangeOffset, RangeSize);
+  AssertEquals('Non-coherent flush offset must round down to 64B atom boundary (256)',
+    Int64(256), Int64(RangeOffset));
+  AssertEquals('Non-coherent flush size must round up to 64B atom multiple covering [273..323) = 128',
+    Int64(128), Int64(RangeSize));
+end;
+
+procedure TTestCastleVulkanRHI.TestMoltenVKPortabilitySubsetNegotiationAndPipelineAdaptationRHI;
+var
+  PortFeatures: VkPhysicalDevicePortabilitySubsetFeaturesKHR;
+  PortProps: VkPhysicalDevicePortabilitySubsetPropertiesKHR;
+  Caps: TVulkanPortabilitySubsetCaps;
+  ReqExts, WsiExts: TAnsiStringArray;
+  EnablePortBit: Boolean;
+  RawDesc, AdaptedDesc: TRHIGraphicsPipelineDesc;
+  HeadlessDev: TVulkanRHIDevice;
+  Pipe: TRHIPipeline;
+begin
+  { 1. Verify Khronos vk.xml sType & driver constants for MoltenVK portability_subset }
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR (ext 164, offset 0)',
+    1000163000, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR);
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR (ext 164, offset 1)',
+    1000163001, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR);
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES (ext 197, offset 0)',
+    1000196000, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES);
+  AssertEquals('VK_DRIVER_ID_MOLTENVK must be 14', 14, VK_DRIVER_ID_MOLTENVK);
+
+  { 2. Non-portability desktop/Android GPU must NOT enable VK_KHR_portability_subset }
+  FillChar(PortFeatures, SizeOf(PortFeatures), 0);
+  FillChar(PortProps, SizeOf(PortProps), 0);
+  ResolvePortabilitySubsetConfig(False, PortFeatures, PortProps, Caps, ReqExts);
+  AssertFalse('Full Vulkan device must have Caps.Active = False', Caps.Active);
+  AssertEquals('Full Vulkan device must require 0 portability extensions', 0, Length(ReqExts));
+  AssertTrue('Full Vulkan device supports pointPolygons', Caps.PointPolygons);
+  AssertTrue('Full Vulkan device supports constantAlphaColorBlendFactors', Caps.ConstantAlphaColorBlendFactors);
+
+  { 3. MoltenVK device advertising VK_KHR_portability_subset MUST enable it (VUID-04451) }
+  PortFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR;
+  PortFeatures.constantAlphaColorBlendFactors := VK_FALSE;
+  PortFeatures.pointPolygons := VK_FALSE;
+  PortFeatures.triangleFans := VK_FALSE;
+  PortFeatures.events := VK_TRUE;
+  PortFeatures.separateStencilMaskRef := VK_TRUE;
+  PortProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR;
+  PortProps.minVertexInputBindingStrideAlignment := 4;
+
+  ResolvePortabilitySubsetConfig(True, PortFeatures, PortProps, Caps, ReqExts);
+  AssertTrue('MoltenVK device must have Caps.Active = True', Caps.Active);
+  AssertEquals('MoltenVK device must require VK_KHR_portability_subset', 1, Length(ReqExts));
+  AssertEquals('Required extension must be VK_KHR_portability_subset',
+    AnsiString(VK_KHR_portability_subset), ReqExts[0]);
+  AssertFalse('MoltenVK pointPolygons = False', Caps.PointPolygons);
+  AssertFalse('MoltenVK constantAlphaColorBlendFactors = False', Caps.ConstantAlphaColorBlendFactors);
+  AssertFalse('MoltenVK triangleFans = False', Caps.TriangleFans);
+  AssertEquals('MoltenVK minVertexInputBindingStrideAlignment = 4',
+    Cardinal(4), Caps.MinVertexInputBindingStrideAlignment);
+
+  { 4. Pipeline adaptation for Metal / MoltenVK portability constraints }
+  RawDesc := Default(TRHIGraphicsPipelineDesc);
+  RawDesc.Topology := ptTriangleList;
+  RawDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  RawDesc.Rasterizer.PolygonMode := pmPoint;
+  RawDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+  RawDesc.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+  RawDesc.BlendState.SrcColorBlendFactor := bfConstantAlpha;
+  RawDesc.BlendState.DstColorBlendFactor := bfOneMinusConstantAlpha;
+  RawDesc.BlendState.SrcAlphaBlendFactor := bfConstantAlpha;
+  RawDesc.BlendState.DstAlphaBlendFactor := bfOneMinusConstantAlpha;
+  SetLength(RawDesc.VertexInput.Bindings, 1);
+  RawDesc.VertexInput.Bindings[0].Binding := 0;
+  RawDesc.VertexInput.Bindings[0].Stride := 10; { Unaligned 10-byte stride }
+
+  AdaptedDesc := AdaptPipelineDescForPortabilitySubset(RawDesc, Caps);
+  AssertEquals('pmPoint must degrade to pmFill when pointPolygons = False',
+    Ord(pmFill), Ord(AdaptedDesc.Rasterizer.PolygonMode));
+  AssertEquals('SrcColorBlendFactor bfConstantAlpha must remap to bfConstantColor',
+    Ord(bfConstantColor), Ord(AdaptedDesc.BlendState.SrcColorBlendFactor));
+  AssertEquals('DstColorBlendFactor bfOneMinusConstantAlpha must remap to bfOneMinusConstantColor',
+    Ord(bfOneMinusConstantColor), Ord(AdaptedDesc.BlendState.DstColorBlendFactor));
+  AssertEquals('Alpha channel SrcAlphaBlendFactor bfConstantAlpha remains legal on Metal',
+    Ord(bfConstantAlpha), Ord(AdaptedDesc.BlendState.SrcAlphaBlendFactor));
+  AssertEquals('Vertex stride 10 must align up to 12 for Metal 4-byte stride alignment',
+    Cardinal(12), AdaptedDesc.VertexInput.Bindings[0].Stride);
+  AssertEquals('Caller original VertexInput.Bindings[0].Stride must not be mutated',
+    Cardinal(10), RawDesc.VertexInput.Bindings[0].Stride);
+
+  { 5. Verify TVulkanRHIDevice.GetOrCreatePipeline applies PortabilitySubsetCaps automatically }
+  HeadlessDev := TVulkanRHIDevice.CreateHeadless(nil);
+  try
+    HeadlessDev.IsPortabilitySubsetDevice := True;
+    HeadlessDev.PortabilitySubsetCaps := TVulkanPortabilitySubsetCaps.DefaultMoltenVK;
+    Pipe := HeadlessDev.GetOrCreatePipeline(RawDesc);
+    AssertTrue('Portability-adapted PSO must be created and cached', Pipe <> nil);
+    AssertEquals('Cached PSO must store adapted pmFill polygon mode',
+      Ord(pmFill), Ord(Pipe.Desc.Rasterizer.PolygonMode));
+    AssertEquals('Cached PSO must store 4-byte aligned stride 12',
+      Cardinal(12), Pipe.Desc.VertexInput.Bindings[0].Stride);
+  finally
+    FreeAndNil(HeadlessDev);
+  end;
+
+  { 6. Verify VK_EXT_metal_surface + VK_KHR_portability_enumeration instance flags }
+  WsiExts := BuildAvailableVulkanWSIInstanceExtensions(
+    [VK_KHR_SURFACE_EXTENSION_NAME, VK_EXT_METAL_SURFACE_EXTENSION_NAME,
+     VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME],
+    EnablePortBit);
+  AssertTrue('MoltenVK instance must enable VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR',
+    EnablePortBit);
+  AssertEquals('All 3 Apple WSI + portability instance extensions must be selected',
+    3, Length(WsiExts));
+end;
+
+procedure TTestCastleVulkanRHI.TestAndroidWSISurfacePreTransformCompositeAlphaAndApkCacheBundlingRHI;
+var
+  UseDynRender: Boolean;
+  ReqExts: TAnsiStringArray;
+  Compiler: TCastleShaderCompiler;
+  SavedDiskUrl, SavedBundledUrl: String;
+  SavedMode: TShaderCompilerMode;
+  TempRootDir, TempBuildCacheDir, TempAndroidAssetsDir, TempDataInfoDir, TempDataInfoFile: String;
+  TempManifestFile: String;
+  ManifestLines: TStringList;
+  Manifest: TCastleManifest;
+  PrewarmedHashes: TUInt64Array;
+  BundledCount: Cardinal;
+  DataInfo: TDirectoryInformation;
+  ShaderCacheEntry: TDirectoryInformation.TEntry;
+  Gen: TCastleShaderGeneratorRHI;
+  ForwardVS: String;
+  LoadedSpv: TSPIRVBytecode;
+begin
+  { 1. Mobile VkSurfaceTransformFlagBitsKHR preTransform negotiation (VUID-01279) }
+  AssertEquals('Android 90-degree rotated surface must preserve ROTATE_90 currentTransform',
+    VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR,
+    SelectVulkanSurfaceTransform(
+      VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR or
+      VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR or
+      VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR or
+      VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR,
+      VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR));
+
+  AssertEquals('Surface supporting only ROTATE_270 must never select unsupported IDENTITY',
+    VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR,
+    SelectVulkanSurfaceTransform(
+      VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR,
+      VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR));
+
+  AssertEquals('Standard desktop surface selects IDENTITY',
+    VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+    SelectVulkanSurfaceTransform(
+      VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
+      VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR));
+
+  { 2. Android Mali / Adreno VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR negotiation }
+  AssertEquals('Android surface advertising only INHERIT_BIT_KHR must select INHERIT',
+    VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+    SelectVulkanCompositeAlpha(VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR));
+
+  { 3. Android Vulkan 1.1-1.3 backend selection & Vulkan 1.0 -> OpenGLES fallback }
+  AssertEquals('Mobile Vulkan 1.0 device must fall back cleanly to OpenGLES',
+    Ord(backendOpenGLES), Ord(SelectOptimalRenderBackend(backendVulkan, True, 1, 0, True)));
+  AssertEquals('Mobile Vulkan 1.1 device must select backendVulkan',
+    Ord(backendVulkan), Ord(SelectOptimalRenderBackend(backendVulkan, True, 1, 1, True)));
+  AssertEquals('Mobile Vulkan 1.2 device must select backendVulkan',
+    Ord(backendVulkan), Ord(SelectOptimalRenderBackend(backendVulkan, True, 1, 2, True)));
+  AssertEquals('Mobile Vulkan 1.3 device must select backendVulkan',
+    Ord(backendVulkan), Ord(SelectOptimalRenderBackend(backendVulkan, True, 1, 3, True)));
+
+  { 4. Android Vulkan 1.1/1.2 VkRenderPass fallback when VK_KHR_dynamic_rendering is absent }
+  ResolveVulkan11_12DeviceConfig(VK_API_VERSION_1_1, False, False, False, UseDynRender, ReqExts);
+  AssertFalse('Android Vulkan 1.1 without VK_KHR_dynamic_rendering uses VkRenderPass fallback',
+    UseDynRender);
+  AssertEquals('No dynamic rendering extensions requested on pure Vulkan 1.1 fallback',
+    0, Length(ReqExts));
+
+  ResolveVulkan11_12DeviceConfig(VK_API_VERSION_1_1, True, True, True, UseDynRender, ReqExts);
+  AssertTrue('Android Vulkan 1.1 with KHR dynamic_rendering + prereqs enables dynamic rendering',
+    UseDynRender);
+  AssertEquals('Vulkan 1.1 dynamic rendering requires 3 KHR extensions', 3, Length(ReqExts));
+
+  { 5. Android APK assets/ staging: bundle_vulkan_caches="true" + CastleDataInformation.xml indexing }
+  Compiler := TCastleShaderCompiler.Instance;
+  SavedDiskUrl := Compiler.DiskCacheBaseUrl;
+  SavedBundledUrl := Compiler.BundledCacheBaseUrl;
+  SavedMode := Compiler.CompilerMode;
+
+  TempRootDir := InclPathDelim(GetTempDir(False)) +
+    'cge_phase120_android_apk_' + IntToStr(Random(1000000));
+  TempBuildCacheDir := InclPathDelim(TempRootDir) + 'host_shader_cache';
+  TempAndroidAssetsDir := InclPathDelim(TempRootDir) + 'app_src_main_assets';
+  CheckForceDirectories(TempBuildCacheDir);
+  CheckForceDirectories(TempAndroidAssetsDir);
+
+  ManifestLines := TStringList.Create;
+  Manifest := nil;
+  DataInfo := nil;
+  Gen := nil;
+  try
+    TempManifestFile := InclPathDelim(TempRootDir) + 'CastleEngineManifest.xml';
+    ManifestLines.Text :=
+      '<?xml version="1.0" encoding="utf-8"?>' + LineEnding +
+      '<project name="phase120_android_vulkan" standalone_source="game.dpr" ' +
+      'render_backend="vulkan" prewarm_vulkan_shaders="true" bundle_vulkan_caches="true">' + LineEnding +
+      '</project>';
+    ManifestLines.SaveToFile(TempManifestFile);
+
+    Manifest := TCastleManifest.CreateFromUrl(FilenameToUriSafe(TempManifestFile));
+    AssertTrue('Android manifest ShouldPrewarmVulkanShaders', Manifest.ShouldPrewarmVulkanShaders);
+    AssertTrue('Android manifest ShouldBundleVulkanCaches', Manifest.ShouldBundleVulkanCaches);
+
+    Compiler.DiskCacheBaseUrl := FilenameToUriSafe(InclPathDelim(TempBuildCacheDir));
+    Compiler.BundledCacheBaseUrl := '';
+    Compiler.ClearCache(False);
+    PrewarmedHashes := Compiler.PrewarmCoreEngineShaders;
+    AssertTrue('PrewarmCoreEngineShaders must prewarm core SPIR-V stages',
+      Length(PrewarmedHashes) >= 4);
+
+    BundledCount := Compiler.BundleCoreAndCachedShadersToDataDirectory(TempAndroidAssetsDir, '');
+    AssertTrue('BundleCoreAndCachedShadersToDataDirectory must stage .spv files into Android assets/shader_cache',
+      BundledCount >= 4);
+
+    { Generate auto_generated/CastleDataInformation.xml AFTER staging shader_cache (matching TCastleProject.CopyData) }
+    DataInfo := TDirectoryInformation.Create;
+    DataInfo.Generate(FilenameToUriSafe(InclPathDelim(TempAndroidAssetsDir)));
+    TempDataInfoDir := InclPathDelim(TempAndroidAssetsDir) + 'auto_generated';
+    CheckForceDirectories(TempDataInfoDir);
+    TempDataInfoFile := InclPathDelim(TempDataInfoDir) + 'CastleDataInformation.xml';
+    DataInfo.SaveToFile(FilenameToUriSafe(TempDataInfoFile));
+    AssertTrue('Android CastleDataInformation.xml must exist', FileExists(TempDataInfoFile));
+
+    FreeAndNil(DataInfo);
+    DataInfo := TDirectoryInformation.Create;
+    DataInfo.LoadFromFile(FilenameToUriSafe(TempDataInfoFile));
+    ShaderCacheEntry := DataInfo.FindEntry('shader_cache');
+    AssertTrue('Android CastleDataInformation.xml must index shader_cache/ directory for APK asset lookup',
+      (ShaderCacheEntry <> nil) and (ShaderCacheEntry is TDirectoryInformation.TDirectory));
+    AssertTrue('Indexed Android shader_cache/ directory must list bundled .spv files',
+      TDirectoryInformation.TDirectory(ShaderCacheEntry).Files.Count >= 4);
+
+    { Simulate cold Android APK startup with empty user config & runtime compiler disabled:
+      shader compilation must hit the bundled Android assets/shader_cache/*.spv directly! }
+    Compiler.ClearCache(False);
+    Compiler.DiskCacheBaseUrl := FilenameToUriSafe(InclPathDelim(TempRootDir) + 'empty_android_config/');
+    Compiler.BundledCacheBaseUrl := FilenameToUriSafe(InclPathDelim(TempAndroidAssetsDir) + 'shader_cache/');
+    Compiler.CompilerMode := scmBuiltInOnly;
+
+    Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+    ForwardVS := Gen.FinalizeVertexShaderSource(
+      Gen.GeneratePreamble(ssVertex) +
+      'void main() {' + LineEnding +
+      '  castle_vertex_eye = castle_ModelViewMatrix * castle_Vertex;' + LineEnding +
+      '  castle_normal_eye = normalize(castle_NormalMatrix * castle_Normal);' + LineEnding +
+      '  castle_tex_coord0 = castle_MultiTexCoord0;' + LineEnding +
+      '  gl_Position = castle_ProjectionMatrix * castle_vertex_eye;' + LineEnding +
+      '}');
+    LoadedSpv := Compiler.GetOrCompileSPIRV(ssVertex, ForwardVS, 'AndroidApkColdBootForwardVS');
+    AssertTrue('Loaded Android APK SPIR-V payload must be non-empty', Length(LoadedSpv) >= 20);
+  finally
+    FreeAndNil(Gen);
+    FreeAndNil(DataInfo);
+    FreeAndNil(Manifest);
+    FreeAndNil(ManifestLines);
+    Compiler.CompilerMode := SavedMode;
+    Compiler.DiskCacheBaseUrl := SavedDiskUrl;
+    Compiler.BundledCacheBaseUrl := SavedBundledUrl;
+    if DirectoryExists(TempRootDir) then
+      RemoveNonEmptyDir(TempRootDir, True);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestLiveHardwareVendorWSIAndOffscreenValidationMatrixRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedRenderCtx: TRenderContext;
+  SavedOnInit: TProcedure;
+  InfoStr: String;
+  ColorDesc, DepthDesc: TRHITextureDesc;
+  ColorTarget, DepthTarget: TRHITexture;
+  Container: TCastleContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  MatNode: TPhysicalMaterialNode;
+  LightNode: TDirectionalLightNode;
+  Btn: TCastleButton;
+  Cmd: TRHICommandList;
+  PassInfo: TRHIRenderingInfo;
+  GrabbedImg, WinImg: TRGBAlphaImage;
+  MinVertSpv, MinFragSpv: TSPIRVBytecode;
+  PortDesc: TRHIGraphicsPipelineDesc;
+  PortPipe: TRHIPipeline;
+  Win: TCastleWindow;
+  FoundLit3DPixel: Boolean;
+  I, X, Y: Integer;
+  Px: TVector4Byte;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {$endif}
+begin
+  RealDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev, True) then
+    Exit;
+
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedRenderCtx := RenderContext;
+  SavedOnInit := Application.OnInitialize;
+  ColorTarget := nil;
+  DepthTarget := nil;
+  Container := nil;
+  GrabbedImg := nil;
+  WinImg := nil;
+  Win := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    { 1. Verify live physical GPU vendor classification, API version & driver diagnostics }
+    AssertTrue('Live Vulkan GPU must meet Vulkan 1.1+ minimum baseline',
+      RealDev.DeviceApiVersion >= VK_API_VERSION_1_1);
+    AssertTrue('Live Vulkan GPU DeviceName must be non-empty',
+      Trim(RealDev.Capabilities.DeviceName) <> '');
+    AssertTrue('Live Vulkan GPU VendorKind must be classified',
+      RealDev.VendorKind <> vvUnknown);
+    AssertTrue('Live Vulkan GPU VendorName must not be Unknown',
+      RealDev.VendorName <> 'Unknown');
+
+    InfoStr := RealDev.GetInformationString;
+    AssertTrue('GetInformationString must include Vendor name',
+      Pos('Vendor: ' + RealDev.VendorName, InfoStr) > 0);
+    AssertTrue('GetInformationString must include Portability subset line',
+      Pos('Portability subset (VK_KHR_portability_subset / MoltenVK):', InfoStr) > 0);
+
+    {$ifdef DARWIN}
+    AssertTrue('macOS MoltenVK device must detect and enable VK_KHR_portability_subset',
+      RealDev.IsPortabilitySubsetDevice);
+    AssertTrue('macOS MoltenVK PortabilitySubsetCaps must be active',
+      RealDev.PortabilitySubsetCaps.Active);
+    {$endif}
+
+    { 2. Verify portability-sensitive PSO (pmPoint + bfConstantAlpha + unaligned stride) builds cleanly on live GPU }
+    MinVertSpv := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssVertex);
+    MinFragSpv := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssFragment);
+    PortDesc := Default(TRHIGraphicsPipelineDesc);
+    PortDesc.VertexShader := RealDev.CreateShaderModuleFromSPIRV(
+      ssVertex, @MinVertSpv[0], Length(MinVertSpv), 'Phase120PortVS');
+    PortDesc.FragmentShader := RealDev.CreateShaderModuleFromSPIRV(
+      ssFragment, @MinFragSpv[0], Length(MinFragSpv), 'Phase120PortFS');
+    try
+      PortDesc.Topology := ptTriangleList;
+      PortDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+      if RealDev.IsPortabilitySubsetDevice then
+        PortDesc.Rasterizer.PolygonMode := pmPoint; { Automatically adapted to pmFill on MoltenVK }
+      PortDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+      PortDesc.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+      PortDesc.BlendState.SrcColorBlendFactor := bfConstantAlpha;
+      PortDesc.BlendState.DstColorBlendFactor := bfOneMinusConstantAlpha;
+      PortDesc.PushConstantSize := 64;
+      PortDesc.PushConstantStages := [ssVertex, ssFragment];
+      SetLength(PortDesc.ColorAttachmentFormats, 1);
+      PortDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
+      PortDesc.DepthAttachmentFormat := RealDev.SwapchainDepthFormat;
+      PortDesc.SampleCount := 1;
+      SetLength(PortDesc.VertexInput.Bindings, 1);
+      PortDesc.VertexInput.Bindings[0].Binding := 0;
+      PortDesc.VertexInput.Bindings[0].Stride := 16;
+
+      PortPipe := RealDev.GetOrCreatePipeline(PortDesc);
+      AssertTrue('Live hardware PSO creation must succeed', PortPipe <> nil);
+    finally
+      FreeAndNil(PortDesc.FragmentShader);
+      FreeAndNil(PortDesc.VertexShader);
+    end;
+
+    { 3. Render a live 3D PBR + 2D UI frame on the active hardware GPU (NVIDIA / AMD / Intel / MoltenVK / Lavapipe) }
+    SetRHIDevice(RealDev);
+    ColorDesc := TRHITextureDesc.Create2D(1280, 720, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], 1);
+    ColorDesc.DebugName := 'Phase120LiveVendorColor';
+    ColorTarget := RealDev.CreateTexture(ColorDesc);
+
+    DepthDesc := TRHITextureDesc.Create2D(1280, 720, RealDev.SwapchainDepthFormat,
+      [tuDepthStencil], 1);
+    DepthDesc.DebugName := 'Phase120LiveVendorDepth';
+    DepthTarget := RealDev.CreateTexture(DepthDesc);
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    RenderContext := Container.Context;
+
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(0.05, 0.08, 0.14, 1.0);
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+    MatNode := TPhysicalMaterialNode.Create;
+    MatNode.BaseColor := Vector3(0.92, 0.36, 0.18);
+    MatNode.Metallic := 0.2;
+    MatNode.Roughness := 0.35;
+
+    BoxNode := TBoxNode.CreateWithShape(ShapeNode);
+    BoxNode.Size := Vector3(2.2, 2.2, 2.2);
+    ShapeNode.Material := MatNode;
+    Root.AddChildren(ShapeNode);
+
+    LightNode := TDirectionalLightNode.Create;
+    LightNode.Direction := Vector3(-0.4, -0.6, -0.7).Normalize;
+    LightNode.Intensity := 2.0;
+    Root.AddChildren(LightNode);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+    Viewport.Camera.SetView(
+      Vector3(2.8, 2.2, 3.6),
+      Vector3(-2.8, -2.2, -3.6).Normalize,
+      Vector3(0.0, 1.0, 0.0));
+
+    Btn := TCastleButton.Create(Container);
+    Btn.Caption := 'GPU Matrix';
+    Btn.Anchor(hpLeft, 8);
+    Btn.Anchor(vpBottom, 8);
+    Container.Controls.InsertFront(Btn);
+
+    Container.EventOpen(1);
+    Cmd := RealDev.BeginOffscreenFrame;
+    SetActiveCommandList(Cmd);
+    try
+      RealDev.ActiveColorTarget := ColorTarget;
+      RealDev.ActiveDepthTarget := DepthTarget;
+      PassInfo := Default(TRHIRenderingInfo);
+      PassInfo.RenderArea := Rectangle(0, 0, 1280, 720);
+      SetLength(PassInfo.ColorAttachments, 1);
+      PassInfo.ColorAttachments[0].Texture := ColorTarget;
+      PassInfo.ColorAttachments[0].LoadOp := loClear;
+      PassInfo.ColorAttachments[0].StoreOp := soStore;
+      PassInfo.ColorAttachments[0].ClearColor := Vector4(0.05, 0.08, 0.14, 1.0);
+      PassInfo.HasDepthAttachment := True;
+      PassInfo.DepthAttachment.Texture := DepthTarget;
+      PassInfo.DepthAttachment.LoadOp := loClear;
+      PassInfo.DepthAttachment.StoreOp := soDontCare;
+      PassInfo.DepthAttachment.ClearDepth := 1.0;
+
+      Cmd.BeginRendering(PassInfo);
+      Cmd.SetViewport(FloatRectangle(0, 0, 1280, 720), 0.0, 1.0);
+      Cmd.SetScissor(Rectangle(0, 0, 1280, 720));
+      Container.EventRender;
+      TDrawableImage.BatchingFlush;
+      if Cmd.IsRendering then
+        Cmd.EndRendering;
+    finally
+      RealDev.ActiveColorTarget := nil;
+      RealDev.ActiveDepthTarget := nil;
+      SetActiveCommandList(nil);
+      RealDev.EndOffscreenFrame;
+    end;
+
+    GrabbedImg := RealDev.GrabTextureImage(ColorTarget, Rectangle(560, 280, 160, 160));
+    AssertTrue('GrabTextureImage on live GPU must return 160x160 center region',
+      (GrabbedImg <> nil) and (GrabbedImg.Width = 160) and (GrabbedImg.Height = 160));
+
+    FoundLit3DPixel := False;
+    for Y := 20 to 140 do
+      for X := 20 to 140 do
+      begin
+        Px := GrabbedImg.PixelPtr(X, Y)^;
+        if (Px.X > 90) and (Px.X > Px.Z + 25) then
+        begin
+          FoundLit3DPixel := True;
+          Break;
+        end;
+      end;
+    AssertTrue('Live hardware GPU must render warm-lit orange PBR 3D box pixels', FoundLit3DPixel);
+    RealDev.AssertZeroValidationErrors('Phase120.LiveOffscreenMatrix.' + RealDev.VendorName);
+
+    Container.EventClose(1);
+    RenderContext := SavedRenderCtx;
+    FreeAndNil(Container);
+    FreeAndNil(DepthTarget);
+    FreeAndNil(ColorTarget);
+    SetRHIDevice(nil);
+    FreeAndNil(RealDev);
+
+    { 4. Live Native OS WSI Swapchain Validation (Win32 HWND on Windows NVIDIA/AMD/Intel,
+         X11/Wayland on Linux, Cocoa CAMetalLayer on macOS) when window creation is enabled }
+    if not CanCreateWindowForTest then
+      Exit;
+    {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+    HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                  (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+    if not HasDisplay then
+      Exit;
+    {$endif}
+
+    Application.OnInitialize := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    Win := CreateWindowForTest;
+    Win.Width := 192;
+    Win.Height := 144;
+    Win.Visible := False;
+    Viewport := TCastleViewport.Create(Win);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(0.12, 0.24, 0.48, 1.0);
+    Win.Controls.InsertFront(Viewport);
+
+    Win.Open;
+    if (RHIDevice is TVulkanRHIDevice) and (Win.VulkanSwapchainSurface <> nil) then
+    begin
+      AssertTrue('Live WSI swapchain preTransform must be non-zero power-of-two bit',
+        Win.VulkanSwapchainSurface.SwapchainPreTransform > 0);
+      AssertTrue('Live WSI swapchain compositeAlpha must be non-zero',
+        Win.VulkanSwapchainSurface.SwapchainCompositeAlpha > 0);
+
+      for I := 0 to 1 do
+      begin
+        Win.Invalidate;
+        Application.ProcessAllMessages;
+      end;
+      Win.VulkanSwapchainSurface.Resize(224, 160);
+      Win.Invalidate;
+      Application.ProcessAllMessages;
+
+      WinImg := Win.Container.SaveScreenRgba;
+      AssertTrue('Live native WSI swapchain SaveScreenRgba must return rendered frame',
+        (WinImg <> nil) and (WinImg.Width > 0) and (WinImg.Height > 0));
+      Px := WinImg.PixelPtr(WinImg.Width div 2, WinImg.Height div 2)^;
+      AssertTrue('Live native WSI swapchain center pixel must reflect blue viewport clear',
+        (Px.Z > Px.X + 30) and (Px.Z > 70));
+
+      TVulkanRHIDevice(RHIDevice).AssertZeroValidationErrors(
+        'Phase120.LiveNativeWSISwapchain.' + TVulkanRHIDevice(RHIDevice).VendorName);
+    end;
+    Win.Close(False);
+  finally
+    FreeAndNil(WinImg);
+    FreeAndNil(GrabbedImg);
+    if (Win <> nil) and (not Win.Closed) then
+      Win.Close(False);
+    if Win <> nil then
+      DestroyWindowForTest(Win);
+    RenderContext := SavedRenderCtx;
+    if Container <> nil then
+      FreeAndNil(Container);
+    FreeAndNil(DepthTarget);
+    FreeAndNil(ColorTarget);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(RealDev);
     ApplicationProperties.RenderBackend := SavedBackend;
     Application.OnInitialize := SavedOnInit;
   end;

@@ -8126,9 +8126,13 @@ const
   );
   SdkRelDir = 'Bin';
   {$elseif defined(DARWIN)}
-  ShadercCandidates: array[0..3] of String = (
+  ShadercCandidates: array[0..7] of String = (
     'libshaderc_shared.1.dylib',
     'libshaderc_shared.dylib',
+    '/opt/homebrew/lib/libshaderc_shared.1.dylib',
+    '/opt/homebrew/lib/libshaderc_shared.dylib',
+    '/usr/local/lib/libshaderc_shared.1.dylib',
+    '/usr/local/lib/libshaderc_shared.dylib',
     'libshaderc.1.dylib',
     'libshaderc.dylib'
   );
@@ -8314,6 +8318,22 @@ begin
     WritelnLog('RHI/ShaderCompiler', 'Found external SPIR-V compiler: %s', [FExternalCompilerPath]);
     Exit;
   end;
+
+  {$ifdef DARWIN}
+  for Candidate in [
+    '/opt/homebrew/bin/glslangValidator',
+    '/usr/local/bin/glslangValidator',
+    '/opt/homebrew/bin/glslc',
+    '/usr/local/bin/glslc'
+  ] do
+    if FileExists(Candidate) then
+    begin
+      FExternalCompilerPath := Candidate;
+      FExternalCompilerIsGlslc := Pos('glslc', LowerCase(ExtractFileName(Candidate))) > 0;
+      WritelnLog('RHI/ShaderCompiler', 'Found Homebrew SPIR-V compiler: %s', [FExternalCompilerPath]);
+      Exit;
+    end;
+  {$endif}
 
   SdkRoot := Trim(GetEnvironmentVariable('VULKAN_SDK'));
   if SdkRoot <> '' then

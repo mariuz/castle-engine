@@ -1012,6 +1012,9 @@ begin
       end;
     end;
   end;
+  {$elseif defined(DARWIN)}
+  Result := TVulkanNativeSurfaceDesc.CreateMetal(
+    EnsureDarwinNSViewMetalLayer({%H-}Pointer(PtrUInt(Handle))));
   {$else}
   Result.Platform := GetDefaultVulkanWSIPlatform;
   {$endif}

@@ -2194,6 +2194,11 @@ begin
   Macros.Add('ANDROID_LOG_TAG'                     , Copy(Name, 1, MaxAndroidTagLength));
   Macros.Add('ANDROID_ABI_LIST'                    , AndroidAbiList);
   Macros.Add('ANDROID_ABI_LIST_MAKEFILE'           , AndroidAbiListMakefile);
+  if Manifest.RenderBackend in [backendAuto, backendVulkan] then
+    Macros.Add('ANDROID_VULKAN_FEATURE',
+      '    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="false"/>')
+  else
+    Macros.Add('ANDROID_VULKAN_FEATURE', '');
 
   for Service in AndroidServices do
     ParametersAddMacros(Macros, Service.Parameters, 'ANDROID.' + Service.Name + '.');
@@ -3034,6 +3039,7 @@ begin
     end;
   finally FreeAndNil(Files) end;
 
+  PrewarmAndBundleVulkanCaches(Manifest, OutputDataPath, '');
   GenerateDataInformation(OutputDataPath);
 end;
 

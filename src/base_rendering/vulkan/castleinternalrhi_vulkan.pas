@@ -307,7 +307,7 @@ type
     procedure ReleaseDeviceResources; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
-      const ADesc: TRHIGraphicsPipelineDesc);
+      const AInputDesc: TRHIGraphicsPipelineDesc);
     destructor Destroy; override;
     property Handle: VkPipeline read FHandle;
     property PipelineLayout: VkPipelineLayout read FPipelineLayout;
@@ -4303,6 +4303,7 @@ type
     FSwapchainColorSpace: VkColorSpaceKHR;
     FSwapchainPresentMode: VkPresentModeKHR;
     FSwapchainCompositeAlpha: Integer;
+    FSwapchainPreTransform: Integer;
     FSwapchainRecreateCount: Cardinal;
     FSwapchainExtent: VkExtent2D;
     FRequestedWidth: Cardinal;
@@ -4372,6 +4373,7 @@ type
     property SwapchainColorSpace: VkColorSpaceKHR read FSwapchainColorSpace;
     property SwapchainPresentMode: VkPresentModeKHR read FSwapchainPresentMode;
     property SwapchainCompositeAlpha: Integer read FSwapchainCompositeAlpha;
+    property SwapchainPreTransform: Integer read FSwapchainPreTransform;
     property SwapchainMinimized: Boolean read FSwapchainMinimized;
     property SwapchainSuboptimal: Boolean read FSwapchainSuboptimal;
     property SwapchainRecreateCount: Cardinal read FSwapchainRecreateCount;
@@ -4385,6 +4387,42 @@ type
   end;
 
   TVulkanSwapchainSurfaceList = {$ifdef FPC}specialize{$endif} TObjectList<TCastleVulkanSwapchainSurface>;
+
+  { Hardware GPU Vendor Classification (Phase 120: Desktop, Apple & Mobile Matrix) }
+  TVulkanVendorID = (
+    vvUnknown,
+    vvNVIDIA,
+    vvAMD,
+    vvIntel,
+    vvApple,
+    vvARM,
+    vvQualcomm,
+    vvImgTec,
+    vvBroadcom,
+    vvSamsung,
+    vvMesa,
+    vvMicrosoft
+  );
+
+  { VK_KHR_portability_subset Capabilities & Limits (macOS / iOS MoltenVK) }
+  TVulkanPortabilitySubsetCaps = record
+    Active: Boolean;
+    ConstantAlphaColorBlendFactors: Boolean;
+    Events: Boolean;
+    ImageViewFormatReinterpretation: Boolean;
+    ImageViewFormatSwizzle: Boolean;
+    ImageView2DOn3DImage: Boolean;
+    MultisampleArrayImage: Boolean;
+    MutableComparisonSamplers: Boolean;
+    PointPolygons: Boolean;
+    SamplerMipLodBias: Boolean;
+    SeparateStencilMaskRef: Boolean;
+    TriangleFans: Boolean;
+    VertexAttributeAccessBeyondStride: Boolean;
+    MinVertexInputBindingStrideAlignment: Cardinal;
+    class function DefaultFullVulkan: TVulkanPortabilitySubsetCaps; static;
+    class function DefaultMoltenVK: TVulkanPortabilitySubsetCaps; static;
+  end;
 
   TVulkanPendingBufferRelocation = record
     Buffer: TVulkanRHIBuffer;
@@ -4419,6 +4457,7 @@ type
     FSwapchainColorSpace: VkColorSpaceKHR;
     FSwapchainPresentMode: VkPresentModeKHR;
     FSwapchainCompositeAlpha: Integer;
+    FSwapchainPreTransform: Integer;
     FSwapchainRecreateCount: Cardinal;
     FSwapchainExtent: VkExtent2D;
     FRequestedSwapchainWidth: Cardinal;
@@ -4538,6 +4577,13 @@ type
     { Diagnostics, VK_EXT_memory_budget, VK_EXT_graphics_pipeline_library, Bindless, Extended Dynamic State, Sync2 & Fallback tracking }
     FInstanceApiVersion: Cardinal;
     FDeviceApiVersion: Cardinal;
+    FVendorKind: TVulkanVendorID;
+    FDriverId: Integer;
+    FDriverName: String;
+    FDriverInfo: String;
+    FIsPortabilitySubsetDevice: Boolean;
+    FPortabilitySubsetCaps: TVulkanPortabilitySubsetCaps;
+    FPortabilitySubsetFeatures: VkPhysicalDevicePortabilitySubsetFeaturesKHR;
     FInstanceHasSurfaceExtension: Boolean;
     FCompletedIdleEpoch: UInt64;
     FSupportsMemoryBudgetExt: Boolean;
@@ -4691,6 +4737,7 @@ type
     function GetWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
     function GetBindlessIndirectBatch: TCastleVulkanBindlessIndirectBatch;
     function GetSwapchainSurfaceCount: Cardinal;
+    function GetVendorName: String;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -4784,11 +4831,11 @@ type
 
     { Acquires or creates a cached VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT library. }
     function GetOrCreateVertexInputLibrary(
-      const ADesc: TRHIGraphicsPipelineDesc): VkPipeline;
+      const AInputDesc: TRHIGraphicsPipelineDesc): VkPipeline;
 
     { Acquires or creates a cached VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT library. }
     function GetOrCreatePreRasterizationLibrary(
-      const ADesc: TRHIGraphicsPipelineDesc;
+      const AInputDesc: TRHIGraphicsPipelineDesc;
       const ALayout: VkPipelineLayout;
       const ARenderPass: VkRenderPass): VkPipeline;
 
@@ -4800,7 +4847,7 @@ type
 
     { Acquires or creates a cached VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT library. }
     function GetOrCreateFragmentOutputLibrary(
-      const ADesc: TRHIGraphicsPipelineDesc;
+      const AInputDesc: TRHIGraphicsPipelineDesc;
       const ARenderPass: VkRenderPass): VkPipeline;
 
     { Acquires or creates a cached VkRenderPass for Vulkan 1.1/1.2 devices that lack
@@ -4949,6 +4996,7 @@ type
     property SwapchainColorSpace: VkColorSpaceKHR read FSwapchainColorSpace;
     property SwapchainPresentMode: VkPresentModeKHR read FSwapchainPresentMode;
     property SwapchainCompositeAlpha: Integer read FSwapchainCompositeAlpha;
+    property SwapchainPreTransform: Integer read FSwapchainPreTransform;
     property SwapchainMinimized: Boolean read FSwapchainMinimized;
     property SwapchainSuboptimal: Boolean read FSwapchainSuboptimal;
     property SwapchainRecreateCount: Cardinal read FSwapchainRecreateCount;
@@ -4972,6 +5020,13 @@ type
     property ValidationWarningCount: Cardinal read FValidationWarningCount;
     property ValidationInfoCount: Cardinal read FValidationInfoCount;
     property ValidationMessageCount: Integer read GetValidationMessageCount;
+    property VendorKind: TVulkanVendorID read FVendorKind;
+    property VendorName: String read GetVendorName;
+    property DriverId: Integer read FDriverId;
+    property DriverName: String read FDriverName;
+    property DriverInfo: String read FDriverInfo;
+    property IsPortabilitySubsetDevice: Boolean read FIsPortabilitySubsetDevice write FIsPortabilitySubsetDevice;
+    property PortabilitySubsetCaps: TVulkanPortabilitySubsetCaps read FPortabilitySubsetCaps write FPortabilitySubsetCaps;
     property DebugObjectsNamedCount: Cardinal read FDebugObjectsNamedCount;
     property LastNamedDebugObject: String read FLastNamedDebugObject;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt;
@@ -5167,6 +5222,44 @@ function SelectVulkanPresentMode(const AAvailableModes: array of VkPresentModeKH
 { Negotiates a supported VkCompositeAlphaFlagBitsKHR value from ASupportedCompositeAlpha,
   preferring VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, then PRE_MULTIPLIED, POST_MULTIPLIED, and INHERIT. }
 function SelectVulkanCompositeAlpha(const ASupportedCompositeAlpha: VkFlags): Integer;
+
+{ Negotiates a valid VkSurfaceTransformFlagBitsKHR value for VkSwapchainCreateInfoKHR.preTransform
+  (per VUID-VkSwapchainCreateInfoKHR-preTransform-01279), preserving ACurrentTransform when present
+  in ASupportedTransforms (e.g. rotated Android 90/180/270 mobile panels without compositor penalty)
+  and falling back to VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR or the first supported transform bit. }
+function SelectVulkanSurfaceTransform(const ASupportedTransforms: VkFlags;
+  const ACurrentTransform: Integer): Integer;
+
+{ Classifies a Vulkan PCI / Khronos vendor ID (+ optional VkDriverId / device name) into TVulkanVendorID. }
+function ClassifyVulkanVendor(const AVendorId: Cardinal;
+  const ADriverId: Integer = 0; const ADeviceName: String = ''): TVulkanVendorID;
+
+{ Returns a human-readable GPU vendor name for AVendor. }
+function GetVulkanVendorName(const AVendor: TVulkanVendorID): String;
+
+{ Scores a candidate physical device for PickPhysicalDevice selection, honoring optional
+  CASTLE_VULKAN_DEVICE (substring or '#index') and CASTLE_VULKAN_VENDOR filters and preferring
+  present-capable Vulkan 1.1+ DISCRETE_GPU > INTEGRATED_GPU > VIRTUAL_GPU > CPU.
+  Returns -1 when excluded by ADeviceFilter or AVendorFilter. }
+function ScorePhysicalDeviceForSelection(const ADeviceIndex: Cardinal;
+  const ADeviceName: String; const AVendorId, ADeviceType, AApiVersion: Cardinal;
+  const ASupportsSurface: Boolean;
+  const ADeviceFilter: String = '';
+  const AVendorFilter: String = ''): Int64;
+
+{ Resolves VK_KHR_portability_subset device requirements (mandatory per
+  VUID-VkDeviceCreateInfo-pProperties-04451 on macOS/iOS MoltenVK) and populates ACaps. }
+procedure ResolvePortabilitySubsetConfig(const AHasPortabilitySubsetExt: Boolean;
+  const AFeatures: VkPhysicalDevicePortabilitySubsetFeaturesKHR;
+  const AProps: VkPhysicalDevicePortabilitySubsetPropertiesKHR;
+  out ACaps: TVulkanPortabilitySubsetCaps;
+  out ARequiredExtensions: TAnsiStringArray);
+
+{ Adapts a TRHIGraphicsPipelineDesc to satisfy VK_KHR_portability_subset limits on MoltenVK
+  (pointPolygons = False -> pmFill, constantAlphaColorBlendFactors = False -> ConstantColor,
+  and minVertexInputBindingStrideAlignment power-of-two stride alignment). }
+function AdaptPipelineDescForPortabilitySubset(const ADesc: TRHIGraphicsPipelineDesc;
+  const APortability: TVulkanPortabilitySubsetCaps): TRHIGraphicsPipelineDesc;
 
 { Negotiates the highest supported VkApplicationInfo.apiVersion (1.3, 1.2, 1.1, or 1.0)
   for a given loader version reported by vkEnumerateInstanceVersion. }
@@ -6395,6 +6488,339 @@ begin
     Result := VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR
   else
     Result := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+end;
+
+class function TVulkanPortabilitySubsetCaps.DefaultFullVulkan: TVulkanPortabilitySubsetCaps;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.Active := False;
+  Result.ConstantAlphaColorBlendFactors := True;
+  Result.Events := True;
+  Result.ImageViewFormatReinterpretation := True;
+  Result.ImageViewFormatSwizzle := True;
+  Result.ImageView2DOn3DImage := True;
+  Result.MultisampleArrayImage := True;
+  Result.MutableComparisonSamplers := True;
+  Result.PointPolygons := True;
+  Result.SamplerMipLodBias := True;
+  Result.SeparateStencilMaskRef := True;
+  Result.TriangleFans := True;
+  Result.VertexAttributeAccessBeyondStride := True;
+  Result.MinVertexInputBindingStrideAlignment := 1;
+end;
+
+class function TVulkanPortabilitySubsetCaps.DefaultMoltenVK: TVulkanPortabilitySubsetCaps;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.Active := True;
+  Result.ConstantAlphaColorBlendFactors := False;
+  Result.Events := True;
+  Result.ImageViewFormatReinterpretation := True;
+  Result.ImageViewFormatSwizzle := True;
+  Result.ImageView2DOn3DImage := False;
+  Result.MultisampleArrayImage := True;
+  Result.MutableComparisonSamplers := False;
+  Result.PointPolygons := False;
+  Result.SamplerMipLodBias := False;
+  Result.SeparateStencilMaskRef := True;
+  Result.TriangleFans := False;
+  Result.VertexAttributeAccessBeyondStride := True;
+  Result.MinVertexInputBindingStrideAlignment := 4;
+end;
+
+function SelectVulkanSurfaceTransform(const ASupportedTransforms: VkFlags;
+  const ACurrentTransform: Integer): Integer;
+var
+  BitIdx: Integer;
+  CandidateBit: VkFlags;
+begin
+  if (ACurrentTransform > 0) and
+     ((Cardinal(ACurrentTransform) and (Cardinal(ACurrentTransform) - 1)) = 0) and
+     ((ASupportedTransforms = 0) or ((ASupportedTransforms and Cardinal(ACurrentTransform)) <> 0)) then
+    Exit(ACurrentTransform);
+
+  if (ASupportedTransforms = 0) or
+     ((ASupportedTransforms and VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) <> 0) then
+    Exit(VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR);
+
+  for BitIdx := 0 to 30 do
+  begin
+    CandidateBit := VkFlags(1) shl BitIdx;
+    if (ASupportedTransforms and CandidateBit) <> 0 then
+      Exit(Integer(CandidateBit));
+  end;
+
+  Result := VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+end;
+
+function ClassifyVulkanVendor(const AVendorId: Cardinal;
+  const ADriverId: Integer; const ADeviceName: String): TVulkanVendorID;
+var
+  LowerName: String;
+begin
+  case AVendorId of
+    $10DE: Exit(vvNVIDIA);
+    $1002, $1022: Exit(vvAMD);
+    $8086, $8087: Exit(vvIntel);
+    $106B: Exit(vvApple);
+    $13B5: Exit(vvARM);
+    $5143: Exit(vvQualcomm);
+    $1010: Exit(vvImgTec);
+    $14E4: Exit(vvBroadcom);
+    $144D: Exit(vvSamsung);
+    $1414: Exit(vvMicrosoft);
+    $10005: Exit(vvMesa);
+  end;
+
+  case ADriverId of
+    VK_DRIVER_ID_NVIDIA_PROPRIETARY,
+    VK_DRIVER_ID_MESA_NVK:
+      Exit(vvNVIDIA);
+    VK_DRIVER_ID_AMD_PROPRIETARY,
+    VK_DRIVER_ID_AMD_OPEN_SOURCE,
+    VK_DRIVER_ID_MESA_RADV:
+      Exit(vvAMD);
+    VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS,
+    VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA:
+      Exit(vvIntel);
+    VK_DRIVER_ID_MOLTENVK,
+    VK_DRIVER_ID_MESA_AGXV:
+      Exit(vvApple);
+    VK_DRIVER_ID_ARM_PROPRIETARY,
+    VK_DRIVER_ID_MESA_PANVK:
+      Exit(vvARM);
+    VK_DRIVER_ID_QUALCOMM_PROPRIETARY,
+    VK_DRIVER_ID_MESA_TURNIP:
+      Exit(vvQualcomm);
+    VK_DRIVER_ID_IMAGINATION_PROPRIETARY:
+      Exit(vvImgTec);
+    VK_DRIVER_ID_MESA_V3DV:
+      Exit(vvBroadcom);
+    VK_DRIVER_ID_SAMSUNG_PROPRIETARY:
+      Exit(vvSamsung);
+    VK_DRIVER_ID_MESA_LLVMPIPE,
+    VK_DRIVER_ID_GOOGLE_SWIFTSHADER:
+      Exit(vvMesa);
+  end;
+
+  LowerName := LowerCase(ADeviceName);
+  if (Pos('llvmpipe', LowerName) > 0) or (Pos('lavapipe', LowerName) > 0) or
+     (Pos('swiftshader', LowerName) > 0) then
+    Result := vvMesa
+  else if (Pos('geforce', LowerName) > 0) or (Pos('nvidia', LowerName) > 0) or
+          (Pos('quadro', LowerName) > 0) then
+    Result := vvNVIDIA
+  else if (Pos('radeon', LowerName) > 0) or (Pos('radv', LowerName) > 0) then
+    Result := vvAMD
+  else if (Pos('intel', LowerName) > 0) or (Pos('arc', LowerName) > 0) then
+    Result := vvIntel
+  else if (Pos('apple', LowerName) > 0) or (Pos('moltenvk', LowerName) > 0) then
+    Result := vvApple
+  else if (Pos('mali', LowerName) > 0) or (Pos('immortalis', LowerName) > 0) then
+    Result := vvARM
+  else if (Pos('adreno', LowerName) > 0) or (Pos('turnip', LowerName) > 0) then
+    Result := vvQualcomm
+  else if (Pos('powervr', LowerName) > 0) then
+    Result := vvImgTec
+  else
+    Result := vvUnknown;
+end;
+
+function GetVulkanVendorName(const AVendor: TVulkanVendorID): String;
+begin
+  case AVendor of
+    vvNVIDIA:    Result := 'NVIDIA';
+    vvAMD:       Result := 'AMD';
+    vvIntel:     Result := 'Intel';
+    vvApple:     Result := 'Apple';
+    vvARM:       Result := 'ARM Mali';
+    vvQualcomm:  Result := 'Qualcomm Adreno';
+    vvImgTec:    Result := 'Imagination PowerVR';
+    vvBroadcom:  Result := 'Broadcom VideoCore';
+    vvSamsung:   Result := 'Samsung Xclipse';
+    vvMesa:      Result := 'Mesa Software';
+    vvMicrosoft: Result := 'Microsoft';
+    else         Result := 'Unknown';
+  end;
+end;
+
+function ScorePhysicalDeviceForSelection(const ADeviceIndex: Cardinal;
+  const ADeviceName: String; const AVendorId, ADeviceType, AApiVersion: Cardinal;
+  const ASupportsSurface: Boolean;
+  const ADeviceFilter: String;
+  const AVendorFilter: String): Int64;
+var
+  TrimmedDev, TrimmedVendor, IdxToken: String;
+  ParsedIdx: Integer;
+  VendorKind: TVulkanVendorID;
+  VendorMatched: Boolean;
+begin
+  TrimmedDev := LowerCase(Trim(ADeviceFilter));
+  if TrimmedDev <> '' then
+  begin
+    IdxToken := TrimmedDev;
+    if (IdxToken <> '') and (IdxToken[1] = '#') then
+      Delete(IdxToken, 1, 1);
+    ParsedIdx := StrToIntDef(IdxToken, -1);
+    if ParsedIdx >= 0 then
+    begin
+      if Cardinal(ParsedIdx) <> ADeviceIndex then
+        Exit(-1);
+    end else
+    if Pos(TrimmedDev, LowerCase(ADeviceName)) = 0 then
+      Exit(-1);
+  end;
+
+  TrimmedVendor := LowerCase(Trim(AVendorFilter));
+  if TrimmedVendor <> '' then
+  begin
+    VendorKind := ClassifyVulkanVendor(AVendorId, 0, ADeviceName);
+    if (TrimmedVendor = 'nvidia') or (TrimmedVendor = 'nv') then
+      VendorMatched := VendorKind = vvNVIDIA
+    else if (TrimmedVendor = 'amd') or (TrimmedVendor = 'radv') or (TrimmedVendor = 'radeon') then
+      VendorMatched := VendorKind = vvAMD
+    else if (TrimmedVendor = 'intel') or (TrimmedVendor = 'anv') then
+      VendorMatched := VendorKind = vvIntel
+    else if (TrimmedVendor = 'apple') or (TrimmedVendor = 'metal') or (TrimmedVendor = 'moltenvk') then
+      VendorMatched := VendorKind = vvApple
+    else if (TrimmedVendor = 'arm') or (TrimmedVendor = 'mali') then
+      VendorMatched := VendorKind = vvARM
+    else if (TrimmedVendor = 'qualcomm') or (TrimmedVendor = 'adreno') or (TrimmedVendor = 'turnip') then
+      VendorMatched := VendorKind = vvQualcomm
+    else if (TrimmedVendor = 'imgtec') or (TrimmedVendor = 'powervr') then
+      VendorMatched := VendorKind = vvImgTec
+    else if (TrimmedVendor = 'broadcom') or (TrimmedVendor = 'v3dv') then
+      VendorMatched := VendorKind = vvBroadcom
+    else if (TrimmedVendor = 'samsung') or (TrimmedVendor = 'xclipse') then
+      VendorMatched := VendorKind = vvSamsung
+    else if (TrimmedVendor = 'mesa') or (TrimmedVendor = 'lavapipe') or
+            (TrimmedVendor = 'llvmpipe') or (TrimmedVendor = 'cpu') or (TrimmedVendor = 'software') then
+      VendorMatched := (VendorKind = vvMesa) or (ADeviceType = VK_PHYSICAL_DEVICE_TYPE_CPU)
+    else if (TrimmedVendor = 'microsoft') or (TrimmedVendor = 'dozen') then
+      VendorMatched := VendorKind = vvMicrosoft
+    else
+      VendorMatched := Pos(TrimmedVendor, LowerCase(GetVulkanVendorName(VendorKind))) > 0;
+
+    if not VendorMatched then
+      Exit(-1);
+  end;
+
+  Result := 0;
+  if ASupportsSurface then
+    Inc(Result, 100000);
+  if AApiVersion >= VK_API_VERSION_1_1 then
+    Inc(Result, 50000);
+
+  case ADeviceType of
+    VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   Inc(Result, 4000);
+    VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: Inc(Result, 3000);
+    VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    Inc(Result, 2000);
+    VK_PHYSICAL_DEVICE_TYPE_OTHER:          Inc(Result, 1000);
+    VK_PHYSICAL_DEVICE_TYPE_CPU:            Inc(Result, 500);
+  end;
+
+  if AApiVersion >= VK_API_VERSION_1_3 then
+    Inc(Result, 100)
+  else if AApiVersion >= VK_API_VERSION_1_2 then
+    Inc(Result, 50);
+end;
+
+procedure ResolvePortabilitySubsetConfig(const AHasPortabilitySubsetExt: Boolean;
+  const AFeatures: VkPhysicalDevicePortabilitySubsetFeaturesKHR;
+  const AProps: VkPhysicalDevicePortabilitySubsetPropertiesKHR;
+  out ACaps: TVulkanPortabilitySubsetCaps;
+  out ARequiredExtensions: TAnsiStringArray);
+begin
+  SetLength(ARequiredExtensions, 0);
+  if not AHasPortabilitySubsetExt then
+  begin
+    ACaps := TVulkanPortabilitySubsetCaps.DefaultFullVulkan;
+    Exit;
+  end;
+
+  { Per VUID-VkDeviceCreateInfo-pProperties-04451, if VK_KHR_portability_subset is advertised
+    in vkEnumerateDeviceExtensionProperties, it MUST be included in ppEnabledExtensionNames. }
+  SetLength(ARequiredExtensions, 1);
+  ARequiredExtensions[0] := VK_KHR_portability_subset;
+
+  FillChar(ACaps, SizeOf(ACaps), 0);
+  ACaps.Active := True;
+  ACaps.ConstantAlphaColorBlendFactors := AFeatures.constantAlphaColorBlendFactors = VK_TRUE;
+  ACaps.Events := AFeatures.events = VK_TRUE;
+  ACaps.ImageViewFormatReinterpretation := AFeatures.imageViewFormatReinterpretation = VK_TRUE;
+  ACaps.ImageViewFormatSwizzle := AFeatures.imageViewFormatSwizzle = VK_TRUE;
+  ACaps.ImageView2DOn3DImage := AFeatures.imageView2DOn3DImage = VK_TRUE;
+  ACaps.MultisampleArrayImage := AFeatures.multisampleArrayImage = VK_TRUE;
+  ACaps.MutableComparisonSamplers := AFeatures.mutableComparisonSamplers = VK_TRUE;
+  ACaps.PointPolygons := AFeatures.pointPolygons = VK_TRUE;
+  ACaps.SamplerMipLodBias := AFeatures.samplerMipLodBias = VK_TRUE;
+  ACaps.SeparateStencilMaskRef := AFeatures.separateStencilMaskRef = VK_TRUE;
+  ACaps.TriangleFans := AFeatures.triangleFans = VK_TRUE;
+  ACaps.VertexAttributeAccessBeyondStride := AFeatures.vertexAttributeAccessBeyondStride = VK_TRUE;
+  ACaps.MinVertexInputBindingStrideAlignment := Max(Cardinal(1), AProps.minVertexInputBindingStrideAlignment);
+end;
+
+function AdaptPipelineDescForPortabilitySubset(const ADesc: TRHIGraphicsPipelineDesc;
+  const APortability: TVulkanPortabilitySubsetCaps): TRHIGraphicsPipelineDesc;
+
+  function AdaptColorBlendFactor(const AFactor: TRHIBlendFactor): TRHIBlendFactor;
+  begin
+    case AFactor of
+      bfConstantAlpha:         Result := bfConstantColor;
+      bfOneMinusConstantAlpha: Result := bfOneMinusConstantColor;
+      else                     Result := AFactor;
+    end;
+  end;
+
+var
+  I: Integer;
+  AlignMask, AlignedStride: Cardinal;
+  NeedsBindingCopy: Boolean;
+begin
+  Result := ADesc;
+  if not APortability.Active then
+    Exit;
+
+  { VUID-VkPipelineRasterizationStateCreateInfo-pointPolygons-04458:
+    Metal / MoltenVK lacks polygonMode = VK_POLYGON_MODE_POINT when pointPolygons = VK_FALSE }
+  if (not APortability.PointPolygons) and (Result.Rasterizer.PolygonMode = pmPoint) then
+    Result.Rasterizer.PolygonMode := pmFill;
+
+  { VUID-VkPipelineColorBlendAttachmentState-constantAlphaColorBlendFactors-04454/04455:
+    Metal / MoltenVK forbids CONSTANT_ALPHA / ONE_MINUS_CONSTANT_ALPHA on RGB color blend factors }
+  if not APortability.ConstantAlphaColorBlendFactors then
+  begin
+    Result.BlendState.SrcColorBlendFactor := AdaptColorBlendFactor(Result.BlendState.SrcColorBlendFactor);
+    Result.BlendState.DstColorBlendFactor := AdaptColorBlendFactor(Result.BlendState.DstColorBlendFactor);
+  end;
+
+  { VUID-VkVertexInputBindingDescription-stride-04456:
+    stride must be a multiple of minVertexInputBindingStrideAlignment (typically 4 on Metal) }
+  if (APortability.MinVertexInputBindingStrideAlignment > 1) and
+     (Length(ADesc.VertexInput.Bindings) > 0) then
+  begin
+    NeedsBindingCopy := False;
+    for I := 0 to High(ADesc.VertexInput.Bindings) do
+      if (ADesc.VertexInput.Bindings[I].Stride > 0) and
+         ((ADesc.VertexInput.Bindings[I].Stride mod APortability.MinVertexInputBindingStrideAlignment) <> 0) then
+      begin
+        NeedsBindingCopy := True;
+        Break;
+      end;
+
+    if NeedsBindingCopy then
+    begin
+      Result.VertexInput.Bindings := Copy(ADesc.VertexInput.Bindings, 0, Length(ADesc.VertexInput.Bindings));
+      AlignMask := APortability.MinVertexInputBindingStrideAlignment;
+      for I := 0 to High(Result.VertexInput.Bindings) do
+        if (Result.VertexInput.Bindings[I].Stride > 0) and
+           ((Result.VertexInput.Bindings[I].Stride mod AlignMask) <> 0) then
+        begin
+          AlignedStride := ((Result.VertexInput.Bindings[I].Stride + AlignMask - 1) div AlignMask) * AlignMask;
+          Result.VertexInput.Bindings[I].Stride := AlignedStride;
+        end;
+    end;
+  end;
 end;
 
 procedure RHIStateToVkLayoutAndAccess(const State: TRHIResourceState;
@@ -8854,8 +9280,9 @@ begin
 end;
 
 constructor TVulkanRHIPipeline.Create(const ADevice: TVulkanRHIDevice;
-  const ADesc: TRHIGraphicsPipelineDesc);
+  const AInputDesc: TRHIGraphicsPipelineDesc);
 var
+  ADesc: TRHIGraphicsPipelineDesc;
   SetLayouts: array of VkDescriptorSetLayout;
   PushRange: VkPushConstantRange;
   LayoutInfo: VkPipelineLayoutCreateInfo;
@@ -8884,6 +9311,10 @@ var
   TempEmptySetLayout: VkDescriptorSetLayout;
   I: Integer;
 begin
+  if (ADevice <> nil) and ADevice.PortabilitySubsetCaps.Active then
+    ADesc := AdaptPipelineDescForPortabilitySubset(AInputDesc, ADevice.PortabilitySubsetCaps)
+  else
+    ADesc := AInputDesc;
   inherited Create(ADevice, ADesc);
   if (ADevice <> nil) and (not ADevice.SupportsDynamicRendering) then
     FRenderPass := ADevice.GetOrCreateFallbackRenderPass(
@@ -25070,6 +25501,7 @@ begin
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
   FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FSwapchainPreTransform := VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
   FRequestedWidth := InitialWidth;
   FRequestedHeight := InitialHeight;
 
@@ -25129,6 +25561,7 @@ begin
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
   FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FSwapchainPreTransform := VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
   FRequestedWidth := InitialWidth;
   FRequestedHeight := InitialHeight;
 
@@ -25181,6 +25614,7 @@ begin
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
   FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FSwapchainPreTransform := VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
   SimulateForTesting(AWidth, AHeight, AImageCount, AColorFormat, ADepthFormat);
 end;
 
@@ -25399,6 +25833,7 @@ begin
     end;
     FSwapchainPresentMode := SelectVulkanPresentMode(PresentModes, False);
     FSwapchainCompositeAlpha := SelectVulkanCompositeAlpha(Caps.supportedCompositeAlpha);
+    FSwapchainPreTransform := SelectVulkanSurfaceTransform(Caps.supportedTransforms, Caps.currentTransform);
 
     FSwapchainExtent.width := Max(Cardinal(1), AWidth);
     FSwapchainExtent.height := Max(Cardinal(1), AHeight);
@@ -25454,7 +25889,7 @@ begin
       CreateInfo.pQueueFamilyIndices := @QueueFamilyIndices[0];
     end else
       CreateInfo.imageSharingMode := VK_SHARING_MODE_EXCLUSIVE;
-    CreateInfo.preTransform := Caps.currentTransform;
+    CreateInfo.preTransform := FSwapchainPreTransform;
     CreateInfo.compositeAlpha := FSwapchainCompositeAlpha;
     CreateInfo.presentMode := FSwapchainPresentMode;
     CreateInfo.clipped := VK_TRUE;
@@ -25786,6 +26221,8 @@ begin
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
   FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FSwapchainPreTransform := VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+  FPortabilitySubsetCaps := TVulkanPortabilitySubsetCaps.DefaultFullVulkan;
   FRequestedSwapchainWidth := InitialWidth;
   FRequestedSwapchainHeight := InitialHeight;
 
@@ -25841,6 +26278,8 @@ begin
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
   FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FSwapchainPreTransform := VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+  FPortabilitySubsetCaps := TVulkanPortabilitySubsetCaps.DefaultFullVulkan;
 
   LoadVulkan;
   CreateInstance(EnableValidation, True);
@@ -25914,6 +26353,8 @@ begin
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
   FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FSwapchainPreTransform := VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+  FPortabilitySubsetCaps := TVulkanPortabilitySubsetCaps.DefaultFullVulkan;
 
   LoadVulkan;
   CreateInstance(EnableValidation, False);
@@ -25983,6 +26424,8 @@ begin
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
   FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FSwapchainPreTransform := VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+  FPortabilitySubsetCaps := TVulkanPortabilitySubsetCaps.DefaultFullVulkan;
   FCapabilities.Backend := rbVulkan;
   FCapabilities.DeviceName := 'Headless Vulkan RHI Device';
   FCapabilities.MaxTextureSize := 16384;
@@ -27123,6 +27566,11 @@ begin
   Result := FBindlessIndirectBatch;
 end;
 
+function TVulkanRHIDevice.GetVendorName: String;
+begin
+  Result := GetVulkanVendorName(FVendorKind);
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
@@ -27404,6 +27852,36 @@ begin
       end;
   end;
 
+  { On Apple platforms (macOS/iOS), if the Khronos Vulkan Loader was loaded without an
+    configured MoltenVK_icd.json, reload libMoltenVK.dylib directly and retry. }
+  if (Res = VK_ERROR_INCOMPATIBLE_DRIVER) and LoadVulkanDirectMoltenVKFallback then
+  begin
+    AppInfo.apiVersion := VK_API_VERSION_1_2;
+    FInstanceApiVersion := AppInfo.apiVersion;
+    EnablePortabilityBit := False;
+    if ARequireSurfaceExtensions then
+      ExtNames := GetAvailableVulkanWSIInstanceExtensions(EnablePortabilityBit)
+    else
+      SetLength(ExtNames, 0);
+    FDebugUtilsActive := False;
+    CreateInfo.pNext := nil;
+    CreateInfo.enabledLayerCount := 0;
+    CreateInfo.ppEnabledLayerNames := nil;
+    FValidationLayerActive := False;
+    CreateInfo.flags := 0;
+    if EnablePortabilityBit then
+      CreateInfo.flags := VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    SetLength(ExtPtrs, Length(ExtNames));
+    for I := 0 to High(ExtNames) do
+      ExtPtrs[I] := PAnsiChar(ExtNames[I]);
+    CreateInfo.enabledExtensionCount := Length(ExtPtrs);
+    if Length(ExtPtrs) > 0 then
+      CreateInfo.ppEnabledExtensionNames := @ExtPtrs[0]
+    else
+      CreateInfo.ppEnabledExtensionNames := nil;
+    Res := vkCreateInstance(@CreateInfo, nil, @FInstance);
+  end;
+
   CheckVk(Res, 'vkCreateInstance');
   for I := 0 to Integer(CreateInfo.enabledExtensionCount) - 1 do
     if AnsiString(ExtPtrs[I]) = VK_KHR_SURFACE_EXTENSION_NAME then
@@ -27441,13 +27919,16 @@ var
   RayTracingPipeProps: VkPhysicalDeviceRayTracingPipelinePropertiesKHR;
   MeshShaderFeatures: VkPhysicalDeviceMeshShaderFeaturesEXT;
   ShaderDrawParamsFeatures: VkPhysicalDeviceShaderDrawParametersFeatures;
+  DriverProps: VkPhysicalDeviceDriverProperties;
+  PortabilityProps: VkPhysicalDevicePortabilitySubsetPropertiesKHR;
   Props2: VkPhysicalDeviceProperties2;
   HasSpirv14: Boolean;
   GplProps: VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
   DescIdxProps: VkPhysicalDeviceDescriptorIndexingProperties;
   HasGplFeature, HasExtDynFeature, HasSync2Feature, HasTimelineFeature: Boolean;
-  FoundPresentDevice: Boolean;
-  ReqDynRenderExts, ReqGplExts, ReqBindlessExts, ReqExtDynSync2Exts: TAnsiStringArray;
+  DeviceFilterEnv, VendorFilterEnv, CandidateDevName: String;
+  BestScore, CandidateScore: Int64;
+  ReqDynRenderExts, ReqGplExts, ReqBindlessExts, ReqExtDynSync2Exts, ReqPortabilityExts: TAnsiStringArray;
 
   function DeviceSupportsSurface(const ADev: VkPhysicalDevice): Boolean;
   var
@@ -27503,30 +27984,45 @@ begin
   SetLength(Devices, DeviceCount);
   CheckVk(vkEnumeratePhysicalDevices(FInstance, @DeviceCount, @Devices[0]), 'vkEnumeratePhysicalDevices');
 
-  { Prefer present-capable discrete GPU meeting Vulkan 1.1+ baseline, otherwise any present-capable Vulkan 1.1+ GPU }
+  { Prefer present-capable discrete GPU meeting Vulkan 1.1+ baseline (or CASTLE_VULKAN_DEVICE /
+    CASTLE_VULKAN_VENDOR environment override), otherwise highest-scoring present-capable GPU }
+  DeviceFilterEnv := Trim(GetEnvironmentVariable('CASTLE_VULKAN_DEVICE'));
+  VendorFilterEnv := Trim(GetEnvironmentVariable('CASTLE_VULKAN_VENDOR'));
   FPhysicalDevice := Devices[0];
-  FoundPresentDevice := False;
+  BestScore := -1;
   for I := 0 to DeviceCount - 1 do
   begin
     vkGetPhysicalDeviceProperties(Devices[I], @Props);
-    if DeviceSupportsSurface(Devices[I]) then
+    CandidateDevName := String(PAnsiChar(@Props.deviceName[0]));
+    CandidateScore := ScorePhysicalDeviceForSelection(
+      I, CandidateDevName, Props.vendorID, Props.deviceType, Props.apiVersion,
+      DeviceSupportsSurface(Devices[I]), DeviceFilterEnv, VendorFilterEnv);
+    if CandidateScore > BestScore then
     begin
-      if not FoundPresentDevice then
-      begin
-        FPhysicalDevice := Devices[I];
-        FoundPresentDevice := True;
-      end;
-      if (Props.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) and
-         (Props.apiVersion >= VK_API_VERSION_1_1) then
-      begin
-        FPhysicalDevice := Devices[I];
-        Break;
-      end;
-      if Props.apiVersion >= VK_API_VERSION_1_1 then
-        FPhysicalDevice := Devices[I];
-    end else
-    if (not FoundPresentDevice) and (Props.apiVersion >= VK_API_VERSION_1_1) then
+      BestScore := CandidateScore;
       FPhysicalDevice := Devices[I];
+    end;
+  end;
+
+  { If CASTLE_VULKAN_DEVICE / CASTLE_VULKAN_VENDOR excluded all adapters, warn and retry unfiltered }
+  if (BestScore < 0) and ((DeviceFilterEnv <> '') or (VendorFilterEnv <> '')) then
+  begin
+    WritelnWarning('Vulkan', Format(
+      'No Vulkan physical device matched CASTLE_VULKAN_DEVICE="%s" / CASTLE_VULKAN_VENDOR="%s"; falling back to automatic GPU selection.',
+      [DeviceFilterEnv, VendorFilterEnv]));
+    for I := 0 to DeviceCount - 1 do
+    begin
+      vkGetPhysicalDeviceProperties(Devices[I], @Props);
+      CandidateDevName := String(PAnsiChar(@Props.deviceName[0]));
+      CandidateScore := ScorePhysicalDeviceForSelection(
+        I, CandidateDevName, Props.vendorID, Props.deviceType, Props.apiVersion,
+        DeviceSupportsSurface(Devices[I]));
+      if CandidateScore > BestScore then
+      begin
+        BestScore := CandidateScore;
+        FPhysicalDevice := Devices[I];
+      end;
+    end;
   end;
 
   vkGetPhysicalDeviceProperties(FPhysicalDevice, @ChosenProps);
@@ -27534,6 +28030,54 @@ begin
 
   FDeviceId := ChosenProps.deviceID;
   FDeviceApiVersion := ChosenProps.apiVersion;
+  FDriverId := 0;
+  FDriverName := '';
+  FDriverInfo := '';
+  if ((FDeviceApiVersion >= VK_API_VERSION_1_2) or
+      IsDeviceExtensionSupported(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) and
+     Assigned(vkGetPhysicalDeviceProperties2) then
+  begin
+    FillChar(DriverProps, SizeOf(DriverProps), 0);
+    DriverProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    FillChar(Props2, SizeOf(Props2), 0);
+    Props2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    Props2.pNext := @DriverProps;
+    vkGetPhysicalDeviceProperties2(FPhysicalDevice, @Props2);
+    FDriverId := DriverProps.driverID;
+    FDriverName := Trim(String(PAnsiChar(@DriverProps.driverName[0])));
+    FDriverInfo := Trim(String(PAnsiChar(@DriverProps.driverInfo[0])));
+  end;
+  FVendorKind := ClassifyVulkanVendor(
+    ChosenProps.vendorID, FDriverId, String(PAnsiChar(@ChosenProps.deviceName[0])));
+
+  FillChar(FPortabilitySubsetFeatures, SizeOf(FPortabilitySubsetFeatures), 0);
+  FPortabilitySubsetFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR;
+  FillChar(PortabilityProps, SizeOf(PortabilityProps), 0);
+  PortabilityProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR;
+  FIsPortabilitySubsetDevice := IsDeviceExtensionSupported(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+  if FIsPortabilitySubsetDevice then
+  begin
+    if Assigned(vkGetPhysicalDeviceFeatures2) then
+    begin
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @FPortabilitySubsetFeatures;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+    end;
+    if Assigned(vkGetPhysicalDeviceProperties2) then
+    begin
+      FillChar(Props2, SizeOf(Props2), 0);
+      Props2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      Props2.pNext := @PortabilityProps;
+      vkGetPhysicalDeviceProperties2(FPhysicalDevice, @Props2);
+    end;
+  end;
+  ResolvePortabilitySubsetConfig(
+    FIsPortabilitySubsetDevice,
+    FPortabilitySubsetFeatures,
+    PortabilityProps,
+    FPortabilitySubsetCaps,
+    ReqPortabilityExts);
 
   ResolveVulkan11_12DeviceConfig(
     FDeviceApiVersion,
@@ -27775,11 +28319,18 @@ begin
     FSupportsTimelineSemaphores,
     ReqExtDynSync2Exts);
 
-  WritelnLog('Vulkan', Format('Selected GPU "%s" (Vulkan %d.%d.%d, DynamicRendering=%s, GPL=%s, Bindless=%s[max=%d], ExtDynState=%s, Sync2=%s, TimelineSem=%s)', [
+  if FDriverName <> '' then
+    CandidateDevName := FDriverName
+  else
+    CandidateDevName := 'default';
+  WritelnLog('Vulkan', Format('Selected GPU "%s" [Vendor=%s, Driver=%s] (Vulkan %d.%d.%d, PortabilitySubset=%s, DynamicRendering=%s, GPL=%s, Bindless=%s[max=%d], ExtDynState=%s, Sync2=%s, TimelineSem=%s)', [
     String(PAnsiChar(@ChosenProps.deviceName[0])),
+    GetVendorName,
+    CandidateDevName,
     VK_VERSION_MAJOR(FDeviceApiVersion),
     VK_VERSION_MINOR(FDeviceApiVersion),
     VK_VERSION_PATCH(FDeviceApiVersion),
+    BoolToStr(FIsPortabilitySubsetDevice, True),
     BoolToStr(FSupportsDynamicRendering, True),
     BoolToStr(FSupportsGraphicsPipelineLibrary, True),
     BoolToStr(FSupportsBindlessTextures, True),
@@ -27868,6 +28419,7 @@ var
   RayTracingPipeFeatures: VkPhysicalDeviceRayTracingPipelineFeaturesKHR;
   MeshShaderFeatures: VkPhysicalDeviceMeshShaderFeaturesEXT;
   ShaderDrawParamsFeatures: VkPhysicalDeviceShaderDrawParametersFeatures;
+  PortabilityFeatures: VkPhysicalDevicePortabilitySubsetFeaturesKHR;
   PhysFeatures, EnabledFeatures: VkPhysicalDeviceFeatures;
   ReqDynRenderExts, ReqGplExts, ReqBindlessExts, ReqExtDynSync2Exts: TAnsiStringArray;
   DeviceExts: array[0..39] of PAnsiChar;
@@ -28130,8 +28682,30 @@ begin
     DeviceExts[ExtCount] := VK_EXT_mesh_shader;
     Inc(ExtCount);
   end;
+  { Per VUID-VkDeviceCreateInfo-pProperties-04451, VK_KHR_portability_subset MUST be enabled
+    whenever advertised by the physical device (e.g. macOS / iOS MoltenVK). }
+  if FIsPortabilitySubsetDevice or IsDeviceExtensionSupported(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME) then
+  begin
+    FIsPortabilitySubsetDevice := True;
+    if (FDeviceApiVersion < VK_API_VERSION_1_1) and
+       (not FSupportsMemoryBudgetExt) and
+       IsDeviceExtensionSupported(VK_KHR_get_physical_device_properties2) then
+    begin
+      DeviceExts[ExtCount] := VK_KHR_get_physical_device_properties2;
+      Inc(ExtCount);
+    end;
+    DeviceExts[ExtCount] := VK_KHR_portability_subset;
+    Inc(ExtCount);
+  end;
 
   NextChainHead := nil;
+  if FIsPortabilitySubsetDevice then
+  begin
+    PortabilityFeatures := FPortabilitySubsetFeatures;
+    PortabilityFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR;
+    PortabilityFeatures.pNext := NextChainHead;
+    NextChainHead := @PortabilityFeatures;
+  end;
   if FDeviceApiVersion >= VK_API_VERSION_1_2 then
   begin
     { Per VUID-VkDeviceCreateInfo-pNext-02830, consolidate all Vulkan 1.2 promoted
@@ -28312,8 +28886,9 @@ begin
 end;
 
 function TVulkanRHIDevice.GetOrCreateVertexInputLibrary(
-  const ADesc: TRHIGraphicsPipelineDesc): VkPipeline;
+  const AInputDesc: TRHIGraphicsPipelineDesc): VkPipeline;
 var
+  ADesc: TRHIGraphicsPipelineDesc;
   KeyHash: UInt64;
   VertexBindings: array of VkVertexInputBindingDescription;
   VertexAttrs: array of VkVertexInputAttributeDescription;
@@ -28325,6 +28900,10 @@ var
   PipelineInfo: VkGraphicsPipelineCreateInfo;
   I: Integer;
 begin
+  if FPortabilitySubsetCaps.Active then
+    ADesc := AdaptPipelineDescForPortabilitySubset(AInputDesc, FPortabilitySubsetCaps)
+  else
+    ADesc := AInputDesc;
   KeyHash := ComputeVertexInputLibraryKeyHash(ADesc);
   if (FVertexInputLibMap <> nil) and FVertexInputLibMap.TryGetValue(KeyHash, Result) then
   begin
@@ -28401,10 +28980,11 @@ begin
 end;
 
 function TVulkanRHIDevice.GetOrCreatePreRasterizationLibrary(
-  const ADesc: TRHIGraphicsPipelineDesc;
+  const AInputDesc: TRHIGraphicsPipelineDesc;
   const ALayout: VkPipelineLayout;
   const ARenderPass: VkRenderPass): VkPipeline;
 var
+  ADesc: TRHIGraphicsPipelineDesc;
   KeyHash: UInt64;
   Stages: array[0..1] of VkPipelineShaderStageCreateInfo;
   StageCount: Cardinal;
@@ -28417,6 +28997,10 @@ var
   GplInfo: VkGraphicsPipelineLibraryCreateInfoEXT;
   PipelineInfo: VkGraphicsPipelineCreateInfo;
 begin
+  if FPortabilitySubsetCaps.Active then
+    ADesc := AdaptPipelineDescForPortabilitySubset(AInputDesc, FPortabilitySubsetCaps)
+  else
+    ADesc := AInputDesc;
   KeyHash := ComputePreRasterizationLibraryKeyHash(ADesc);
   if (FPreRasterLibMap <> nil) and FPreRasterLibMap.TryGetValue(KeyHash, Result) then
   begin
@@ -28616,9 +29200,10 @@ begin
 end;
 
 function TVulkanRHIDevice.GetOrCreateFragmentOutputLibrary(
-  const ADesc: TRHIGraphicsPipelineDesc;
+  const AInputDesc: TRHIGraphicsPipelineDesc;
   const ARenderPass: VkRenderPass): VkPipeline;
 var
+  ADesc: TRHIGraphicsPipelineDesc;
   KeyHash: UInt64;
   BlendAttachments: array of VkPipelineColorBlendAttachmentState;
   ColorBlending: VkPipelineColorBlendStateCreateInfo;
@@ -28631,6 +29216,10 @@ var
   PipelineInfo: VkGraphicsPipelineCreateInfo;
   I: Integer;
 begin
+  if FPortabilitySubsetCaps.Active then
+    ADesc := AdaptPipelineDescForPortabilitySubset(AInputDesc, FPortabilitySubsetCaps)
+  else
+    ADesc := AInputDesc;
   KeyHash := ComputeFragmentOutputLibraryKeyHash(ADesc);
   if (FFragmentOutputLibMap <> nil) and FFragmentOutputLibMap.TryGetValue(KeyHash, Result) then
   begin
@@ -29181,6 +29770,7 @@ begin
     end;
     FSwapchainPresentMode := SelectVulkanPresentMode(PresentModes, False);
     FSwapchainCompositeAlpha := SelectVulkanCompositeAlpha(Caps.supportedCompositeAlpha);
+    FSwapchainPreTransform := SelectVulkanSurfaceTransform(Caps.supportedTransforms, Caps.currentTransform);
 
     FSwapchainExtent.width := Max(Cardinal(1), Width);
     FSwapchainExtent.height := Max(Cardinal(1), Height);
@@ -29236,7 +29826,7 @@ begin
       CreateInfo.pQueueFamilyIndices := @QueueFamilyIndices[0];
     end else
       CreateInfo.imageSharingMode := VK_SHARING_MODE_EXCLUSIVE;
-    CreateInfo.preTransform := Caps.currentTransform;
+    CreateInfo.preTransform := FSwapchainPreTransform;
     CreateInfo.compositeAlpha := FSwapchainCompositeAlpha;
     CreateInfo.presentMode := FSwapchainPresentMode;
     CreateInfo.clipped := VK_TRUE;
@@ -30406,19 +30996,24 @@ end;
 
 function TVulkanRHIDevice.GetOrCreatePipeline(const ADesc: TRHIGraphicsPipelineDesc): TRHIPipeline;
 var
+  EffDesc: TRHIGraphicsPipelineDesc;
   HashKey: UInt64;
   FoundPipeline: TVulkanRHIPipeline;
 begin
-  HashKey := ComputePipelineHash(ADesc);
+  if FPortabilitySubsetCaps.Active then
+    EffDesc := AdaptPipelineDescForPortabilitySubset(ADesc, FPortabilitySubsetCaps)
+  else
+    EffDesc := ADesc;
+  HashKey := ComputePipelineHash(EffDesc);
   if FPipelineMap.TryGetValue(HashKey, FoundPipeline) then
   begin
     Inc(FPipelineCacheHits);
     if FSupportsExtendedDynamicState then
-      FoundPipeline.UpdateDynamicStateDesc(ADesc);
+      FoundPipeline.UpdateDynamicStateDesc(EffDesc);
   end else
   begin
     Inc(FPipelineCacheMisses);
-    FoundPipeline := TVulkanRHIPipeline.Create(Self, ADesc);
+    FoundPipeline := TVulkanRHIPipeline.Create(Self, EffDesc);
     FPipelineMap.Add(HashKey, FoundPipeline);
   end;
   Result := FoundPipeline;
@@ -31500,8 +32095,17 @@ var
   UsedBytes, BudgetBytes: UInt64;
   UsedMB, BudgetMB: Cardinal;
   HasBudgetExt: Boolean;
+  DriverLine: String;
 begin
   HasBudgetExt := QueryMemoryBudget(UsedBytes, BudgetBytes, UsedMB, BudgetMB);
+  if FDriverName <> '' then
+  begin
+    DriverLine := '  Driver: ' + FDriverName;
+    if FDriverInfo <> '' then
+      DriverLine := DriverLine + ' (' + FDriverInfo + ')';
+    DriverLine := DriverLine + LineEnding;
+  end else
+    DriverLine := '';
   Result :=
     'Vulkan RHI information:' + LineEnding +
     LineEnding +
@@ -31509,14 +32113,16 @@ begin
     'Basic information:' + LineEnding +
     LineEnding +
     '  Device name: ' + FCapabilities.DeviceName + LineEnding +
-    '  Vendor ID: ' + IntToStr(FCapabilities.VendorId) + LineEnding +
+    '  Vendor: ' + GetVendorName + ' (ID: 0x' + IntToHex(FCapabilities.VendorId, 4) + ')' + LineEnding +
     '  Device ID: ' + IntToStr(FDeviceId) + LineEnding +
+    DriverLine +
     '  Instance API version: ' + FormatVkVersion(FInstanceApiVersion) + LineEnding +
     '  Device API version: ' + FormatVkVersion(FDeviceApiVersion) + LineEnding +
     LineEnding +
     Section + LineEnding +
     'Features:' + LineEnding +
     LineEnding +
+    '  Portability subset (VK_KHR_portability_subset / MoltenVK): ' + BoolToStr(FIsPortabilitySubsetDevice, True) + LineEnding +
     '  Dynamic rendering (VK_KHR_dynamic_rendering / 1.3): ' + BoolToStr(FSupportsDynamicRendering, True) + LineEnding +
     '  Graphics pipeline library (VK_EXT_graphics_pipeline_library): ' + BoolToStr(FSupportsGraphicsPipelineLibrary, True) + LineEnding +
     '  Extended dynamic state (VK_EXT_extended_dynamic_state / 1.3): ' + BoolToStr(FSupportsExtendedDynamicState, True) + LineEnding +

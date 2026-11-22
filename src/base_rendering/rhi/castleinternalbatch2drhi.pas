@@ -711,6 +711,13 @@ begin
 
   { 4. Bind Streaming VBO at the current batch offset & Static Quad IBO }
   VertexByteOffset := PtrUInt(FFramePassBaseQuad + FBatchStartQuad) * 4 * SizeOf(TCastle2DVertex);
+  if (FDevice <> nil) and
+     (FDevice.Capabilities.Backend in [rbOpenGL, rbOpenGLES]) and
+     (FMappedVertices <> nil) and (ActiveVBO <> nil) then
+    ActiveVBO.UploadData(
+      (PByte(FMappedVertices) + VertexByteOffset)^,
+      PtrUInt(QueuedQuads) * 4 * SizeOf(TCastle2DVertex),
+      VertexByteOffset);
   FCurrentCmd.BindVertexBuffers(0, [ActiveVBO], [VertexByteOffset]);
   FCurrentCmd.BindIndexBuffer(FStaticQuadIBO, 0, itUInt16);
 

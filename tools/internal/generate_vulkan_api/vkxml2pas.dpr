@@ -1278,7 +1278,7 @@ const
     'VK_OBJECT_TYPE_DEBUG_UTILS_MESSENGER_EXT'
   );
 
-  OrderedEnums4: array[0..85] of String = (
+  OrderedEnums4: array[0..117] of String = (
     // Constant Blend Factors, Border Colors & Host Query Reset
     'VK_BLEND_FACTOR_CONSTANT_COLOR',
     'VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR',
@@ -1369,7 +1369,40 @@ const
     'VK_PIPELINE_STAGE_2_TASK_SHADER_BIT_EXT',
     'VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT',
     'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT',
-    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT'
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT',
+    // Phase 120: MoltenVK Portability Subset, Driver Properties & Mobile Surface Transforms
+    'VK_MAX_DRIVER_NAME_SIZE',
+    'VK_MAX_DRIVER_INFO_SIZE',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES',
+    'VK_DRIVER_ID_AMD_PROPRIETARY',
+    'VK_DRIVER_ID_AMD_OPEN_SOURCE',
+    'VK_DRIVER_ID_MESA_RADV',
+    'VK_DRIVER_ID_NVIDIA_PROPRIETARY',
+    'VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS',
+    'VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA',
+    'VK_DRIVER_ID_IMAGINATION_PROPRIETARY',
+    'VK_DRIVER_ID_QUALCOMM_PROPRIETARY',
+    'VK_DRIVER_ID_ARM_PROPRIETARY',
+    'VK_DRIVER_ID_GOOGLE_SWIFTSHADER',
+    'VK_DRIVER_ID_MESA_LLVMPIPE',
+    'VK_DRIVER_ID_MOLTENVK',
+    'VK_DRIVER_ID_MESA_TURNIP',
+    'VK_DRIVER_ID_MESA_V3DV',
+    'VK_DRIVER_ID_MESA_PANVK',
+    'VK_DRIVER_ID_SAMSUNG_PROPRIETARY',
+    'VK_DRIVER_ID_MESA_NVK',
+    'VK_DRIVER_ID_MESA_AGXV',
+    'VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR',
+    'VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR',
+    'VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR',
+    'VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR',
+    'VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR',
+    'VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR',
+    'VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_180_BIT_KHR',
+    'VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR',
+    'VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1507,7 +1540,7 @@ const
     'VkMemoryBarrier'
   );
 
-  OrderedStructs3: array[0..32] of String = (
+  OrderedStructs3: array[0..36] of String = (
     'VkClearAttachment',
     'VkClearRect',
     'VkPhysicalDeviceHostQueryResetFeatures',
@@ -1540,7 +1573,11 @@ const
     'VkStridedDeviceAddressRegionKHR',
     'VkPhysicalDeviceMeshShaderFeaturesEXT',
     'VkPhysicalDeviceMeshShaderPropertiesEXT',
-    'VkDrawMeshTasksIndirectCommandEXT'
+    'VkDrawMeshTasksIndirectCommandEXT',
+    'VkConformanceVersion',
+    'VkPhysicalDeviceDriverProperties',
+    'VkPhysicalDevicePortabilitySubsetFeaturesKHR',
+    'VkPhysicalDevicePortabilitySubsetPropertiesKHR'
   );
 
   OrderedCommands: array[0..94] of String = (
@@ -1822,6 +1859,8 @@ begin
     L.Add('  VK_KHR_deferred_host_operations = ''VK_KHR_deferred_host_operations'';');
     L.Add('  VK_KHR_depth_stencil_resolve = ''VK_KHR_depth_stencil_resolve'';');
     L.Add('  VK_KHR_draw_indirect_count = ''VK_KHR_draw_indirect_count'';');
+    L.Add('  VK_KHR_driver_properties = ''VK_KHR_driver_properties'';');
+    L.Add('  VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME = ''VK_KHR_driver_properties'';');
     L.Add('  VK_KHR_dynamic_rendering = ''VK_KHR_dynamic_rendering'';');
     L.Add('  VK_KHR_get_physical_device_properties2 = ''VK_KHR_get_physical_device_properties2'';');
     L.Add('  VK_KHR_maintenance1 = ''VK_KHR_maintenance1'';');
@@ -1829,6 +1868,8 @@ begin
     L.Add('  VK_KHR_maintenance3 = ''VK_KHR_maintenance3'';');
     L.Add('  VK_KHR_multiview = ''VK_KHR_multiview'';');
     L.Add('  VK_KHR_pipeline_library = ''VK_KHR_pipeline_library'';');
+    L.Add('  VK_KHR_portability_subset = ''VK_KHR_portability_subset'';');
+    L.Add('  VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME = ''VK_KHR_portability_subset'';');
     L.Add('  VK_KHR_ray_query = ''VK_KHR_ray_query'';');
     L.Add('  VK_KHR_ray_tracing_pipeline = ''VK_KHR_ray_tracing_pipeline'';');
     L.Add('  VK_KHR_shader_draw_parameters = ''VK_KHR_shader_draw_parameters'';');
@@ -1991,6 +2032,8 @@ begin
     L.Add('  PVkPipelineRenderingCreateInfoKHR = ^VkPipelineRenderingCreateInfoKHR;');
     L.Add('  VkCommandBufferInheritanceRenderingInfoKHR = VkCommandBufferInheritanceRenderingInfo;');
     L.Add('  PVkCommandBufferInheritanceRenderingInfoKHR = ^VkCommandBufferInheritanceRenderingInfoKHR;');
+    L.Add('  VkPhysicalDeviceDriverPropertiesKHR = VkPhysicalDeviceDriverProperties;');
+    L.Add('  PVkPhysicalDeviceDriverPropertiesKHR = ^VkPhysicalDeviceDriverPropertiesKHR;');
     L.Add('');
     L.Add('{ -------------------------------------------------------------------------- }');
     L.Add('{ Function Pointers generated from vk.xml                                    }');
@@ -2026,6 +2069,8 @@ begin
     L.Add('');
     L.Add('{ Loads the Vulkan shared library dynamically. Returns True if successfully loaded. }');
     L.Add('function LoadVulkan: Boolean;');
+    L.Add('{ Reloads MoltenVK ICD directly on Apple platforms when the Vulkan loader cannot locate an ICD JSON. }');
+    L.Add('function LoadVulkanDirectMoltenVKFallback: Boolean;');
     L.Add('{ Populates instance-level function pointers using vkGetInstanceProcAddr. }');
     L.Add('procedure LoadVulkanInstance(const Instance: VkInstance);');
     L.Add('{ Populates device-level function pointers using vkGetDeviceProcAddr. }');
@@ -2075,33 +2120,16 @@ begin
     L.Add('  Result := LoadedVulkanInstance <> nil;');
     L.Add('end;');
     L.Add('');
-    L.Add('function LoadVulkan: Boolean;');
-    L.Add('const');
-    L.Add('  {$if defined(MSWINDOWS)}');
-    L.Add('  VulkanLibNames: array[0..0] of String = (''vulkan-1.dll'');');
-    L.Add('  {$elseif defined(DARWIN)}');
-    L.Add('  VulkanLibNames: array[0..2] of String = (');
-    L.Add('    ''libMoltenVK.dylib'',');
-    L.Add('    ''libvulkan.1.dylib'',');
-    L.Add('    ''libvulkan.dylib''');
-    L.Add('  );');
-    L.Add('  {$else}');
-    L.Add('  VulkanLibNames: array[0..2] of String = (');
-    L.Add('    ''libvulkan.so.1'',');
-    L.Add('    ''libvulkan.so'',');
-    L.Add('    ''libvulkan.so.0''');
-    L.Add('  );');
-    L.Add('  {$endif}');
+    L.Add('function LoadVulkanFromLibraryNames(const ALibNames: array of String): Boolean;');
     L.Add('var');
     L.Add('  I: Integer;');
     L.Add('begin');
-    L.Add('  if VulkanLibrary <> nil then');
-    L.Add('    Exit(True);');
-    L.Add('');
-    L.Add('  for I := Low(VulkanLibNames) to High(VulkanLibNames) do');
+    L.Add('  for I := Low(ALibNames) to High(ALibNames) do');
     L.Add('  begin');
+    L.Add('    if ALibNames[I] = '''' then');
+    L.Add('      Continue;');
     L.Add('    try');
-    L.Add('      VulkanLibrary := TDynLib.Load(VulkanLibNames[I], false);');
+    L.Add('      VulkanLibrary := TDynLib.Load(ALibNames[I], false);');
     L.Add('      if VulkanLibrary <> nil then');
     L.Add('        Break;');
     L.Add('    except');
@@ -2110,10 +2138,7 @@ begin
     L.Add('  end;');
     L.Add('');
     L.Add('  if VulkanLibrary = nil then');
-    L.Add('  begin');
-    L.Add('    WritelnLog(''Vulkan'', ''Could not locate Vulkan dynamic library'');');
     L.Add('    Exit(False);');
-    L.Add('  end;');
     L.Add('');
     L.Add('  Pointer(vkGetInstanceProcAddr) := VulkanLibrary.Symbol(''vkGetInstanceProcAddr'');');
     L.Add('  if not Assigned(vkGetInstanceProcAddr) then');
@@ -2127,9 +2152,75 @@ begin
     L.Add('  Pointer(vkEnumerateInstanceExtensionProperties) := vkGetInstanceProcAddr(nil, ''vkEnumerateInstanceExtensionProperties'');');
     L.Add('  Pointer(vkEnumerateInstanceLayerProperties) := vkGetInstanceProcAddr(nil, ''vkEnumerateInstanceLayerProperties'');');
     L.Add('  Pointer(vkEnumerateInstanceVersion) := vkGetInstanceProcAddr(nil, ''vkEnumerateInstanceVersion'');');
+    L.Add('  Result := True;');
+    L.Add('end;');
+    L.Add('');
+    L.Add('function LoadVulkan: Boolean;');
+    L.Add('const');
+    L.Add('  {$if defined(MSWINDOWS)}');
+    L.Add('  VulkanLibNames: array[0..0] of String = (''vulkan-1.dll'');');
+    L.Add('  {$elseif defined(DARWIN)}');
+    L.Add('  VulkanLibNames: array[0..6] of String = (');
+    L.Add('    ''libvulkan.1.dylib'',');
+    L.Add('    ''/opt/homebrew/lib/libvulkan.1.dylib'',');
+    L.Add('    ''/usr/local/lib/libvulkan.1.dylib'',');
+    L.Add('    ''libMoltenVK.dylib'',');
+    L.Add('    ''/opt/homebrew/lib/libMoltenVK.dylib'',');
+    L.Add('    ''/usr/local/lib/libMoltenVK.dylib'',');
+    L.Add('    ''libvulkan.dylib''');
+    L.Add('  );');
+    L.Add('  {$elseif defined(ANDROID)}');
+    L.Add('  VulkanLibNames: array[0..1] of String = (');
+    L.Add('    ''libvulkan.so'',');
+    L.Add('    ''libvulkan.so.1''');
+    L.Add('  );');
+    L.Add('  {$else}');
+    L.Add('  VulkanLibNames: array[0..2] of String = (');
+    L.Add('    ''libvulkan.so.1'',');
+    L.Add('    ''libvulkan.so'',');
+    L.Add('    ''libvulkan.so.0''');
+    L.Add('  );');
+    L.Add('  {$endif}');
+    L.Add('var');
+    L.Add('  CustomLib: String;');
+    L.Add('begin');
+    L.Add('  if VulkanLibrary <> nil then');
+    L.Add('    Exit(True);');
+    L.Add('');
+    L.Add('  CustomLib := Trim(GetEnvironmentVariable(''CASTLE_VULKAN_LIBRARY''));');
+    L.Add('  if CustomLib <> '''' then');
+    L.Add('  begin');
+    L.Add('    if LoadVulkanFromLibraryNames([CustomLib]) then');
+    L.Add('      Exit(True);');
+    L.Add('    WritelnLog(''Vulkan'', ''CASTLE_VULKAN_LIBRARY="%s" could not be loaded; falling back to default Vulkan library search'', [CustomLib]);');
+    L.Add('  end;');
+    L.Add('');
+    L.Add('  if not LoadVulkanFromLibraryNames(VulkanLibNames) then');
+    L.Add('  begin');
+    L.Add('    WritelnLog(''Vulkan'', ''Could not locate Vulkan dynamic library'');');
+    L.Add('    Exit(False);');
+    L.Add('  end;');
     L.Add('');
     L.Add('  Result := True;');
     L.Add('end;');
+    L.Add('');
+    L.Add('function LoadVulkanDirectMoltenVKFallback: Boolean;');
+    L.Add('{$if defined(DARWIN)}');
+    L.Add('const');
+    L.Add('  MoltenVKLibNames: array[0..2] of String = (');
+    L.Add('    ''libMoltenVK.dylib'',');
+    L.Add('    ''/opt/homebrew/lib/libMoltenVK.dylib'',');
+    L.Add('    ''/usr/local/lib/libMoltenVK.dylib''');
+    L.Add('  );');
+    L.Add('begin');
+    L.Add('  FreeVulkan;');
+    L.Add('  Result := LoadVulkanFromLibraryNames(MoltenVKLibNames);');
+    L.Add('end;');
+    L.Add('{$else}');
+    L.Add('begin');
+    L.Add('  Result := False;');
+    L.Add('end;');
+    L.Add('{$endif}');
     L.Add('');
     L.Add('procedure LoadVulkanInstance(const Instance: VkInstance);');
     L.Add('begin');

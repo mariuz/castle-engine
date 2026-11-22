@@ -27,7 +27,7 @@ uses
   SysUtils,
   {$if defined(MSWINDOWS)} Windows, {$endif}
   {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)} X, Xlib, {$endif}
-  CastleApplicationProperties, CastleInternalRHI, CastleInternalVulkan;
+  CastleDynLib, CastleApplicationProperties, CastleInternalRHI, CastleInternalVulkan;
 
 const
   VK_KHR_SURFACE_EXTENSION_NAME                 = 'VK_KHR_surface';
@@ -291,6 +291,12 @@ function BuildAvailableVulkanWSIInstanceExtensions(
 { Queries the live Vulkan loader and returns all supported WSI instance extensions }
 function GetAvailableVulkanWSIInstanceExtensions(
   out AEnablePortabilityBit: Boolean): TAnsiStringArray;
+
+{ Attaches (or retrieves an existing) CAMetalLayer on a macOS Cocoa NSView pointer
+  via the Objective-C runtime (non-variadic arm64/x86_64 ABI safe) and optionally
+  updates its contentsScale for Retina HiDPI backing stores. Returns nil off-Darwin. }
+function EnsureDarwinNSViewMetalLayer(const ANSViewPtr: Pointer;
+  const AContentsScale: Double = 0.0): PCAMetalLayer;
 
 { Resolves the active render backend given hardware capabilities.
   Enforces the Vulkan 1.1+ minimum baseline and falls back to OpenGLES 3.0 on
@@ -768,5 +774,78 @@ begin
   CreateInfo.sType := VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
   CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateHeadlessSurfaceEXT');
 end;
+
+{$if defined(DARWIN)}
+var
+  GDarwinQuartzLib: TDynLib = nil;
+  GDarwinObjcLib: TDynLib = nil;
+{$endif}
+
+function EnsureDarwinNSViewMetalLayer(const ANSViewPtr: Pointer;
+  const AContentsScale: Double): PCAMetalLayer;
+{$if defined(DARWIN)}
+type
+  TObjcLookUpClass = function(const AName: PAnsiChar): Pointer; cdecl;
+  TSelRegisterName = function(const AName: PAnsiChar): Pointer; cdecl;
+  TMsgSendId = function(AReceiver, ASelector: Pointer): Pointer; cdecl;
+  TMsgSendVoidId = procedure(AReceiver, ASelector, AArg: Pointer); cdecl;
+  TMsgSendVoidBool = procedure(AReceiver, ASelector: Pointer; AFlag: ByteBool); cdecl;
+  TMsgSendVoidDouble = procedure(AReceiver, ASelector: Pointer; AScale: Double); cdecl;
+  TMsgSendBoolId = function(AReceiver, ASelector, AClass: Pointer): ByteBool; cdecl;
+var
+  LookUpClassFn: TObjcLookUpClass;
+  SelRegisterFn: TSelRegisterName;
+  MsgSendSym, MetalLayerClass, LayerObj: Pointer;
+begin
+  Result := nil;
+  if ANSViewPtr = nil then
+    Exit;
+
+  if GDarwinQuartzLib = nil then
+    GDarwinQuartzLib := TDynLib.Load('/System/Library/Frameworks/QuartzCore.framework/QuartzCore', False);
+  if GDarwinObjcLib = nil then
+    GDarwinObjcLib := TDynLib.Load('/usr/lib/libobjc.A.dylib', False);
+  if GDarwinObjcLib = nil then
+    Exit;
+
+  Pointer(LookUpClassFn) := GDarwinObjcLib.Symbol('objc_lookUpClass');
+  Pointer(SelRegisterFn) := GDarwinObjcLib.Symbol('sel_registerName');
+  MsgSendSym := GDarwinObjcLib.Symbol('objc_msgSend');
+  if (not Assigned(LookUpClassFn)) or (not Assigned(SelRegisterFn)) or (MsgSendSym = nil) then
+    Exit;
+
+  MetalLayerClass := LookUpClassFn('CAMetalLayer');
+  if MetalLayerClass = nil then
+    Exit;
+
+  LayerObj := TMsgSendId(MsgSendSym)(ANSViewPtr, SelRegisterFn('layer'));
+  if (LayerObj = nil) or
+     (not TMsgSendBoolId(MsgSendSym)(LayerObj, SelRegisterFn('isKindOfClass:'), MetalLayerClass)) then
+  begin
+    LayerObj := TMsgSendId(MsgSendSym)(MetalLayerClass, SelRegisterFn('layer'));
+    if LayerObj = nil then
+      Exit;
+    TMsgSendVoidId(MsgSendSym)(ANSViewPtr, SelRegisterFn('setLayer:'), LayerObj);
+    TMsgSendVoidBool(MsgSendSym)(ANSViewPtr, SelRegisterFn('setWantsLayer:'), True);
+  end;
+
+  if AContentsScale > 0.0 then
+    TMsgSendVoidDouble(MsgSendSym)(LayerObj, SelRegisterFn('setContentsScale:'), AContentsScale);
+
+  Result := PCAMetalLayer(LayerObj);
+end;
+{$else}
+begin
+  if (ANSViewPtr = nil) and (AContentsScale < 0.0) then ;
+  Result := nil;
+end;
+{$endif}
+
+{$if defined(DARWIN)}
+initialization
+finalization
+  FreeAndNil(GDarwinObjcLib);
+  FreeAndNil(GDarwinQuartzLib);
+{$endif}
 
 end.

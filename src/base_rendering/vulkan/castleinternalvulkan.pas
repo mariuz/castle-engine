@@ -602,6 +602,38 @@ const
   VK_PIPELINE_STAGE_2_MESH_SHADER_BIT_EXT = $00100000;
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT = 1000328000;
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT = 1000328001;
+  VK_MAX_DRIVER_NAME_SIZE = 256;
+  VK_MAX_DRIVER_INFO_SIZE = 256;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_FEATURES_KHR = 1000163000;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PORTABILITY_SUBSET_PROPERTIES_KHR = 1000163001;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES = 1000196000;
+  VK_DRIVER_ID_AMD_PROPRIETARY = 1;
+  VK_DRIVER_ID_AMD_OPEN_SOURCE = 2;
+  VK_DRIVER_ID_MESA_RADV = 3;
+  VK_DRIVER_ID_NVIDIA_PROPRIETARY = 4;
+  VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS = 5;
+  VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA = 6;
+  VK_DRIVER_ID_IMAGINATION_PROPRIETARY = 7;
+  VK_DRIVER_ID_QUALCOMM_PROPRIETARY = 8;
+  VK_DRIVER_ID_ARM_PROPRIETARY = 9;
+  VK_DRIVER_ID_GOOGLE_SWIFTSHADER = 10;
+  VK_DRIVER_ID_MESA_LLVMPIPE = 13;
+  VK_DRIVER_ID_MOLTENVK = 14;
+  VK_DRIVER_ID_MESA_TURNIP = 18;
+  VK_DRIVER_ID_MESA_V3DV = 19;
+  VK_DRIVER_ID_MESA_PANVK = 20;
+  VK_DRIVER_ID_SAMSUNG_PROPRIETARY = 21;
+  VK_DRIVER_ID_MESA_NVK = 24;
+  VK_DRIVER_ID_MESA_AGXV = 26;
+  VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR = $00000001;
+  VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR = $00000002;
+  VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR = $00000004;
+  VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR = $00000008;
+  VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_BIT_KHR = $00000010;
+  VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_90_BIT_KHR = $00000020;
+  VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_180_BIT_KHR = $00000040;
+  VK_SURFACE_TRANSFORM_HORIZONTAL_MIRROR_ROTATE_270_BIT_KHR = $00000080;
+  VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR = $00000100;
 
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
@@ -620,6 +652,8 @@ const
   VK_KHR_deferred_host_operations = 'VK_KHR_deferred_host_operations';
   VK_KHR_depth_stencil_resolve = 'VK_KHR_depth_stencil_resolve';
   VK_KHR_draw_indirect_count = 'VK_KHR_draw_indirect_count';
+  VK_KHR_driver_properties = 'VK_KHR_driver_properties';
+  VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME = 'VK_KHR_driver_properties';
   VK_KHR_dynamic_rendering = 'VK_KHR_dynamic_rendering';
   VK_KHR_get_physical_device_properties2 = 'VK_KHR_get_physical_device_properties2';
   VK_KHR_maintenance1 = 'VK_KHR_maintenance1';
@@ -627,6 +661,8 @@ const
   VK_KHR_maintenance3 = 'VK_KHR_maintenance3';
   VK_KHR_multiview = 'VK_KHR_multiview';
   VK_KHR_pipeline_library = 'VK_KHR_pipeline_library';
+  VK_KHR_portability_subset = 'VK_KHR_portability_subset';
+  VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME = 'VK_KHR_portability_subset';
   VK_KHR_ray_query = 'VK_KHR_ray_query';
   VK_KHR_ray_tracing_pipeline = 'VK_KHR_ray_tracing_pipeline';
   VK_KHR_shader_draw_parameters = 'VK_KHR_shader_draw_parameters';
@@ -2601,6 +2637,52 @@ type
   end;
   PVkDrawMeshTasksIndirectCommandEXT = ^VkDrawMeshTasksIndirectCommandEXT;
 
+  VkConformanceVersion = record
+    major: Byte;
+    minor: Byte;
+    subminor: Byte;
+    patch: Byte;
+  end;
+  PVkConformanceVersion = ^VkConformanceVersion;
+
+  VkPhysicalDeviceDriverProperties = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    driverID: Integer;
+    driverName: array[0..VK_MAX_DRIVER_NAME_SIZE - 1] of AnsiChar;
+    driverInfo: array[0..VK_MAX_DRIVER_INFO_SIZE - 1] of AnsiChar;
+    conformanceVersion: VkConformanceVersion;
+  end;
+  PVkPhysicalDeviceDriverProperties = ^VkPhysicalDeviceDriverProperties;
+
+  VkPhysicalDevicePortabilitySubsetFeaturesKHR = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    constantAlphaColorBlendFactors: VkBool32;
+    events: VkBool32;
+    imageViewFormatReinterpretation: VkBool32;
+    imageViewFormatSwizzle: VkBool32;
+    imageView2DOn3DImage: VkBool32;
+    multisampleArrayImage: VkBool32;
+    mutableComparisonSamplers: VkBool32;
+    pointPolygons: VkBool32;
+    samplerMipLodBias: VkBool32;
+    separateStencilMaskRef: VkBool32;
+    shaderSampleRateInterpolationFunctions: VkBool32;
+    tessellationIsolines: VkBool32;
+    tessellationPointMode: VkBool32;
+    triangleFans: VkBool32;
+    vertexAttributeAccessBeyondStride: VkBool32;
+  end;
+  PVkPhysicalDevicePortabilitySubsetFeaturesKHR = ^VkPhysicalDevicePortabilitySubsetFeaturesKHR;
+
+  VkPhysicalDevicePortabilitySubsetPropertiesKHR = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    minVertexInputBindingStrideAlignment: Cardinal;
+  end;
+  PVkPhysicalDevicePortabilitySubsetPropertiesKHR = ^VkPhysicalDevicePortabilitySubsetPropertiesKHR;
+
   { KHR Type Aliases }
   VkRenderingAttachmentInfoKHR = VkRenderingAttachmentInfo;
   PVkRenderingAttachmentInfoKHR = ^VkRenderingAttachmentInfoKHR;
@@ -2612,6 +2694,8 @@ type
   PVkPipelineRenderingCreateInfoKHR = ^VkPipelineRenderingCreateInfoKHR;
   VkCommandBufferInheritanceRenderingInfoKHR = VkCommandBufferInheritanceRenderingInfo;
   PVkCommandBufferInheritanceRenderingInfoKHR = ^VkCommandBufferInheritanceRenderingInfoKHR;
+  VkPhysicalDeviceDriverPropertiesKHR = VkPhysicalDeviceDriverProperties;
+  PVkPhysicalDeviceDriverPropertiesKHR = ^VkPhysicalDeviceDriverPropertiesKHR;
 
 { -------------------------------------------------------------------------- }
 { Function Pointers generated from vk.xml                                    }
@@ -2955,6 +3039,8 @@ function VK_VERSION_PATCH(const Version: Cardinal): Cardinal; inline;
 
 { Loads the Vulkan shared library dynamically. Returns True if successfully loaded. }
 function LoadVulkan: Boolean;
+{ Reloads MoltenVK ICD directly on Apple platforms when the Vulkan loader cannot locate an ICD JSON. }
+function LoadVulkanDirectMoltenVKFallback: Boolean;
 { Populates instance-level function pointers using vkGetInstanceProcAddr. }
 procedure LoadVulkanInstance(const Instance: VkInstance);
 { Populates device-level function pointers using vkGetDeviceProcAddr. }
@@ -3004,33 +3090,16 @@ begin
   Result := LoadedVulkanInstance <> nil;
 end;
 
-function LoadVulkan: Boolean;
-const
-  {$if defined(MSWINDOWS)}
-  VulkanLibNames: array[0..0] of String = ('vulkan-1.dll');
-  {$elseif defined(DARWIN)}
-  VulkanLibNames: array[0..2] of String = (
-    'libMoltenVK.dylib',
-    'libvulkan.1.dylib',
-    'libvulkan.dylib'
-  );
-  {$else}
-  VulkanLibNames: array[0..2] of String = (
-    'libvulkan.so.1',
-    'libvulkan.so',
-    'libvulkan.so.0'
-  );
-  {$endif}
+function LoadVulkanFromLibraryNames(const ALibNames: array of String): Boolean;
 var
   I: Integer;
 begin
-  if VulkanLibrary <> nil then
-    Exit(True);
-
-  for I := Low(VulkanLibNames) to High(VulkanLibNames) do
+  for I := Low(ALibNames) to High(ALibNames) do
   begin
+    if ALibNames[I] = '' then
+      Continue;
     try
-      VulkanLibrary := TDynLib.Load(VulkanLibNames[I], false);
+      VulkanLibrary := TDynLib.Load(ALibNames[I], false);
       if VulkanLibrary <> nil then
         Break;
     except
@@ -3039,10 +3108,7 @@ begin
   end;
 
   if VulkanLibrary = nil then
-  begin
-    WritelnLog('Vulkan', 'Could not locate Vulkan dynamic library');
     Exit(False);
-  end;
 
   Pointer(vkGetInstanceProcAddr) := VulkanLibrary.Symbol('vkGetInstanceProcAddr');
   if not Assigned(vkGetInstanceProcAddr) then
@@ -3056,9 +3122,75 @@ begin
   Pointer(vkEnumerateInstanceExtensionProperties) := vkGetInstanceProcAddr(nil, 'vkEnumerateInstanceExtensionProperties');
   Pointer(vkEnumerateInstanceLayerProperties) := vkGetInstanceProcAddr(nil, 'vkEnumerateInstanceLayerProperties');
   Pointer(vkEnumerateInstanceVersion) := vkGetInstanceProcAddr(nil, 'vkEnumerateInstanceVersion');
+  Result := True;
+end;
+
+function LoadVulkan: Boolean;
+const
+  {$if defined(MSWINDOWS)}
+  VulkanLibNames: array[0..0] of String = ('vulkan-1.dll');
+  {$elseif defined(DARWIN)}
+  VulkanLibNames: array[0..6] of String = (
+    'libvulkan.1.dylib',
+    '/opt/homebrew/lib/libvulkan.1.dylib',
+    '/usr/local/lib/libvulkan.1.dylib',
+    'libMoltenVK.dylib',
+    '/opt/homebrew/lib/libMoltenVK.dylib',
+    '/usr/local/lib/libMoltenVK.dylib',
+    'libvulkan.dylib'
+  );
+  {$elseif defined(ANDROID)}
+  VulkanLibNames: array[0..1] of String = (
+    'libvulkan.so',
+    'libvulkan.so.1'
+  );
+  {$else}
+  VulkanLibNames: array[0..2] of String = (
+    'libvulkan.so.1',
+    'libvulkan.so',
+    'libvulkan.so.0'
+  );
+  {$endif}
+var
+  CustomLib: String;
+begin
+  if VulkanLibrary <> nil then
+    Exit(True);
+
+  CustomLib := Trim(GetEnvironmentVariable('CASTLE_VULKAN_LIBRARY'));
+  if CustomLib <> '' then
+  begin
+    if LoadVulkanFromLibraryNames([CustomLib]) then
+      Exit(True);
+    WritelnLog('Vulkan', 'CASTLE_VULKAN_LIBRARY="%s" could not be loaded; falling back to default Vulkan library search', [CustomLib]);
+  end;
+
+  if not LoadVulkanFromLibraryNames(VulkanLibNames) then
+  begin
+    WritelnLog('Vulkan', 'Could not locate Vulkan dynamic library');
+    Exit(False);
+  end;
 
   Result := True;
 end;
+
+function LoadVulkanDirectMoltenVKFallback: Boolean;
+{$if defined(DARWIN)}
+const
+  MoltenVKLibNames: array[0..2] of String = (
+    'libMoltenVK.dylib',
+    '/opt/homebrew/lib/libMoltenVK.dylib',
+    '/usr/local/lib/libMoltenVK.dylib'
+  );
+begin
+  FreeVulkan;
+  Result := LoadVulkanFromLibraryNames(MoltenVKLibNames);
+end;
+{$else}
+begin
+  Result := False;
+end;
+{$endif}
 
 procedure LoadVulkanInstance(const Instance: VkInstance);
 begin

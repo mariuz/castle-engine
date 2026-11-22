@@ -53,9 +53,11 @@ type
     FHandle: TGLuint;
     FTarget: TGLenum;
     FMappedFallback: Pointer;
-    FMappedWithGL: Boolean;
+    FIsMappedForWrite: Boolean;
+    FMappedUploadedViaSubData: Boolean;
     FHostShadow: TBytes;
     function OpenGLDevice: TOpenGLRHIDevice;
+    procedure SyncMappedToGL(const AOffset: PtrUInt = 0; const ASize: PtrUInt = 0);
   protected
     procedure ReleaseDeviceResources; override;
   public
@@ -1143,7 +1145,8 @@ begin
     FreeMem(FMappedFallback);
     FMappedFallback := nil;
   end;
-  FMappedWithGL := False;
+  FIsMappedForWrite := False;
+  FMappedUploadedViaSubData := False;
   if (FHandle <> 0) and (OpenGLDevice <> nil) and OpenGLDevice.HasLiveGLContext then
     glDeleteBuffers(1, @FHandle);
   FHandle := 0;
@@ -1155,10 +1158,31 @@ begin
   inherited;
 end;
 
+procedure TOpenGLRHIBuffer.SyncMappedToGL(const AOffset: PtrUInt; const ASize: PtrUInt);
+var
+  TotalBytes, SyncOffset, SyncBytes: PtrUInt;
+begin
+  if (not FIsMappedForWrite) or (FMappedFallback = nil) or
+     (OpenGLDevice = nil) or (not OpenGLDevice.HasLiveGLContext) then
+    Exit;
+
+  TotalBytes := Max(PtrUInt(1), FDesc.Size);
+  if AOffset >= TotalBytes then
+    Exit;
+  SyncOffset := AOffset;
+  if (ASize = 0) or (SyncOffset + ASize > TotalBytes) then
+    SyncBytes := TotalBytes - SyncOffset
+  else
+    SyncBytes := ASize;
+
+  glBindBuffer(FTarget, FHandle);
+  glBufferSubData(FTarget, SyncOffset, SyncBytes, PByte(FMappedFallback) + SyncOffset);
+  glBindBuffer(FTarget, 0);
+end;
+
 function TOpenGLRHIBuffer.Map: Pointer;
 var
   ByteSize: PtrUInt;
-  AccessFlags: TGLbitfield;
 begin
   ByteSize := Max(PtrUInt(1), FDesc.Size);
 
@@ -1169,62 +1193,48 @@ begin
     Exit(@FHostShadow[0]);
   end;
 
-  glBindBuffer(FTarget, FHandle);
-  {$ifndef OpenGLES}
-  if Assigned(glMapBufferRange) then
-  begin
-    if FDesc.MemoryUsage = muGpuToCpu then
-      AccessFlags := GL_MAP_READ_BIT
-    else if (buStorage in FDesc.Usage) or (buIndirect in FDesc.Usage) then
-      AccessFlags := GL_MAP_READ_BIT or GL_MAP_WRITE_BIT
-    else
-      AccessFlags := GL_MAP_WRITE_BIT or GL_MAP_INVALIDATE_BUFFER_BIT;
-
-    Result := glMapBufferRange(FTarget, 0, ByteSize, AccessFlags);
-    if Result <> nil then
-    begin
-      FMappedWithGL := True;
-      glBindBuffer(FTarget, 0);
-      Exit;
-    end;
-  end;
-  {$endif}
-
-  FMappedWithGL := False;
+  { Use a persistent CPU staging mirror (FMappedFallback) instead of leaving the
+    OpenGL buffer object in GL_BUFFER_MAPPED state via glMapBufferRange without
+    GL_MAP_PERSISTENT_BIT. Per OpenGL 4.6 Core Spec 6.3.2, issuing glDraw* or
+    glDispatch* while a buffer is mapped without MAP_PERSISTENT_BIT raises
+    GL_INVALID_OPERATION on strict hardware drivers (NVIDIA, AMD, Intel), and
+    GL_MAP_INVALIDATE_BUFFER_BIT would discard earlier sub-ranges written in
+    multi-pass streaming ring buffers (such as TCastleBatch2DRenderer). }
   if FMappedFallback = nil then
+  begin
     GetMem(FMappedFallback, ByteSize);
+    FillChar(FMappedFallback^, ByteSize, 0);
+  end;
+
   {$ifndef OpenGLES}
   if ((FDesc.MemoryUsage = muGpuToCpu) or (buStorage in FDesc.Usage) or (buIndirect in FDesc.Usage)) and
      Assigned(glGetBufferSubData) then
+  begin
+    glBindBuffer(FTarget, FHandle);
     glGetBufferSubData(FTarget, 0, ByteSize, FMappedFallback);
+    glBindBuffer(FTarget, 0);
+  end;
   {$endif}
-  glBindBuffer(FTarget, 0);
+
+  FIsMappedForWrite := (FDesc.MemoryUsage <> muGpuToCpu);
+  FMappedUploadedViaSubData := False;
   Result := FMappedFallback;
 end;
 
 procedure TOpenGLRHIBuffer.Unmap;
-var
-  ByteSize: PtrUInt;
 begin
   if (OpenGLDevice = nil) or (not OpenGLDevice.HasLiveGLContext) then
     Exit;
 
-  ByteSize := Max(PtrUInt(1), FDesc.Size);
-  glBindBuffer(FTarget, FHandle);
-  if FMappedWithGL then
-  begin
-    {$ifndef OpenGLES}
-    if Assigned(glUnmapBuffer) then
-      glUnmapBuffer(FTarget);
-    {$endif}
-    FMappedWithGL := False;
-  end else
-  if (FMappedFallback <> nil) and (FDesc.MemoryUsage <> muGpuToCpu) then
-    glBufferSubData(FTarget, 0, ByteSize, FMappedFallback);
-  glBindBuffer(FTarget, 0);
+  if FIsMappedForWrite and (not FMappedUploadedViaSubData) then
+    SyncMappedToGL(0, 0);
+  FIsMappedForWrite := False;
+  FMappedUploadedViaSubData := False;
 end;
 
 procedure TOpenGLRHIBuffer.UploadData(const Data; const Size: PtrUInt; const Offset: PtrUInt);
+var
+  ByteSize: PtrUInt;
 begin
   if Size = 0 then Exit;
 
@@ -1235,6 +1245,13 @@ begin
     Move(Data, FHostShadow[Offset], Size);
     Exit;
   end;
+
+  ByteSize := Max(PtrUInt(1), FDesc.Size);
+  if (FMappedFallback <> nil) and (Offset + Size <= ByteSize) and
+     (Pointer(@Data) <> Pointer(PByte(FMappedFallback) + Offset)) then
+    Move(Data, (PByte(FMappedFallback) + Offset)^, Size);
+  if FIsMappedForWrite then
+    FMappedUploadedViaSubData := True;
 
   glBindBuffer(FTarget, FHandle);
   glBufferSubData(FTarget, Offset, Size, @Data);
@@ -2796,6 +2813,10 @@ begin
       else
         TargetEnum := GL_UNIFORM_BUFFER;
 
+      if GLSet.FBoundBuffers[I].Buffer.FIsMappedForWrite and
+         (not GLSet.FBoundBuffers[I].Buffer.FMappedUploadedViaSubData) then
+        GLSet.FBoundBuffers[I].Buffer.SyncMappedToGL(ActualOffset, ActualRange);
+
       glBindBufferRange(TargetEnum, Slot,
         GLSet.FBoundBuffers[I].Buffer.Handle, ActualOffset, ActualRange);
     end;
@@ -3110,6 +3131,9 @@ begin
     else
       BufOffset := 0;
 
+    if GLBuf.FIsMappedForWrite and (not GLBuf.FMappedUploadedViaSubData) then
+      GLBuf.SyncMappedToGL(BufOffset, 0);
+
     glBindBuffer(GL_ARRAY_BUFFER, GLBuf.Handle);
     glEnableVertexAttribArray(Attr.Location);
 
@@ -3179,6 +3203,9 @@ begin
   end;
   if (FDevice <> nil) and FDevice.HasLiveGLContext then
   begin
+    if FCurrentIndexBuffer.FIsMappedForWrite and
+       (not FCurrentIndexBuffer.FMappedUploadedViaSubData) then
+      FCurrentIndexBuffer.SyncMappedToGL(Offset, 0);
     if FCurrentPipeline <> nil then
       glBindVertexArray(FCurrentPipeline.VAOHandle);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, FCurrentIndexBuffer.Handle);
