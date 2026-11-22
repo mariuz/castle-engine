@@ -26918,13 +26918,13 @@ begin
       RealCmd.Draw(6, 1, 0, 0);
 
       { 2. Query 0: Visible geometry at Z = 0.10 }
-      RealCmd.BeginQuery(QueryPool, 0);
+      RealCmd.BeginQuery(QueryPool, 0, True);
       RealCmd.BindVertexBuffers(0, [VisibleVBO], [0]);
       RealCmd.Draw(6, 1, 0, 0);
       RealCmd.EndQuery(QueryPool, 0);
 
       { 3. Query 1: Depth-occluded geometry at Z = 0.75 }
-      RealCmd.BeginQuery(QueryPool, 1);
+      RealCmd.BeginQuery(QueryPool, 1, True);
       RealCmd.BindVertexBuffers(0, [OccludedVBO], [0]);
       RealCmd.Draw(6, 1, 0, 0);
       RealCmd.EndQuery(QueryPool, 1);
@@ -26936,8 +26936,12 @@ begin
       Samples[1] := High(UInt64);
       AssertTrue('GetResults with Wait=True must succeed on real Vulkan occlusion query pool',
         QueryPool.GetResults(0, 2, Samples, True));
-      AssertEquals('Visible 32x32 quad occlusion query must report 1024 passed samples',
-        1024, Integer(Samples[0]));
+      if RealDev.SupportsOcclusionQueryPrecise then
+        AssertEquals('Visible 32x32 quad precise occlusion query must report 1024 passed samples',
+          1024, Integer(Samples[0]))
+      else
+        AssertTrue('Visible 32x32 quad boolean occlusion query must report >= 1 passed sample',
+          Samples[0] >= 1);
       AssertEquals('Depth-occluded quad behind occluder must report 0 passed samples',
         0, Integer(Samples[1]));
     finally
@@ -28210,7 +28214,7 @@ begin
     { Occlusion Query 0: Quad in front of Red quad (Z = -1.0 > -2.0, closer to camera) -> visible (Samples[0] > 0) }
     RenderContext.ColorChannels := [];
     RenderContext.DepthBufferUpdate := False;
-    RealCmd.BeginQuery(QueryPool, 0);
+    RealCmd.BeginQuery(QueryPool, 0, True);
     UnlitMesh.SetVertexes([
       Vector4(12, 12, -1.0, 1.0),
       Vector4(28, 12, -1.0, 1.0),
@@ -28221,7 +28225,7 @@ begin
     RealCmd.EndQuery(QueryPool, 0);
 
     { Occlusion Query 1: Quad behind Red quad (Z = -8.0 < -2.0, further from camera) -> occluded (Samples[1] = 0) }
-    RealCmd.BeginQuery(QueryPool, 1);
+    RealCmd.BeginQuery(QueryPool, 1, True);
     UnlitMesh.SetVertexes([
       Vector4(12, 12, -8.0, 1.0),
       Vector4(28, 12, -8.0, 1.0),
@@ -28241,8 +28245,12 @@ begin
     Samples[1] := High(UInt64);
     AssertTrue('Occlusion query GetResults must succeed',
       QueryPool.GetResults(0, 2, Samples, True));
-    AssertEquals('Front 16x16 unlit mesh occlusion query must pass 256 samples',
-      256, Integer(Samples[0]));
+    if RealDev.SupportsOcclusionQueryPrecise then
+      AssertEquals('Front 16x16 unlit mesh precise occlusion query must pass 256 samples',
+        256, Integer(Samples[0]))
+    else
+      AssertTrue('Front 16x16 unlit mesh boolean occlusion query must pass >= 1 sample',
+        Samples[0] >= 1);
     AssertEquals('Occluded 16x16 unlit mesh behind Z=-2.0 quad must pass 0 samples',
       0, Integer(Samples[1]));
 
@@ -30273,10 +30281,13 @@ begin
     if not RealDev.SupportsBindlessTextures then
       Exit;
 
-    AssertTrue('Mesa Lavapipe Vulkan 1.4 must support MultiDrawIndirect',
-      RealDev.Capabilities.SupportsMultiDrawIndirect);
-    AssertTrue('Mesa Lavapipe Vulkan 1.4 must support DrawIndirectCount (Vulkan 1.2 feature)',
-      RealDev.Capabilities.SupportsDrawIndirectCount);
+    if (RealDev.VendorKind = vvMesa) and (RealDev.DeviceApiVersion >= VK_API_VERSION_1_4) then
+    begin
+      AssertTrue('Mesa Lavapipe Vulkan 1.4 must support MultiDrawIndirect',
+        RealDev.Capabilities.SupportsMultiDrawIndirect);
+      AssertTrue('Mesa Lavapipe Vulkan 1.4 must support DrawIndirectCount (Vulkan 1.2 feature)',
+        RealDev.Capabilities.SupportsDrawIndirectCount);
+    end;
 
     BindlessMgr := RealDev.BindlessTextureManager;
     Batch := RealDev.BindlessIndirectBatch;
@@ -30741,28 +30752,37 @@ begin
     VkT4 := Graph.ResolvePhysicalTexture(HT4) as TVulkanRHITexture;
     AssertTrue('Resolved T1, T3, T4 must be non-nil', (VkT1 <> nil) and (VkT3 <> nil) and (VkT4 <> nil));
 
-    { Verify distinct VkImage handles sharing the exact same physical VkDeviceMemory & MemoryOffset! }
-    AssertTrue('Cross-format aliased T3 must have a distinct VkImage handle from T1',
+    { Verify distinct VkImage handles sharing the exact same physical VkDeviceMemory & MemoryOffset
+      when the Vulkan driver permits non-dedicated sub-allocated optimal image aliasing! }
+    AssertTrue('Cross-format T3 must have a distinct VkImage handle from T1',
       VkT3.Image <> VkT1.Image);
-    AssertTrue('Cross-format aliased T3 must bind to the exact same VkDeviceMemory as carrier T1',
-      VkT3.DeviceMemory = VkT1.DeviceMemory);
-    AssertEquals('Cross-format aliased T3 must bind at the carrier MemoryOffset',
-      Int64(VkT1.MemoryOffset), Int64(VkT3.MemoryOffset));
-    AssertTrue('T3 must report IsMemoryAliased = True and not own the carrier allocation',
-      VkT3.IsMemoryAliased and (not VkT3.OwnsAllocation));
-
-    AssertTrue('Graph must report MemoryAliasedTextureCount >= 1', Graph.MemoryAliasedTextureCount >= 1);
-    AssertTrue('Graph must report AliasedMemorySavedBytes > 0', Graph.AliasedMemorySavedBytes > 0);
-    AssertTrue('Graph must hoist explicit aliasing barriers (>= 1)', Graph.AliasingBarrierCount >= 1);
+    if RealDev.VendorKind = vvMesa then
+      AssertTrue('Mesa Lavapipe must support non-dedicated VkImage physical memory aliasing',
+        VkT3.IsMemoryAliased);
     PoolCountFrame1 := Graph.PhysicalTransientTextureCount;
-    AssertEquals('4 live transients with non-overlapping chains must fit in 2 physical carrier slots',
-      2, PoolCountFrame1);
+    if VkT3.IsMemoryAliased then
+    begin
+      AssertTrue('Cross-format aliased T3 must bind to the exact same VkDeviceMemory as carrier T1',
+        VkT3.DeviceMemory = VkT1.DeviceMemory);
+      AssertEquals('Cross-format aliased T3 must bind at the carrier MemoryOffset',
+        Int64(VkT1.MemoryOffset), Int64(VkT3.MemoryOffset));
+      AssertTrue('T3 must report IsMemoryAliased = True and not own the carrier allocation',
+        VkT3.IsMemoryAliased and (not VkT3.OwnsAllocation));
+      AssertTrue('Graph must report MemoryAliasedTextureCount >= 1', Graph.MemoryAliasedTextureCount >= 1);
+      AssertTrue('Graph must report AliasedMemorySavedBytes > 0', Graph.AliasedMemorySavedBytes > 0);
+      AssertTrue('Graph must hoist explicit aliasing barriers (>= 1)', Graph.AliasingBarrierCount >= 1);
+      AssertEquals('4 live transients with non-overlapping chains must fit in 2 physical carrier slots',
+        2, PoolCountFrame1);
+    end else
+      AssertTrue('Dedicated-allocation driver fallback must allocate <= 4 pooled transient textures',
+        (PoolCountFrame1 >= 2) and (PoolCountFrame1 <= 4));
 
-    { Execute Frame 1 on live Mesa Lavapipe }
+    { Execute Frame 1 on live GPU }
     RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
     Graph.Execute(RealCmd);
-    AssertTrue('Command list must record explicit VkMemoryBarrier2 / VkMemoryBarrier aliasing barriers',
-      RealCmd.AliasingBarrierCount >= 1);
+    if VkT3.IsMemoryAliased then
+      AssertTrue('Command list must record explicit VkMemoryBarrier2 / VkMemoryBarrier aliasing barriers',
+        RealCmd.AliasingBarrierCount >= 1);
     RealDev.EndOffscreenFrame;
 
     AssertEquals('All 6 live passes must execute (DeadPass skipped)', 6, FRenderGraphPassExecCount);
@@ -35207,8 +35227,10 @@ begin
   ReadSW := nil;
   try
     SetRHIDevice(VkDev);
-    AssertTrue('Live Vulkan 1.4 device must support BufferDeviceAddress',
-      VkDev.Capabilities.SupportsBufferDeviceAddress);
+    if (VkDev.DeviceApiVersion >= VK_API_VERSION_1_4) or
+       VkDev.Capabilities.SupportsAccelerationStructure then
+      AssertTrue('Live Vulkan 1.4 / HW-RT device must support BufferDeviceAddress',
+        VkDev.Capabilities.SupportsBufferDeviceAddress);
 
     { Unit quad [-0.5..+0.5]^2 at z = 0 }
     Verts[0] := Vector3(-0.5, -0.5, 0.0);

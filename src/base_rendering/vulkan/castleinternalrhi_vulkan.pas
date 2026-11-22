@@ -4596,6 +4596,7 @@ type
     FSupportsSynchronization2: Boolean;
     FSupportsTimelineSemaphores: Boolean;
     FSupportsHostQueryReset: Boolean;
+    FSupportsOcclusionQueryPrecise: Boolean;
     FSupportsDrawIndirectCountFeature: Boolean;
     FSupportsShaderDrawParameters: Boolean;
     FSupportsBufferDeviceAddress: Boolean;
@@ -5039,6 +5040,7 @@ type
     property SupportsSynchronization2: Boolean read FSupportsSynchronization2 write SetSupportsSynchronization2;
     property SupportsTimelineSemaphores: Boolean read FSupportsTimelineSemaphores write SetSupportsTimelineSemaphores;
     property SupportsHostQueryReset: Boolean read FSupportsHostQueryReset write FSupportsHostQueryReset;
+    property SupportsOcclusionQueryPrecise: Boolean read FSupportsOcclusionQueryPrecise write FSupportsOcclusionQueryPrecise;
     property SupportsShaderDrawParameters: Boolean read FSupportsShaderDrawParameters write FSupportsShaderDrawParameters;
     property SupportsBufferDeviceAddress: Boolean read FSupportsBufferDeviceAddress write FSupportsBufferDeviceAddress;
     property SupportsAccelerationStructure: Boolean read FSupportsAccelerationStructure write FSupportsAccelerationStructure;
@@ -11278,7 +11280,10 @@ begin
     if VkPool.FSimulatedResults[QueryIndex] = 0 then
       VkPool.FSimulatedResults[QueryIndex] := 128;
     Flags := 0;
-    if Precise then
+    { Per VUID-vkCmdBeginQuery-queryType-00800, VK_QUERY_CONTROL_PRECISE_BIT is only valid
+      for VK_QUERY_TYPE_OCCLUSION when occlusionQueryPrecise is enabled on the device. }
+    if Precise and (VkPool.Desc.QueryType = qtOcclusion) and
+       ((FDevice = nil) or FDevice.SupportsOcclusionQueryPrecise) then
       Flags := VK_QUERY_CONTROL_PRECISE_BIT;
     vkCmdBeginQuery(FHandle, VkPool.Handle, QueryIndex, Flags);
     Exit;
@@ -11386,32 +11391,61 @@ end;
 
 procedure TVulkanRHICommandList.DrawIndirect(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
+var
+  EffectiveStride, I: Cardinal;
+  VkBuf: VkBuffer;
 begin
   if IndirectBuffer = nil then Exit;
   Inc(FIndirectDrawCallCount);
   FLastEffectiveIndirectDrawCount := DrawCount;
-  if (FHandle <> nil) and Assigned(vkCmdDrawIndirect) then
-    vkCmdDrawIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
-      Offset, DrawCount, Stride);
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndirect) and (DrawCount > 0) then
+  begin
+    VkBuf := (IndirectBuffer as TVulkanRHIBuffer).Handle;
+    EffectiveStride := Stride;
+    if EffectiveStride = 0 then
+      EffectiveStride := SizeOf(TRHIDrawIndirectCommand);
+    if (FDevice = nil) or FDevice.Capabilities.SupportsMultiDrawIndirect or (DrawCount = 1) then
+      vkCmdDrawIndirect(FHandle, VkBuf, Offset, DrawCount, EffectiveStride)
+    else
+      { Per VUID-vkCmdDrawIndirect-drawCount-02718, emit single-draw calls when multiDrawIndirect is unsupported }
+      for I := 0 to DrawCount - 1 do
+        vkCmdDrawIndirect(FHandle, VkBuf,
+          Offset + PtrUInt(I) * PtrUInt(EffectiveStride), 1, EffectiveStride);
+  end;
 end;
 
 procedure TVulkanRHICommandList.DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
+var
+  EffectiveStride, I: Cardinal;
+  VkBuf: VkBuffer;
 begin
   if IndirectBuffer = nil then Exit;
   Inc(FIndirectDrawCallCount);
   FLastEffectiveIndirectDrawCount := DrawCount;
-  if (FHandle <> nil) and Assigned(vkCmdDrawIndexedIndirect) then
-    vkCmdDrawIndexedIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
-      Offset, DrawCount, Stride);
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndexedIndirect) and (DrawCount > 0) then
+  begin
+    VkBuf := (IndirectBuffer as TVulkanRHIBuffer).Handle;
+    EffectiveStride := Stride;
+    if EffectiveStride = 0 then
+      EffectiveStride := SizeOf(TRHIDrawIndexedIndirectCommand);
+    if (FDevice = nil) or FDevice.Capabilities.SupportsMultiDrawIndirect or (DrawCount = 1) then
+      vkCmdDrawIndexedIndirect(FHandle, VkBuf, Offset, DrawCount, EffectiveStride)
+    else
+      { Per VUID-vkCmdDrawIndexedIndirect-drawCount-02718, emit single-draw calls when multiDrawIndirect is unsupported }
+      for I := 0 to DrawCount - 1 do
+        vkCmdDrawIndexedIndirect(FHandle, VkBuf,
+          Offset + PtrUInt(I) * PtrUInt(EffectiveStride), 1, EffectiveStride);
+  end;
 end;
 
 procedure TVulkanRHICommandList.DrawIndirectCount(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
   const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal);
 var
-  EffectiveCount: Cardinal;
+  EffectiveCount, CpuCount, EffectiveStride, I: Cardinal;
   MappedPtr: Pointer;
+  VkBuf: VkBuffer;
 begin
   if (IndirectBuffer = nil) or (CountBuffer = nil) then Exit;
 
@@ -11422,7 +11456,14 @@ begin
     MappedPtr := CountBuffer.Map;
     try
       if MappedPtr <> nil then
-        EffectiveCount := Min(MaxDrawCount, PCardinal(PtrUInt(MappedPtr) + CountBufferOffset)^);
+      begin
+        CpuCount := PCardinal(PtrUInt(MappedPtr) + CountBufferOffset)^;
+        { In headless mode CountBuffer is CPU-populated; on a real GPU without VK_KHR_draw_indirect_count
+          (e.g. Metal / MoltenVK), a zero host value indicates a GPU compute pass will populate
+          IndirectBuffer before draw execution with unused trailing slots zeroed. }
+        if (FHandle = nil) or (CpuCount > 0) then
+          EffectiveCount := Min(MaxDrawCount, CpuCount);
+      end;
     finally
       CountBuffer.Unmap;
     end;
@@ -11431,26 +11472,37 @@ begin
   Inc(FIndirectDrawCallCount);
   Inc(FIndirectCountDrawCallCount);
   FLastEffectiveIndirectDrawCount := EffectiveCount;
+
+  EffectiveStride := Stride;
+  if EffectiveStride = 0 then
+    EffectiveStride := SizeOf(TRHIDrawIndirectCommand);
 
   if (FHandle <> nil) and (FDevice <> nil) and
      FDevice.Capabilities.SupportsDrawIndirectCount and Assigned(vkCmdDrawIndirectCount) then
     vkCmdDrawIndirectCount(FHandle,
       (IndirectBuffer as TVulkanRHIBuffer).Handle, Offset,
       (CountBuffer as TVulkanRHIBuffer).Handle, CountBufferOffset,
-      MaxDrawCount, Stride)
+      MaxDrawCount, EffectiveStride)
   else
-  if (FHandle <> nil) and Assigned(vkCmdDrawIndirect) then
-    vkCmdDrawIndirect(FHandle,
-      (IndirectBuffer as TVulkanRHIBuffer).Handle, Offset,
-      EffectiveCount, Stride);
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndirect) and (EffectiveCount > 0) then
+  begin
+    VkBuf := (IndirectBuffer as TVulkanRHIBuffer).Handle;
+    if (FDevice = nil) or FDevice.Capabilities.SupportsMultiDrawIndirect or (EffectiveCount = 1) then
+      vkCmdDrawIndirect(FHandle, VkBuf, Offset, EffectiveCount, EffectiveStride)
+    else
+      for I := 0 to EffectiveCount - 1 do
+        vkCmdDrawIndirect(FHandle, VkBuf,
+          Offset + PtrUInt(I) * PtrUInt(EffectiveStride), 1, EffectiveStride);
+  end;
 end;
 
 procedure TVulkanRHICommandList.DrawIndexedIndirectCount(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
   const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal);
 var
-  EffectiveCount: Cardinal;
+  EffectiveCount, CpuCount, EffectiveStride, I: Cardinal;
   MappedPtr: Pointer;
+  VkBuf: VkBuffer;
 begin
   if (IndirectBuffer = nil) or (CountBuffer = nil) then Exit;
 
@@ -11461,7 +11513,11 @@ begin
     MappedPtr := CountBuffer.Map;
     try
       if MappedPtr <> nil then
-        EffectiveCount := Min(MaxDrawCount, PCardinal(PtrUInt(MappedPtr) + CountBufferOffset)^);
+      begin
+        CpuCount := PCardinal(PtrUInt(MappedPtr) + CountBufferOffset)^;
+        if (FHandle = nil) or (CpuCount > 0) then
+          EffectiveCount := Min(MaxDrawCount, CpuCount);
+      end;
     finally
       CountBuffer.Unmap;
     end;
@@ -11471,17 +11527,27 @@ begin
   Inc(FIndirectCountDrawCallCount);
   FLastEffectiveIndirectDrawCount := EffectiveCount;
 
+  EffectiveStride := Stride;
+  if EffectiveStride = 0 then
+    EffectiveStride := SizeOf(TRHIDrawIndexedIndirectCommand);
+
   if (FHandle <> nil) and (FDevice <> nil) and
      FDevice.Capabilities.SupportsDrawIndirectCount and Assigned(vkCmdDrawIndexedIndirectCount) then
     vkCmdDrawIndexedIndirectCount(FHandle,
       (IndirectBuffer as TVulkanRHIBuffer).Handle, Offset,
       (CountBuffer as TVulkanRHIBuffer).Handle, CountBufferOffset,
-      MaxDrawCount, Stride)
+      MaxDrawCount, EffectiveStride)
   else
-  if (FHandle <> nil) and Assigned(vkCmdDrawIndexedIndirect) then
-    vkCmdDrawIndexedIndirect(FHandle,
-      (IndirectBuffer as TVulkanRHIBuffer).Handle, Offset,
-      EffectiveCount, Stride);
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndexedIndirect) and (EffectiveCount > 0) then
+  begin
+    VkBuf := (IndirectBuffer as TVulkanRHIBuffer).Handle;
+    if (FDevice = nil) or FDevice.Capabilities.SupportsMultiDrawIndirect or (EffectiveCount = 1) then
+      vkCmdDrawIndexedIndirect(FHandle, VkBuf, Offset, EffectiveCount, EffectiveStride)
+    else
+      for I := 0 to EffectiveCount - 1 do
+        vkCmdDrawIndexedIndirect(FHandle, VkBuf,
+          Offset + PtrUInt(I) * PtrUInt(EffectiveStride), 1, EffectiveStride);
+  end;
 end;
 
 procedure TVulkanRHICommandList.DrawMeshTasks(const GroupCountX: Cardinal;
@@ -14495,8 +14561,7 @@ begin
     or when CPU Hi-Z culling is active, populate mapped buffers deterministically on CPU. }
   ExecuteOnRealGpu := (FDevice <> nil) and (FDevice.Handle <> nil) and
     (ACmd is TVulkanRHICommandList) and (TVulkanRHICommandList(ACmd).Handle <> nil) and
-    (FComputePipeline <> nil) and (not FHiZCullingEnabled) and
-    (FDevice.Capabilities.SupportsDrawIndirectCount or (not ACompactDraws));
+    (FComputePipeline <> nil) and (not FHiZCullingEnabled);
 
   VisibleCount := 0;
   HiZCulledCount := 0;
@@ -14629,7 +14694,7 @@ begin
 
   if (FDevice <> nil) and (FDevice.Handle <> nil) and
      (ACmd is TVulkanRHICommandList) and (TVulkanRHICommandList(ACmd).Handle <> nil) and
-     FDevice.Capabilities.SupportsDrawIndirectCount and (not FHiZCullingEnabled) then
+     (not FHiZCullingEnabled) then
   begin
     Result := Min(MaxDraws, FLastVisibleInstanceCount);
     TVulkanRHICommandList(ACmd).FLastEffectiveIndirectDrawCount := Result;
@@ -26451,6 +26516,7 @@ begin
   FSupportsSynchronization2 := ADeviceApiVersion >= VK_API_VERSION_1_3;
   FSupportsTimelineSemaphores := ADeviceApiVersion >= VK_API_VERSION_1_2;
   FSupportsHostQueryReset := ADeviceApiVersion >= VK_API_VERSION_1_2;
+  FSupportsOcclusionQueryPrecise := True;
   FSupportsBufferDeviceAddress := ADeviceApiVersion >= VK_API_VERSION_1_2;
   FRTShaderGroupHandleSize := 32;
   FRTShaderGroupHandleAlignment := 32;
@@ -27762,7 +27828,15 @@ begin
   if ARequireSurfaceExtensions then
     ExtNames := GetAvailableVulkanWSIInstanceExtensions(EnablePortabilityBit)
   else
+  begin
     SetLength(ExtNames, 0);
+    if IsVulkanInstanceExtensionSupported(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) then
+    begin
+      SetLength(ExtNames, 1);
+      ExtNames[0] := VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+      EnablePortabilityBit := True;
+    end;
+  end;
 
   HasDebugUtilsExt := False;
   if (WantValidation or
@@ -28355,6 +28429,7 @@ begin
   FCapabilities.SupportsBCCompression := Features.textureCompressionBC = VK_TRUE;
   FCapabilities.SupportsASTCCompression := Features.textureCompressionASTC_LDR = VK_TRUE;
   FCapabilities.SupportsETC2Compression := Features.textureCompressionETC2 = VK_TRUE;
+  FSupportsOcclusionQueryPrecise := Features.occlusionQueryPrecise = VK_TRUE;
   FCapabilities.SupportsComputeShaders := True;
   FCapabilities.SupportsMultiDrawIndirect := Features.multiDrawIndirect = VK_TRUE;
   FCapabilities.SupportsDrawIndirectCount := FSupportsDrawIndirectCountFeature;
@@ -28509,6 +28584,7 @@ begin
     EnabledFeatures.fullDrawIndexUint32 := PhysFeatures.fullDrawIndexUint32;
     EnabledFeatures.multiDrawIndirect := PhysFeatures.multiDrawIndirect;
     EnabledFeatures.drawIndirectFirstInstance := PhysFeatures.drawIndirectFirstInstance;
+    EnabledFeatures.occlusionQueryPrecise := PhysFeatures.occlusionQueryPrecise;
     EnabledFeatures.samplerAnisotropy := PhysFeatures.samplerAnisotropy;
     EnabledFeatures.fillModeNonSolid := PhysFeatures.fillModeNonSolid;
     EnabledFeatures.wideLines := PhysFeatures.wideLines;
