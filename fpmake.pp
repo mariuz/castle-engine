@@ -610,6 +610,7 @@ begin
     P.Targets.AddUnit('castlebehaviortree.pas');
     P.Targets.AddUnit('castleniagarastack.pas');
     P.Targets.AddUnit('castlewidgetanim.pas');
+    P.Targets.AddUnit('castleikretargeter.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

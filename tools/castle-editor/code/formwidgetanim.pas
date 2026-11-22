@@ -95,7 +95,7 @@ begin
   FOnRefresh := AOnRefresh;
   FSelectedSlotIdx := 0;
 
-  Caption := 'UMG Widget Animation Timeline & Anchor Slot Designer (106 UE Studios / 29 MCP)';
+  Caption := 'UMG Widget Animation Timeline & Anchor Slot Designer (107 UE Studios / 30 MCP)';
   Position := poScreenCenter;
   Width := 1220;
   Height := 740;
@@ -144,63 +144,76 @@ begin
 
   BtnModal := TButton.Create(Self);
   BtnModal.Parent := PnlToolbar;
-  BtnModal.SetBounds(8, 6, 148, 30);
+  BtnModal.SetBounds(8, 6, 166, 30);
   BtnModal.Caption := '+ Modal Bounce Preset';
   BtnModal.OnClick := @BtnSpawnModalClick;
 
   BtnHud := TButton.Create(Self);
   BtnHud.Parent := PnlToolbar;
-  BtnHud.SetBounds(160, 6, 148, 30);
-  BtnHud.Caption := '+ HUD Damage & Toast';
+  BtnHud.SetBounds(178, 6, 170, 30);
+  BtnHud.Caption := '+ HUD Damage + Toast';
   BtnHud.OnClick := @BtnSpawnHudClick;
 
   LblClip := TLabel.Create(Self);
   LblClip.Parent := PnlToolbar;
-  LblClip.Left := 316;
+  LblClip.Left := 356;
   LblClip.Top := 13;
   LblClip.Caption := 'Clip:';
 
   FCmbClips := TComboBox.Create(Self);
   FCmbClips.Parent := PnlToolbar;
   FCmbClips.Style := csDropDownList;
-  FCmbClips.SetBounds(350, 8, 168, 28);
+  FCmbClips.SetBounds(390, 8, 186, 28);
   FCmbClips.OnChange := @CmbClipsChange;
 
   BtnPlayF := TButton.Create(Self);
   BtnPlayF.Parent := PnlToolbar;
-  BtnPlayF.SetBounds(524, 6, 98, 30);
+  BtnPlayF.SetBounds(582, 6, 94, 30);
   BtnPlayF.Caption := 'Play Fwd';
   BtnPlayF.OnClick := @BtnPlayFwdClick;
 
   BtnPlayR := TButton.Create(Self);
   BtnPlayR.Parent := PnlToolbar;
-  BtnPlayR.SetBounds(626, 6, 98, 30);
+  BtnPlayR.SetBounds(680, 6, 94, 30);
   BtnPlayR.Caption := 'Play Rev';
   BtnPlayR.OnClick := @BtnPlayRevClick;
 
   BtnStep := TButton.Create(Self);
   BtnStep.Parent := PnlToolbar;
-  BtnStep.SetBounds(728, 6, 102, 30);
+  BtnStep.SetBounds(778, 6, 102, 30);
   BtnStep.Caption := 'Step +0.10s';
   BtnStep.OnClick := @BtnStepClick;
 
   BtnReset := TButton.Create(Self);
   BtnReset.Parent := PnlToolbar;
-  BtnReset.SetBounds(834, 6, 92, 30);
+  BtnReset.SetBounds(884, 6, 92, 30);
   BtnReset.Caption := 'Rest Pose';
   BtnReset.OnClick := @BtnResetRestClick;
 
   BtnCopy := TButton.Create(Self);
   BtnCopy.Parent := PnlToolbar;
-  BtnCopy.SetBounds(930, 6, 122, 30);
+  BtnCopy.SetBounds(980, 6, 128, 30);
   BtnCopy.Caption := 'Copy Markdown';
   BtnCopy.OnClick := @BtnCopyMarkdownClick;
+
+  PnlTimelineHost := TPanel.Create(Self);
+  PnlTimelineHost.Parent := Self;
+  PnlTimelineHost.Align := alBottom;
+  PnlTimelineHost.Height := 168;
+  PnlTimelineHost.BevelOuter := bvLowered;
+
+  FPaintTimeline := TPaintBox.Create(Self);
+  FPaintTimeline.Parent := PnlTimelineHost;
+  FPaintTimeline.Align := alClient;
+  FPaintTimeline.OnPaint := @PaintTimelineCanvas;
+  FPaintTimeline.OnMouseDown := @TimelineMouseDown;
 
   PnlBottom := TPanel.Create(Self);
   PnlBottom.Parent := Self;
   PnlBottom.Align := alBottom;
-  PnlBottom.Height := 118;
+  PnlBottom.Height := 116;
   PnlBottom.BevelOuter := bvNone;
+  PnlBottom.Top := Height;
 
   FMemoReport := TMemo.Create(Self);
   FMemoReport.Parent := PnlBottom;
@@ -215,18 +228,6 @@ begin
   BtnClose.Width := 74;
   BtnClose.Caption := 'Close';
   BtnClose.ModalResult := mrOk;
-
-  PnlTimelineHost := TPanel.Create(Self);
-  PnlTimelineHost.Parent := Self;
-  PnlTimelineHost.Align := alBottom;
-  PnlTimelineHost.Height := 196;
-  PnlTimelineHost.BevelOuter := bvLowered;
-
-  FPaintTimeline := TPaintBox.Create(Self);
-  FPaintTimeline.Parent := PnlTimelineHost;
-  FPaintTimeline.Align := alClient;
-  FPaintTimeline.OnPaint := @PaintTimelineCanvas;
-  FPaintTimeline.OnMouseDown := @TimelineMouseDown;
 
   PnlRight := TPanel.Create(Self);
   PnlRight.Parent := Self;
@@ -386,7 +387,7 @@ begin
 
   C.Brush.Style := bsClear;
   C.Font.Color := RGBToColor(148, 196, 248);
-  C.TextOut(ScrL + 8, ScrT + 6, 'UMG Designer Viewport (1280x720 Virtual Reference)');
+  C.TextOut(ScrL + 10, ScrT + 6, 'UMG 16:9 Canvas (1280x720)');
 
   if FActiveAnim = nil then Exit;
 
@@ -462,8 +463,8 @@ begin
   C.Brush.Color := RGBToColor(22, 24, 30);
   C.FillRect(0, 0, W, H);
 
-  LabelW := 230;
-  TrackL := LabelW + 12;
+  LabelW := 232;
+  TrackL := LabelW + 16;
   TrackR := Max(TrackL + 120, W - 24);
 
   C.Brush.Style := bsSolid;
@@ -472,7 +473,7 @@ begin
 
   C.Brush.Style := bsClear;
   C.Font.Color := RGBToColor(215, 226, 242);
-  C.TextOut(10, 5, 'UMG Sequencer Tracks (Click timeline to scrub)');
+  C.TextOut(10, 5, 'UMG Sequencer Dope-Sheet');
 
   if (FActiveAnim = nil) or (FActiveAnim.ActiveClipIndex < 0) or
      (FActiveAnim.ActiveClipIndex > High(FActiveAnim.Clips)) then Exit;

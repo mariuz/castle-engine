@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="245">
+    <Units Count="247">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1307,6 +1307,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormWidgetAnim"/>
       </Unit244>
+      <Unit245>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolikretargeter.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolIkRetargeter"/>
+      </Unit245>
+      <Unit246>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formikretargeter.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormIkRetargeter"/>
+      </Unit246>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

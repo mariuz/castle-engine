@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1133,6 +1133,15 @@ begin
   AddToolDef('cge_animate_umg_widget',
     'Spawn, scrub timeline, play forward/reverse clips, trigger UI events, or audit TCastleWidgetAnimator UMG 2D UI animations.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'IK Retargeter operation: status, spawn_preset, step_walk, or toggle_ref_delta (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleIkRetargeter name (defaults to first IK Retargeter in design).'));
+  P.Add('deltaSec', MakePropSchema('number', 'Delta seconds for step_walk (default 0.25).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: compact_apose, brute_ogre, or two_hand_ik (default compact_apose).'));
+  AddToolDef('cge_retarget_ik_skeleton',
+    'Spawn, step cross-skeleton stride retargeting, toggle T/A-pose reference delta compensation, or audit TCastleIkRetargeter rigs.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1290,6 +1299,9 @@ var
   UmgPresetVal: TUmgWidgetAnimPreset;
   UmgClipStr: String;
   UmgTimeVal: Single;
+  IkRtgAudit: TIkRetargetSceneAuditReport;
+  IkRtgComp: TCastleIkRetargeter;
+  IkRtgPresetVal: TIkRetargetPreset;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2871,6 +2883,77 @@ begin
         OutPayload.Add('activeAnimator', UmgComp.Name);
         OutPayload.Add('currentTimeSec', UmgComp.CurrentTimeSec);
         OutPayload.Add('summaryBadge', UmgComp.WidgetAnimSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_retarget_ik_skeleton' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    MacroMult := 0.25;
+    IkRtgPresetVal := irpMannequinToCompactAPose;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      MacroMult := ArgsObj.Get('deltaSec', 0.25);
+      if SameText(ArgsObj.Get('preset', ''), 'brute_ogre') then
+        IkRtgPresetVal := irpMannequinToBruteOgre
+      else if SameText(ArgsObj.Get('preset', ''), 'two_hand_ik') then
+        IkRtgPresetVal := irpTwoHandedGripIkRetarget;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'step_walk') or
+       SameText(ActionStr, 'toggle_ref_delta') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      IkRtgComp := TIkRetargeterHelper.SpawnIkRetargetPresetInDesign(
+        DesignRoot, DesignOwner, IkRtgPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Skeletal IK Retargeter');
+    end else
+      IkRtgComp := TIkRetargeterHelper.FindIkRetargeterByName(DesignRoot, DesignOwner, CompName);
+
+    if (IkRtgComp <> nil) and SameText(ActionStr, 'step_walk') then
+      IkRtgComp.StepRetargeter(MacroMult)
+    else if (IkRtgComp <> nil) and SameText(ActionStr, 'toggle_ref_delta') then
+      IkRtgComp.CompensateRefPoseDelta := not IkRtgComp.CompensateRefPoseDelta;
+
+    IkRtgAudit := TIkRetargeterHelper.AuditIkRetargetersInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('retargeterCount', IkRtgAudit.RetargeterCount);
+      OutPayload.Add('totalMappedChains', IkRtgAudit.TotalMappedChains);
+      OutPayload.Add('ikEnabledChainCount', IkRtgAudit.IkEnabledChainCount);
+      OutPayload.Add('refDeltaCompensatedCount', IkRtgAudit.RefDeltaCompensatedCount);
+      OutPayload.Add('maxLimbLengthErrorMeters', IkRtgAudit.MaxLimbLengthErrorMeters);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if IkRtgComp <> nil then
+      begin
+        OutPayload.Add('activeRetargeter', IkRtgComp.Name);
+        OutPayload.Add('scaleRatio', IkRtgComp.PelvisHeightScaleRatio);
+        OutPayload.Add('summaryBadge', IkRtgComp.IkRetargetSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

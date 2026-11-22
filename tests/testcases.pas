@@ -213,6 +213,7 @@ uses
   TestToolBehaviorTree,
   TestToolNiagaraStack,
   TestToolWidgetAnim,
+  TestToolIkRetargeter,
   TestCastleVulkanRHI;
 
 implementation

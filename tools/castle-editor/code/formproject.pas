@@ -700,6 +700,7 @@ type
       MenuItemBehaviorTree: TMenuItem;
       MenuItemNiagaraStack: TMenuItem;
       MenuItemWidgetAnim: TMenuItem;
+      MenuItemIkRetargeter: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -820,6 +821,7 @@ type
     procedure MenuItemBehaviorTreeClick(Sender: TObject);
     procedure MenuItemNiagaraStackClick(Sender: TObject);
     procedure MenuItemWidgetAnimClick(Sender: TObject);
+    procedure MenuItemIkRetargeterClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2980,6 +2982,11 @@ begin
   MenuItemWidgetAnim.Caption := 'UMG Widget Animation Timeline & Anchor Slot Designer...';
   MenuItemWidgetAnim.OnClick := @MenuItemWidgetAnimClick;
   MenuItemDesign.Add(MenuItemWidgetAnim);
+
+  MenuItemIkRetargeter := TMenuItem.Create(MenuItemDesign);
+  MenuItemIkRetargeter.Caption := 'Skeletal IK Retargeter (UIKRetargeter & 7-Chain FK/IK)...';
+  MenuItemIkRetargeter.OnClick := @MenuItemIkRetargeterClick;
+  MenuItemDesign.Add(MenuItemIkRetargeter);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6592,6 +6599,12 @@ procedure TProjectForm.MenuItemWidgetAnimClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowWidgetAnimDialog;
+end;
+
+procedure TProjectForm.MenuItemIkRetargeterClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowIkRetargeterDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

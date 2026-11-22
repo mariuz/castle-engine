@@ -135,7 +135,7 @@ uses
   CastleOctahedralImpostor, CastlePoseSnapshot, CastleGravityField,
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
-  CastleNiagaraStack, CastleWidgetAnim;
+  CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -540,7 +540,7 @@ begin
     shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot studio hub',
     '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
 
-  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 106 UE Studios & 29 MCP Tools) }
+  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 107 UE Studios & 30 MCP Tools) }
   Reg('blueprint_editor', 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)', 'Blueprint',
     shcCharactersAiGas, 381, 'blueprint ublueprint kismet visual scripting eventgraph construction script exec pin variable branch forloop delay timeline breakpoint pascal codegen mcp',
     'EventGraph + Construction Script node VM, Exec/Data pins, latent Delay/Timeline, breakpoints & Pascal nativizer (24th MCP).');
@@ -559,6 +559,9 @@ begin
   Reg('umg_widget_anim', 'UMG Widget Animation Timeline & Anchor Slot Designer (UWidgetBlueprint)', 'UMGAnim',
     shcCinematicsAudioInput, 386, 'umg widget animation timeline uwidgetblueprint uwidgetanimation anchor flower slot opacity scale bounce overshoot forward reverse hover mcp',
     'Multi-track 2D UI keyframe timeline (Opacity/Trans/Scale/Color), Bounce/Overshoot easing, 9-point Anchor Flower & 29th MCP.');
+  Reg('ik_retargeter', 'Skeletal IK Retargeter (UIKRetargeter, T/A-Pose Delta & 7-Chain FK/IK)', 'IKRetarget',
+    shcCharactersAiGas, 387, 'skeletal ik retargeter uikretargeter uikrigdefinition bone chain spine arm leg t pose a pose stride scale foot ik mcp',
+    'Cross-skeleton 7-chain FK/IK retargeter with T/A-pose reference delta compensation, pelvis stride scaling & 30th MCP.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -755,6 +758,8 @@ var
       BumpSub(shcMaterialsVfxLighting);
     if C is TCastleWidgetAnimator then
       BumpSub(shcCinematicsAudioInput);
+    if C is TCastleIkRetargeter then
+      BumpSub(shcCharactersAiGas);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);
