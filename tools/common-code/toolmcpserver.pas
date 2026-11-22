@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1113,6 +1113,16 @@ begin
   AddToolDef('cge_tick_behavior_tree',
     'Spawn, update Blackboard keys, tick Behavior Tree execution (including Observer Aborts & Services), or audit TCastleBehaviorTree components.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Niagara operation: status, step_sim, toggle_module, or spawn_preset (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleNiagaraSystem name (defaults to first Niagara system in design).'));
+  P.Add('deltaSec', MakePropSchema('number', 'Delta seconds for step_sim (default 0.25).'));
+  P.Add('moduleId', MakePropSchema('string', 'ModuleId to enable/disable for toggle_module (e.g. "PU_Attractor").'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: vortex_portal, collision_sparks, or campfire_embers (default vortex_portal).'));
+  AddToolDef('cge_simulate_niagara_stack',
+    'Spawn, toggle stack modules, step simulation, or audit TCastleNiagaraSystem 4-stage modular VFX emitters.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1261,6 +1271,10 @@ var
   BtComp: TCastleBehaviorTree;
   BtPresetVal: TBehaviorTreePreset;
   BtKeyStr: String;
+  NiagAudit: TNiagaraSceneAuditReport;
+  NiagComp: TCastleNiagaraSystem;
+  NiagPresetVal: TNiagaraSystemPreset;
+  NiagModId: String;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2693,6 +2707,79 @@ begin
         OutPayload.Add('activeTree', BtComp.Name);
         OutPayload.Add('runningLeafNodeId', BtComp.RunningLeafNodeId);
         OutPayload.Add('summaryBadge', BtComp.BehaviorTreeSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_simulate_niagara_stack' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    NiagModId := '';
+    MacroMult := 0.25;
+    NiagPresetVal := nspArcaneVortexPortal;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      NiagModId := Trim(ArgsObj.Get('moduleId', ''));
+      MacroMult := ArgsObj.Get('deltaSec', 0.25);
+      if SameText(ArgsObj.Get('preset', ''), 'collision_sparks') then
+        NiagPresetVal := nspAnvilSparksCollisionBurst
+      else if SameText(ArgsObj.Get('preset', ''), 'campfire_embers') then
+        NiagPresetVal := nspCampfireEmberColumn;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'step_sim') or
+       SameText(ActionStr, 'toggle_module') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      NiagComp := TNiagaraStackHelper.SpawnNiagaraPresetInDesign(
+        DesignRoot, DesignOwner, NiagPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Niagara System');
+    end else
+      NiagComp := TNiagaraStackHelper.FindNiagaraSystemByName(DesignRoot, DesignOwner, CompName);
+
+    if (NiagComp <> nil) and SameText(ActionStr, 'toggle_module') and (NiagModId <> '') then
+      NiagComp.ToggleModuleEnabled(NiagModId)
+    else if (NiagComp <> nil) and SameText(ActionStr, 'step_sim') then
+      NiagComp.StepSystem(MacroMult);
+
+    NiagAudit := TNiagaraStackHelper.AuditNiagaraSystemsInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('systemCount', NiagAudit.SystemCount);
+      OutPayload.Add('totalModuleCount', NiagAudit.TotalModuleCount);
+      OutPayload.Add('enabledModuleCount', NiagAudit.EnabledModuleCount);
+      OutPayload.Add('totalActiveParticles', NiagAudit.TotalActiveParticles);
+      OutPayload.Add('totalCollisionEvents', NiagAudit.TotalCollisionEvents);
+      OutPayload.Add('totalSubSparksSpawned', NiagAudit.TotalSubSparksSpawned);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if NiagComp <> nil then
+      begin
+        OutPayload.Add('activeSystem', NiagComp.Name);
+        OutPayload.Add('summaryBadge', NiagComp.NiagaraSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

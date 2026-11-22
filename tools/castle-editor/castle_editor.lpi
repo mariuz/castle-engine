@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="241">
+    <Units Count="243">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1287,6 +1287,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormBehaviorTree"/>
       </Unit240>
+      <Unit241>
+        <Filename Value="../common-code/toolniagarastack.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolNiagaraStack"/>
+      </Unit241>
+      <Unit242>
+        <Filename Value="code/formniagarastack.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormNiagaraStack"/>
+      </Unit242>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

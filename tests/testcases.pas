@@ -211,6 +211,7 @@ uses
   TestToolPcgGraph,
   TestToolAnimBlueprint,
   TestToolBehaviorTree,
+  TestToolNiagaraStack,
   TestCastleVulkanRHI;
 
 implementation

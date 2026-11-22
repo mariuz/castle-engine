@@ -134,7 +134,8 @@ uses
   CastleSubstrateMaterial, CastleFireGrid2D, CastleGameplayMessenger,
   CastleOctahedralImpostor, CastlePoseSnapshot, CastleGravityField,
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
-  CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree;
+  CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
+  CastleNiagaraStack;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -539,7 +540,7 @@ begin
     shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot studio hub',
     '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
 
-  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 104 UE Studios & 27 MCP Tools) }
+  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 105 UE Studios & 28 MCP Tools) }
   Reg('blueprint_editor', 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)', 'Blueprint',
     shcCharactersAiGas, 381, 'blueprint ublueprint kismet visual scripting eventgraph construction script exec pin variable branch forloop delay timeline breakpoint pascal codegen mcp',
     'EventGraph + Construction Script node VM, Exec/Data pins, latent Delay/Timeline, breakpoints & Pascal nativizer (24th MCP).');
@@ -552,6 +553,9 @@ begin
   Reg('behavior_tree', 'Behavior Tree & Blackboard Editor (Observer Aborts, Services & Parallel)', 'BehavTree',
     shcCharactersAiGas, 384, 'behavior tree ubehaviortree blackboard selector sequence simple parallel decorator observer aborts lower priority self service moveto mcp',
     'Composites (Selector/Sequence/SimpleParallel), Blackboard Decorators with Observer Aborts, Services & 27th MCP tool.');
+  Reg('niagara_stack', 'Niagara Modular Emitter Stack & Curve Editor (4-Stage VFX & Collisions)', 'Niagara',
+    shcMaterialsVfxLighting, 385, 'niagara uniagarasystem modular emitter stack spawn update curl noise point attractor drag size curve collision bounce spark mcp',
+    'Reorderable 4-stage Niagara module stack, Curl Noise, Point Attractor, Size/Color curves, collision sub-sparks & 28th MCP.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -744,6 +748,8 @@ var
       BumpSub(shcCharactersAiGas);
     if C is TCastleBehaviorTree then
       BumpSub(shcCharactersAiGas);
+    if C is TCastleNiagaraSystem then
+      BumpSub(shcMaterialsVfxLighting);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

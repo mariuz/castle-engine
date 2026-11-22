@@ -377,6 +377,7 @@ contains
   castlepcggraph in '..\..\src\scene\castlepcggraph.pas',
   castleanimblueprint in '..\..\src\scene\castleanimblueprint.pas',
   castlebehaviortree in '..\..\src\scene\castlebehaviortree.pas',
+  castleniagarastack in '..\..\src\scene\castleniagarastack.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

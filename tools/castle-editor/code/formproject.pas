@@ -698,6 +698,7 @@ type
       MenuItemPcgGraph: TMenuItem;
       MenuItemAnimBlueprint: TMenuItem;
       MenuItemBehaviorTree: TMenuItem;
+      MenuItemNiagaraStack: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -816,6 +817,7 @@ type
     procedure MenuItemPcgGraphClick(Sender: TObject);
     procedure MenuItemAnimBlueprintClick(Sender: TObject);
     procedure MenuItemBehaviorTreeClick(Sender: TObject);
+    procedure MenuItemNiagaraStackClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2966,6 +2968,11 @@ begin
   MenuItemBehaviorTree.Caption := 'Behavior Tree & Blackboard Visual Editor (Observer Aborts)...';
   MenuItemBehaviorTree.OnClick := @MenuItemBehaviorTreeClick;
   MenuItemDesign.Add(MenuItemBehaviorTree);
+
+  MenuItemNiagaraStack := TMenuItem.Create(MenuItemDesign);
+  MenuItemNiagaraStack.Caption := 'Niagara Modular Emitter Stack & Curve Editor...';
+  MenuItemNiagaraStack.OnClick := @MenuItemNiagaraStackClick;
+  MenuItemDesign.Add(MenuItemNiagaraStack);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6566,6 +6573,12 @@ procedure TProjectForm.MenuItemBehaviorTreeClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowBehaviorTreeDialog;
+end;
+
+procedure TProjectForm.MenuItemNiagaraStackClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowNiagaraStackDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

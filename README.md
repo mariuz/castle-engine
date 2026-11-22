@@ -24,12 +24,17 @@ See https://castle-engine.io/features for the complete list of engine features.
 Unreal Engine 5.x Editor Modernization & Blueprint Visual Scripting
 -------------------------------------------------------------------
 
-This branch modernizes `castle-editor` and the Castle Game Engine runtime toward **Unreal Engine 5.5 parity** across **384 Phases**, **104 Specialized Editor Studios** (`Ctrl+Shift+P` Studio Hub), and an embedded **27-Tool Model Context Protocol (MCP) JSON-RPC 2.0 Server** (`http://127.0.0.1:8765/mcp`):
+This branch modernizes `castle-editor` and the Castle Game Engine runtime toward **Unreal Engine 5.5 parity** across **385 Phases**, **105 Specialized Editor Studios** (`Ctrl+Shift+P` Studio Hub), and an embedded **28-Tool Model Context Protocol (MCP) JSON-RPC 2.0 Server** (`http://127.0.0.1:8765/mcp`):
 
 ![Castle Game Engine — Blueprint Visual Scripting Editor (EventGraph, Construction Script & Nativizer)](docs/images/blueprint_editor.png)
 
+![Castle Game Engine — Animation Blueprint Editor (AnimGraph Pose Pipeline & AnimNotify Timeline)](docs/images/anim_blueprint_editor.png)
+
+![Castle Game Engine — Behavior Tree & Blackboard Visual Editor (Composites, Decorator Observer Aborts & Services)](docs/images/behavior_tree_editor.png)
+
 * **Blueprint Visual Scripting Editor (`TCastleBlueprint`)**: Interactive 2D **EventGraph** (`EventBeginPlay`, `EventTick`, `EventActorBeginOverlap`, `CustomEvent`) and live in-editor **Construction Script**, white `Exec` wires + color-coded typed `Data` pins, member variables (`Get`/`Set`), flow control (`Branch`, `Sequence`, `ForLoop`, `DoOnce`, `FlipFlop`, `Gate`), latent `Delay` & `Timeline` (`0..1` Hermite curve) schedulers, node **Breakpoints (`F9`)** with live Wire Watch & execution-trace highlighting, and **Blueprint Nativization** to FreePascal `TCastleBehavior` units.
-* **PCG Visual Node Graph (`TCastlePcgGraph`) & Animation Blueprint (`TCastleAnimBlueprint`)**: Directed point-cloud pipelines (`Surface/Spline Sampler`, `Density/Slope Filter`, `Difference`, `Self-Pruning`, per-node point inspection) and visual `AnimGraph` pose pipelines (`State Machine`, `Layered Blend Per Bone`, `Cached Pose`, `Two-Bone IK`, looping `AnimNotify` & `AnimNotifyState` tracks).
+* **Animation Blueprint (`TCastleAnimBlueprint`) & Behavior Tree (`TCastleBehaviorTree`)**: Visual `AnimGraph` pose evaluation DAG (`State Machine`, `Layered Blend Per Bone`, `Cached Pose`, `Two-Bone IK`, looping `AnimNotify` & `AnimNotifyState` tracks) and `UBehaviorTree` AI editor (`Selector`, `Sequence`, `SimpleParallel`, `ExecutionIndex` priority badges, Blackboard-driven `Decorators` with `Self`/`LowerPriority`/`Both` **Observer Aborts**, and periodic branch `Services`).
+* **PCG Visual Node Graph (`TCastlePcgGraph`) & Niagara Modular Emitter Stack (`TCastleNiagaraSystem`)**: Directed point-cloud pipelines (`Surface/Spline Sampler`, `Density/Slope Filter`, `Difference`, `Self-Pruning`, per-node point inspection) and reorderable 4-stage Niagara VFX stacks (`Emitter Spawn`, `Emitter Update`, `Particle Spawn`, `Particle Update` with 3D Curl Noise, Point Attractor, Size/Color-over-Life LUT curves, and Collision sub-spark events).
 * **Roadmap & Reference Guide**: See [`EDITOR_ROADMAP.md`](EDITOR_ROADMAP.md) and [`docs/EDITOR_MODERNIZATION_GUIDE.md`](docs/EDITOR_MODERNIZATION_GUIDE.md).
 
 Installation and building your first application
