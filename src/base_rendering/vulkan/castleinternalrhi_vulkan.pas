@@ -7278,6 +7278,7 @@ begin
     Exit(FDeviceAddress);
   if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
      VulkanDevice.SupportsBufferDeviceAddress and (FHandle <> VK_NULL_HANDLE) and
+     ((BuildVkUsageFlags and VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) <> 0) and
      Assigned(vkGetBufferDeviceAddress) then
   begin
     FillChar(AddrInfo, SizeOf(AddrInfo), 0);
@@ -23129,7 +23130,7 @@ begin
   if (FTLASBuffer = nil) or (FTLASBuffer.Desc.Size < ReqBytes) then
   begin
     FreeAndNil(FTLASBuffer);
-    BufDesc := TRHIBufferDesc.Create(ReqBytes, [buStorage, buTransferDst], muCpuToGpu,
+    BufDesc := TRHIBufferDesc.Create(ReqBytes, [buStorage, buTransferDst, buShaderDeviceAddress], muCpuToGpu,
       'TopLevelAccelerationStructureBuffer');
     FTLASBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
   end;
