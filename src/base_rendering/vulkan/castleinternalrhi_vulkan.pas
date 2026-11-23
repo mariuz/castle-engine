@@ -188,6 +188,7 @@ type
   private
     FHandle: VkDescriptorSetLayout;
     FUsesUpdateAfterBind: Boolean;
+    FAllBindingsUpdateAfterBind: Boolean;
     FBindings: array of TRHIDescriptorBindingDesc;
   protected
     procedure ReleaseDeviceResources; override;
@@ -199,6 +200,7 @@ type
       out ADescriptorType: TRHIDescriptorType): Boolean;
     property Handle: VkDescriptorSetLayout read FHandle;
     property UsesUpdateAfterBind: Boolean read FUsesUpdateAfterBind;
+    property AllBindingsUpdateAfterBind: Boolean read FAllBindingsUpdateAfterBind;
   end;
 
   TVulkanDescriptorPoolAllocator = class;
@@ -7384,6 +7386,7 @@ var
   ViewInfo: VkImageViewCreateInfo;
   MemReq: VkMemoryRequirements;
   AllocInfo: VkMemoryAllocateInfo;
+  FmtProps: VkFormatProperties;
   ApproxBytes: VkDeviceSize;
 begin
   NegotiatedDesc := ADesc;
@@ -7475,6 +7478,19 @@ begin
   if tuDepthStencil in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   if tuTransferSrc in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   if tuTransferDst in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  { On Metal / MoltenVK (Portability Subset), scaled vkCmdBlitImage mipmap generation renders
+    via an internal MTLRenderCommandEncoder when MTLBlitCommandEncoder cannot filter-scale;
+    include COLOR_ATTACHMENT_BIT when supported by the optimal-tiling format so MTLTextureUsageRenderTarget is set. }
+  if ADevice.IsPortabilitySubsetDevice and (FDesc.MipLevels > 1) and
+     (tuTransferSrc in FDesc.Usage) and (tuTransferDst in FDesc.Usage) and
+     ((ImgInfo.usage and VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) = 0) and
+     (ADevice.PhysicalDevice <> nil) and Assigned(vkGetPhysicalDeviceFormatProperties) then
+  begin
+    FillChar(FmtProps, SizeOf(FmtProps), 0);
+    vkGetPhysicalDeviceFormatProperties(ADevice.PhysicalDevice, ImgInfo.format, @FmtProps);
+    if (FmtProps.optimalTilingFeatures and VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) <> 0 then
+      ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  end;
 
   CheckVk(vkCreateImage(ADevice.Handle, @ImgInfo, nil, @FImage), 'vkCreateImage');
 
@@ -7538,6 +7554,7 @@ var
   NegotiatedDesc: TRHITextureDesc;
   ImgInfo: VkImageCreateInfo;
   ViewInfo: VkImageViewCreateInfo;
+  FmtProps: VkFormatProperties;
   CarrierBytes: VkDeviceSize;
 begin
   NegotiatedDesc := ADesc;
@@ -7615,6 +7632,19 @@ begin
   if tuDepthStencil in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   if tuTransferSrc in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
   if tuTransferDst in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  { On Metal / MoltenVK (Portability Subset), scaled vkCmdBlitImage mipmap generation renders
+    via an internal MTLRenderCommandEncoder when MTLBlitCommandEncoder cannot filter-scale;
+    include COLOR_ATTACHMENT_BIT when supported by the optimal-tiling format so MTLTextureUsageRenderTarget is set. }
+  if ADevice.IsPortabilitySubsetDevice and (FDesc.MipLevels > 1) and
+     (tuTransferSrc in FDesc.Usage) and (tuTransferDst in FDesc.Usage) and
+     ((ImgInfo.usage and VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) = 0) and
+     (ADevice.PhysicalDevice <> nil) and Assigned(vkGetPhysicalDeviceFormatProperties) then
+  begin
+    FillChar(FmtProps, SizeOf(FmtProps), 0);
+    vkGetPhysicalDeviceFormatProperties(ADevice.PhysicalDevice, ImgInfo.format, @FmtProps);
+    if (FmtProps.optimalTilingFeatures and VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) <> 0 then
+      ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  end;
 
   CheckVk(vkCreateImage(ADevice.Handle, @ImgInfo, nil, @FImage), 'vkCreateImage(Carrier)');
 
@@ -7980,9 +8010,9 @@ end;
 procedure TVulkanRHITexture.RecordVkMipmapBlits(const ACmd: VkCommandBuffer);
 var
   Barrier: VkImageMemoryBarrier;
-  Blit: VkImageBlit;
+  Blits: array of VkImageBlit;
   MipWidth, MipHeight, MipDepth, NextWidth, NextHeight, NextDepth: Integer;
-  LayerCount, I: Cardinal;
+  LayerCount, LayerIdx, I: Cardinal;
 begin
   if (ACmd = nil) or (FDesc.MipLevels <= 1) or
      not Assigned(vkCmdBlitImage) or not Assigned(vkCmdPipelineBarrier) then
@@ -8047,27 +8077,31 @@ begin
     NextHeight := Max(1, MipHeight div 2);
     NextDepth := Max(1, MipDepth div 2);
 
-    FillChar(Blit, SizeOf(Blit), 0);
-    Blit.srcOffsets[1].x := MipWidth;
-    Blit.srcOffsets[1].y := MipHeight;
-    Blit.srcOffsets[1].z := MipDepth;
-    Blit.srcSubresource.aspectMask := FAspectMask;
-    Blit.srcSubresource.mipLevel := I - 1;
-    Blit.srcSubresource.baseArrayLayer := 0;
-    Blit.srcSubresource.layerCount := LayerCount;
+    SetLength(Blits, LayerCount);
+    for LayerIdx := 0 to LayerCount - 1 do
+    begin
+      FillChar(Blits[LayerIdx], SizeOf(VkImageBlit), 0);
+      Blits[LayerIdx].srcOffsets[1].x := MipWidth;
+      Blits[LayerIdx].srcOffsets[1].y := MipHeight;
+      Blits[LayerIdx].srcOffsets[1].z := MipDepth;
+      Blits[LayerIdx].srcSubresource.aspectMask := FAspectMask;
+      Blits[LayerIdx].srcSubresource.mipLevel := I - 1;
+      Blits[LayerIdx].srcSubresource.baseArrayLayer := LayerIdx;
+      Blits[LayerIdx].srcSubresource.layerCount := 1;
 
-    Blit.dstOffsets[1].x := NextWidth;
-    Blit.dstOffsets[1].y := NextHeight;
-    Blit.dstOffsets[1].z := NextDepth;
-    Blit.dstSubresource.aspectMask := FAspectMask;
-    Blit.dstSubresource.mipLevel := I;
-    Blit.dstSubresource.baseArrayLayer := 0;
-    Blit.dstSubresource.layerCount := LayerCount;
+      Blits[LayerIdx].dstOffsets[1].x := NextWidth;
+      Blits[LayerIdx].dstOffsets[1].y := NextHeight;
+      Blits[LayerIdx].dstOffsets[1].z := NextDepth;
+      Blits[LayerIdx].dstSubresource.aspectMask := FAspectMask;
+      Blits[LayerIdx].dstSubresource.mipLevel := I;
+      Blits[LayerIdx].dstSubresource.baseArrayLayer := LayerIdx;
+      Blits[LayerIdx].dstSubresource.layerCount := 1;
+    end;
 
     vkCmdBlitImage(ACmd,
       FImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
       FImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-      1, @Blit, VK_FILTER_LINEAR);
+      LayerCount, @Blits[0], VK_FILTER_LINEAR);
 
     { Transition source mip level I - 1 to SHADER_READ_ONLY_OPTIMAL }
     Barrier.subresourceRange.baseMipLevel := I - 1;
@@ -8560,6 +8594,7 @@ var
 begin
   inherited Create(ADevice, '');
   FUsesUpdateAfterBind := False;
+  FAllBindingsUpdateAfterBind := Length(Bindings) > 0;
   HasAnyBindingFlags := False;
   HasSamplerBinding := False;
   HasDynamicBuffer := False;
@@ -8615,10 +8650,12 @@ begin
       begin
         VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
         FUsesUpdateAfterBind := True;
-      end;
+      end else
+        FAllBindingsUpdateAfterBind := False;
       if dbfVariableDescriptorCount in FBindings[I].BindingFlags then
         VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-    end;
+    end else
+      FAllBindingsUpdateAfterBind := False;
   end;
 
   FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
@@ -9227,7 +9264,7 @@ begin
       previous handle into FDeferredDeletions so pending command buffers remain untouched. }
     if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
        (not FUsesCustomPool) and
-       ((FLayout = nil) or (not FLayout.UsesUpdateAfterBind)) and
+       ((FLayout = nil) or (not FLayout.AllBindingsUpdateAfterBind)) and
        (FBoundIdleEpoch <> 0) and
        (FBoundIdleEpoch = VulkanDevice.FCompletedIdleEpoch) then
     begin
@@ -30356,7 +30393,7 @@ begin
     FreeAndNil(ASwapchainTex.FPresentReadbackShadow);
     ShadowDesc := TRHITextureDesc.Create2D(
       ASwapchainTex.Desc.Width, ASwapchainTex.Desc.Height,
-      ASwapchainTex.Desc.Format, [tuTransferDst, tuTransferSrc], 1);
+      ASwapchainTex.Desc.Format, [tuSampled, tuTransferDst, tuTransferSrc], 1);
     ShadowDesc.DebugName := 'SwapchainPresentReadbackShadow';
     ASwapchainTex.FPresentReadbackShadow := TVulkanRHITexture.Create(Self, ShadowDesc);
   end;

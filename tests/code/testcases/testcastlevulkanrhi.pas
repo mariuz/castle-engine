@@ -33520,7 +33520,9 @@ begin
     AssertTrue('Metallic sphere lower hemisphere (33,46) must reflect -Y warm amber ground via Split-Sum IBL (R > B + 50, R > 120), got R=' +
       IntToStr(MetalLowerPx.X) + ' G=' + IntToStr(MetalLowerPx.Y) + ' B=' + IntToStr(MetalLowerPx.Z),
       (MetalLowerPx.X > MetalLowerPx.Z + 50) and (MetalLowerPx.X > 120));
-    AssertTrue('Rough dielectric sphere (95,64) with zero punctual lights must receive non-black diffuse+specular IBL (R+G+B > 180)',
+    AssertTrue(Format(
+      'Rough dielectric sphere (95,64) with zero punctual lights must receive non-black diffuse+specular IBL (R+G+B > 180), got R=%d G=%d B=%d',
+      [RoughCenterPx.X, RoughCenterPx.Y, RoughCenterPx.Z]),
       Integer(RoughCenterPx.X) + Integer(RoughCenterPx.Y) + Integer(RoughCenterPx.Z) > 180);
 
     RealDev.AssertZeroValidationErrors('Phase114.EnvironmentLightSplitSumIBL3DViewport');
