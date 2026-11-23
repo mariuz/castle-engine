@@ -3256,6 +3256,20 @@ begin
   AssertEquals('Extension name must be VK_EXT_descriptor_indexing',
     String(VK_EXT_descriptor_indexing), String(ReqExts[0]));
 
+  { Metal / MoltenVK argument-buffer sampler limits (96) must clamp MaxBindlessTextures with 24-slot headroom (72) }
+  Props.maxPerStageDescriptorUpdateAfterBindSamplers := 96;
+  Props.maxDescriptorSetUpdateAfterBindSamplers := 96;
+  ResolveDescriptorIndexingConfig(VK_API_VERSION_1_2, False, False,
+    Features, Props, 1208, UseBindless, UseUpdateAfterBind, ClampedMax, ReqExts);
+  AssertEquals('Metal 96 UAB sampler limit must clamp MaxBindlessTextures to 72 (96 - 24 headroom)',
+    72, ClampedMax);
+  ResolveDescriptorIndexingConfig(VK_API_VERSION_1_2, False, False,
+    Features, Props, ClampedMax, UseBindless, UseUpdateAfterBind, ClampedMax, ReqExts);
+  AssertEquals('Repeated ResolveDescriptorIndexingConfig clamp must remain idempotent at 72',
+    72, ClampedMax);
+  Props.maxPerStageDescriptorUpdateAfterBindSamplers := 0;
+  Props.maxDescriptorSetUpdateAfterBindSamplers := 0;
+
   { Missing descriptorBindingPartiallyBound must disable bindless }
   Features.descriptorBindingPartiallyBound := VK_FALSE;
   ResolveDescriptorIndexingConfig(VK_API_VERSION_1_3, True, True,

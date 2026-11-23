@@ -101,6 +101,8 @@ type
     FLastRenderedMipLevel: Cardinal;
     FLastRenderedArrayLayer: Cardinal;
     FRenderedLayerMask: Cardinal;
+    FPresentReadbackShadow: TVulkanRHITexture;
+    FPresentReadbackStaging: TVulkanRHIBuffer;
     function VulkanDevice: TVulkanRHIDevice;
     function GetSubresourceViewCount: Cardinal;
     procedure RecordVkMipmapBlits(const ACmd: VkCommandBuffer);
@@ -4583,6 +4585,7 @@ type
     FDriverInfo: String;
     FIsPortabilitySubsetDevice: Boolean;
     FPortabilitySubsetCaps: TVulkanPortabilitySubsetCaps;
+    FMaxPerStageDescriptorSamplers: Cardinal;
     FPortabilitySubsetFeatures: VkPhysicalDevicePortabilitySubsetFeaturesKHR;
     FInstanceHasSurfaceExtension: Boolean;
     FCompletedIdleEpoch: UInt64;
@@ -4660,6 +4663,9 @@ type
       const AColorFormat, ADepthFormat: TRHIPixelFormat);
     procedure CreateFrameContexts;
     procedure CreateDescriptorPool;
+    function NeedsUpdateAfterBindSamplerLayouts: Boolean;
+    procedure CaptureSwapchainReadbackShadowBeforePresent(
+      const ACmdList: TVulkanRHICommandList; const ASwapchainTex: TVulkanRHITexture);
     procedure ClearPipelineLibraries;
     procedure ClearFallbackFramebuffers;
     procedure ClearFallbackRenderPasses;
@@ -5028,6 +5034,7 @@ type
     property DriverInfo: String read FDriverInfo;
     property IsPortabilitySubsetDevice: Boolean read FIsPortabilitySubsetDevice write FIsPortabilitySubsetDevice;
     property PortabilitySubsetCaps: TVulkanPortabilitySubsetCaps read FPortabilitySubsetCaps write FPortabilitySubsetCaps;
+    property MaxPerStageDescriptorSamplers: Cardinal read FMaxPerStageDescriptorSamplers;
     property DebugObjectsNamedCount: Cardinal read FDebugObjectsNamedCount;
     property LastNamedDebugObject: String read FLastNamedDebugObject;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt;
@@ -5688,6 +5695,23 @@ begin
     HwLimit := Min(HwLimit, AProps.maxPerStageDescriptorUpdateAfterBindSampledImages);
   if AProps.maxDescriptorSetUpdateAfterBindSampledImages > 0 then
     HwLimit := Min(HwLimit, AProps.maxDescriptorSetUpdateAfterBindSampledImages);
+  { CombinedImageSampler bindless arrays also count against per-stage and per-pipeline-layout
+    sampler limits (VUID-VkPipelineLayoutCreateInfo-descriptorType-03022 / 03036, e.g. 96 on Metal).
+    Reserve 24 slots of headroom for scene/material/effect sets when hardware limit > 32. }
+  if AProps.maxPerStageDescriptorUpdateAfterBindSamplers > 0 then
+  begin
+    if AProps.maxPerStageDescriptorUpdateAfterBindSamplers > 32 then
+      HwLimit := Min(HwLimit, AProps.maxPerStageDescriptorUpdateAfterBindSamplers - 24)
+    else
+      HwLimit := Min(HwLimit, AProps.maxPerStageDescriptorUpdateAfterBindSamplers);
+  end;
+  if AProps.maxDescriptorSetUpdateAfterBindSamplers > 0 then
+  begin
+    if AProps.maxDescriptorSetUpdateAfterBindSamplers > 32 then
+      HwLimit := Min(HwLimit, AProps.maxDescriptorSetUpdateAfterBindSamplers - 24)
+    else
+      HwLimit := Min(HwLimit, AProps.maxDescriptorSetUpdateAfterBindSamplers);
+  end;
 
   AClampedMaxTextures := Max(Cardinal(1), HwLimit);
 end;
@@ -7888,6 +7912,8 @@ end;
 
 destructor TVulkanRHITexture.Destroy;
 begin
+  FreeAndNil(FPresentReadbackShadow);
+  FreeAndNil(FPresentReadbackStaging);
   SetLength(FHostPixels, 0);
   inherited;
 end;
@@ -8528,13 +8554,30 @@ var
   VkBindings: array of VkDescriptorSetLayoutBinding;
   VkBindingFlags: array of VkDescriptorBindingFlags;
   BindingFlagsInfo: VkDescriptorSetLayoutBindingFlagsCreateInfo;
-  HasAnyBindingFlags: Boolean;
+  HasAnyBindingFlags, HasSamplerBinding, HasDynamicBuffer, AutoPromoteSamplersToUAB: Boolean;
   LayoutInfo: VkDescriptorSetLayoutCreateInfo;
   I: Integer;
 begin
   inherited Create(ADevice, '');
   FUsesUpdateAfterBind := False;
   HasAnyBindingFlags := False;
+  HasSamplerBinding := False;
+  HasDynamicBuffer := False;
+  for I := 0 to High(Bindings) do
+  begin
+    if Bindings[I].DescriptorType in [dtCombinedImageSampler, dtSampler] then
+      HasSamplerBinding := True;
+    if Bindings[I].DescriptorType = dtUniformBufferDynamic then
+      HasDynamicBuffer := True;
+  end;
+  { On Metal / Portability devices where non-UAB discrete sampler registers are capped at 16
+    (VUID-VkPipelineLayoutCreateInfo-descriptorType-03016) while Metal Argument Buffers
+    (UpdateAfterBind) support 96+ samplers per stage, promote sampler bindings in non-dynamic-UBO
+    layouts to VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT. }
+  AutoPromoteSamplersToUAB := (ADevice <> nil) and
+    ADevice.NeedsUpdateAfterBindSamplerLayouts and
+    HasSamplerBinding and (not HasDynamicBuffer);
+
   SetLength(FBindings, Length(Bindings));
   SetLength(VkBindings, Length(Bindings));
   SetLength(VkBindingFlags, Length(Bindings));
@@ -8556,20 +8599,24 @@ begin
       dtAccelerationStructure: VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     end;
 
+    if AutoPromoteSamplersToUAB and
+       (Bindings[I].DescriptorType in [dtCombinedImageSampler, dtSampler]) then
+      Include(FBindings[I].BindingFlags, dbfUpdateAfterBind);
+
     VkBindingFlags[I] := 0;
-    if Bindings[I].BindingFlags <> [] then
+    if FBindings[I].BindingFlags <> [] then
     begin
       HasAnyBindingFlags := True;
-      if dbfPartiallyBound in Bindings[I].BindingFlags then
+      if dbfPartiallyBound in FBindings[I].BindingFlags then
         VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
-      if dbfUpdateUnusedWhilePending in Bindings[I].BindingFlags then
+      if dbfUpdateUnusedWhilePending in FBindings[I].BindingFlags then
         VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
-      if dbfUpdateAfterBind in Bindings[I].BindingFlags then
+      if dbfUpdateAfterBind in FBindings[I].BindingFlags then
       begin
         VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
         FUsesUpdateAfterBind := True;
       end;
-      if dbfVariableDescriptorCount in Bindings[I].BindingFlags then
+      if dbfVariableDescriptorCount in FBindings[I].BindingFlags then
         VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
     end;
   end;
@@ -26652,7 +26699,8 @@ begin
   FTimestampProfiler := TCastleVulkanTimestampProfiler.Create(Self);
   FSwapchainSurfaces := TVulkanSwapchainSurfaceList.Create(True);
   for I := 0 to MaxFramesInFlight - 1 do
-    FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
+    FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
+      FDevice, 512, False, 4096, NeedsUpdateAfterBindSamplerLayouts, FSupportsAccelerationStructure);
 end;
 
 procedure TVulkanRHIDevice.ClearPipelineLibraries;
@@ -28224,6 +28272,7 @@ begin
 
   FDeviceId := ChosenProps.deviceID;
   FDeviceApiVersion := ChosenProps.apiVersion;
+  FMaxPerStageDescriptorSamplers := ChosenProps.limits.maxPerStageDescriptorSamplers;
   FDriverId := 0;
   FDriverName := '';
   FDriverInfo := '';
@@ -28358,6 +28407,20 @@ begin
       RequestedBindlessMax := Min(RequestedBindlessMax, ChosenProps.limits.maxPerStageDescriptorSampledImages);
     if ChosenProps.limits.maxDescriptorSetSampledImages > 0 then
       RequestedBindlessMax := Min(RequestedBindlessMax, ChosenProps.limits.maxDescriptorSetSampledImages);
+    if ChosenProps.limits.maxPerStageDescriptorSamplers > 0 then
+    begin
+      if ChosenProps.limits.maxPerStageDescriptorSamplers > 32 then
+        RequestedBindlessMax := Min(RequestedBindlessMax, ChosenProps.limits.maxPerStageDescriptorSamplers - 24)
+      else
+        RequestedBindlessMax := Min(RequestedBindlessMax, ChosenProps.limits.maxPerStageDescriptorSamplers);
+    end;
+    if ChosenProps.limits.maxDescriptorSetSamplers > 0 then
+    begin
+      if ChosenProps.limits.maxDescriptorSetSamplers > 32 then
+        RequestedBindlessMax := Min(RequestedBindlessMax, ChosenProps.limits.maxDescriptorSetSamplers - 24)
+      else
+        RequestedBindlessMax := Min(RequestedBindlessMax, ChosenProps.limits.maxDescriptorSetSamplers);
+    end;
   end;
 
   ResolveDescriptorIndexingConfig(
@@ -30242,8 +30305,102 @@ begin
     CheckVk(vkCreateFence(FDevice, @FenceInfo, nil, @FFrames[I].InFlightFence), 'vkCreateFence');
     FFrames[I].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
     if FFrames[I].TransientDescriptorAllocator = nil then
-      FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
+      FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
+        FDevice, 512, False, 4096, NeedsUpdateAfterBindSamplerLayouts, FSupportsAccelerationStructure);
   end;
+end;
+
+function TVulkanRHIDevice.NeedsUpdateAfterBindSamplerLayouts: Boolean;
+begin
+  Result := (FMaxPerStageDescriptorSamplers > 0) and
+    (FMaxPerStageDescriptorSamplers < 32) and
+    FSupportsBindlessUpdateAfterBind;
+end;
+
+procedure TVulkanRHIDevice.CaptureSwapchainReadbackShadowBeforePresent(
+  const ACmdList: TVulkanRHICommandList; const ASwapchainTex: TVulkanRHITexture);
+var
+  ShadowDesc: TRHITextureDesc;
+  StagingDesc: TRHIBufferDesc;
+  Bpp, ByteSize: PtrUInt;
+  Region: VkBufferImageCopy;
+  BufBarrier: VkBufferMemoryBarrier;
+begin
+  if (not FValidationLayerActive) or
+     (ACmdList = nil) or (ACmdList.Handle = nil) or
+     (ASwapchainTex = nil) or ASwapchainTex.FOwnsImage or
+     (ASwapchainTex.CurrentState in [rsUndefined, rsPresent]) or
+     (ASwapchainTex.Image = VK_NULL_HANDLE) or
+     (not (tuTransferSrc in ASwapchainTex.Desc.Usage)) or
+     (ASwapchainTex.Desc.Width = 0) or (ASwapchainTex.Desc.Height = 0) or
+     (not Assigned(vkCmdCopyImageToBuffer)) or
+     (not Assigned(vkCmdCopyBufferToImage)) then
+    Exit;
+
+  case ASwapchainTex.Desc.Format of
+    pfRGBA32_Float: Bpp := 16;
+    pfRGBA16_Float: Bpp := 8;
+    pfRG16_Float, pfR32_Float: Bpp := 4;
+    pfR16_Float, pfRG8_UNorm: Bpp := 2;
+    pfR8_UNorm: Bpp := 1;
+  else
+    Bpp := 4;
+  end;
+  ByteSize := PtrUInt(ASwapchainTex.Desc.Width) * PtrUInt(ASwapchainTex.Desc.Height) * Bpp;
+
+  if (ASwapchainTex.FPresentReadbackShadow = nil) or
+     (ASwapchainTex.FPresentReadbackShadow.Desc.Width <> ASwapchainTex.Desc.Width) or
+     (ASwapchainTex.FPresentReadbackShadow.Desc.Height <> ASwapchainTex.Desc.Height) or
+     (ASwapchainTex.FPresentReadbackShadow.Desc.Format <> ASwapchainTex.Desc.Format) then
+  begin
+    FreeAndNil(ASwapchainTex.FPresentReadbackShadow);
+    ShadowDesc := TRHITextureDesc.Create2D(
+      ASwapchainTex.Desc.Width, ASwapchainTex.Desc.Height,
+      ASwapchainTex.Desc.Format, [tuTransferDst, tuTransferSrc], 1);
+    ShadowDesc.DebugName := 'SwapchainPresentReadbackShadow';
+    ASwapchainTex.FPresentReadbackShadow := TVulkanRHITexture.Create(Self, ShadowDesc);
+  end;
+
+  if (ASwapchainTex.FPresentReadbackStaging = nil) or
+     (ASwapchainTex.FPresentReadbackStaging.Desc.Size < ByteSize) then
+  begin
+    FreeAndNil(ASwapchainTex.FPresentReadbackStaging);
+    StagingDesc := TRHIBufferDesc.Create(
+      ByteSize, [buTransferSrc, buTransferDst], muGpuOnly, 'SwapchainPresentReadbackStaging');
+    ASwapchainTex.FPresentReadbackStaging := TVulkanRHIBuffer.Create(Self, StagingDesc, nil);
+  end;
+
+  ACmdList.TransitionTexture(ASwapchainTex, rsTransferSrc);
+  FillChar(Region, SizeOf(Region), 0);
+  Region.imageSubresource.aspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
+  Region.imageSubresource.layerCount := 1;
+  Region.imageExtent.width := ASwapchainTex.Desc.Width;
+  Region.imageExtent.height := ASwapchainTex.Desc.Height;
+  Region.imageExtent.depth := 1;
+
+  vkCmdCopyImageToBuffer(ACmdList.Handle, ASwapchainTex.Image,
+    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, ASwapchainTex.FPresentReadbackStaging.Handle, 1, @Region);
+
+  if Assigned(vkCmdPipelineBarrier) then
+  begin
+    FillChar(BufBarrier, SizeOf(BufBarrier), 0);
+    BufBarrier.sType := VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    BufBarrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+    BufBarrier.dstAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
+    BufBarrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier.buffer := ASwapchainTex.FPresentReadbackStaging.Handle;
+    BufBarrier.offset := 0;
+    BufBarrier.size := VK_WHOLE_SIZE;
+    vkCmdPipelineBarrier(ACmdList.Handle,
+      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      0, 0, nil, 1, @BufBarrier, 0, nil);
+  end;
+
+  ACmdList.TransitionTexture(ASwapchainTex.FPresentReadbackShadow, rsTransferDst);
+  vkCmdCopyBufferToImage(ACmdList.Handle, ASwapchainTex.FPresentReadbackStaging.Handle,
+    ASwapchainTex.FPresentReadbackShadow.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, @Region);
+  ASwapchainTex.FPresentReadbackShadow.FRenderedLayerMask := ASwapchainTex.FRenderedLayerMask;
 end;
 
 procedure TVulkanRHIDevice.CreateDescriptorPool;
@@ -30262,7 +30419,8 @@ begin
   if FFrames[FFrameIndex].CommandList = nil then
     FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
   if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
-    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
+    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
+      FDevice, 512, False, 4096, NeedsUpdateAfterBindSamplerLayouts, FSupportsAccelerationStructure);
 
   Frame := FFrames[FFrameIndex];
 
@@ -30383,7 +30541,11 @@ begin
   if (FCurrentSwapchainImageIndex < Cardinal(Length(FSwapchainColorTextures))) and
      (FSwapchainColorTextures[FCurrentSwapchainImageIndex] <> nil) and
      ((FSwapchain <> VK_NULL_HANDLE) or (FDevice = nil)) then
+  begin
+    CaptureSwapchainReadbackShadowBeforePresent(
+      Frame.CommandList, FSwapchainColorTextures[FCurrentSwapchainImageIndex]);
     Frame.CommandList.TransitionTexture(FSwapchainColorTextures[FCurrentSwapchainImageIndex], rsPresent);
+  end;
   Frame.CommandList.EndRecording;
 
   HasAsyncWait := (FStagingUploader <> nil) and
@@ -30392,7 +30554,7 @@ begin
   if (FDevice <> nil) and (FSwapchain <> VK_NULL_HANDLE) and Assigned(vkQueueSubmit) then
   begin
     WaitSems[0] := Frame.ImageAvailableSemaphore;
-    WaitStages[0] := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    WaitStages[0] := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT or VK_PIPELINE_STAGE_TRANSFER_BIT;
     WaitValues[0] := 0;
     WaitCount := 1;
     SignalValueZero := 0;
@@ -30523,7 +30685,8 @@ begin
   if FFrames[FFrameIndex].CommandList = nil then
     FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
   if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
-    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
+    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
+      FDevice, 512, False, 4096, NeedsUpdateAfterBindSamplerLayouts, FSupportsAccelerationStructure);
 
   Frame := FFrames[FFrameIndex];
 
@@ -30760,7 +30923,8 @@ begin
   if FFrames[FFrameIndex].CommandList = nil then
     FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
   if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
-    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096, False, FSupportsAccelerationStructure);
+    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
+      FDevice, 512, False, 4096, NeedsUpdateAfterBindSamplerLayouts, FSupportsAccelerationStructure);
 
   Frame := FFrames[FFrameIndex];
 
@@ -30905,7 +31069,10 @@ begin
 
   CurColorTex := ASurface.GetCurrentColorTexture;
   if (CurColorTex <> nil) and ((ASurface.FSwapchain <> VK_NULL_HANDLE) or (FDevice = nil)) then
+  begin
+    CaptureSwapchainReadbackShadowBeforePresent(Frame.CommandList, CurColorTex);
     Frame.CommandList.TransitionTexture(CurColorTex, rsPresent);
+  end;
   Frame.CommandList.EndRecording;
 
   HasAsyncWait := (FStagingUploader <> nil) and
@@ -30917,7 +31084,7 @@ begin
     if AcquireSem = VK_NULL_HANDLE then
       AcquireSem := Frame.ImageAvailableSemaphore;
     WaitSems[0] := AcquireSem;
-    WaitStages[0] := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    WaitStages[0] := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT or VK_PIPELINE_STAGE_TRANSFER_BIT;
     WaitValues[0] := 0;
     WaitCount := 1;
     SignalValueZero := 0;
@@ -31721,6 +31888,8 @@ begin
 
   Result := TRGBAlphaImage.Create(ReadArea.Width, ReadArea.Height);
   VkTex := SourceTexture as TVulkanRHITexture;
+  if (not VkTex.FOwnsImage) and (VkTex.FPresentReadbackShadow <> nil) then
+    VkTex := VkTex.FPresentReadbackShadow;
 
   if (FDevice = nil) or not Assigned(vkCmdCopyImageToBuffer) then
   begin
