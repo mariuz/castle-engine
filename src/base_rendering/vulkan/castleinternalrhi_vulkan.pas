@@ -103,9 +103,11 @@ type
     FRenderedLayerMask: Cardinal;
     FPresentReadbackShadow: TVulkanRHITexture;
     FPresentReadbackStaging: TVulkanRHIBuffer;
+    FMip0FacePixels: array[0..5] of array of Byte;
     function VulkanDevice: TVulkanRHIDevice;
     function GetSubresourceViewCount: Cardinal;
     procedure RecordVkMipmapBlits(const ACmd: VkCommandBuffer);
+    function TryUploadPortabilityCubeMipmapsFromHost: Boolean;
   protected
     procedure ReleaseDeviceResources; override;
     function GetRenderedLayerMask: Cardinal; override;
@@ -7331,7 +7333,9 @@ begin
   if Size = 0 then
     Exit;
 
-  if FDesc.MemoryUsage = muCpuToGpu then
+  if (FDesc.MemoryUsage = muCpuToGpu) or
+     ((FAllocation.MappedPtr <> nil) and (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
+      (ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
   begin
     DestPtr := PByte(Map);
     if DestPtr <> nil then
@@ -7965,9 +7969,13 @@ begin
 end;
 
 destructor TVulkanRHITexture.Destroy;
+var
+  FaceIdx: Integer;
 begin
   FreeAndNil(FPresentReadbackShadow);
   FreeAndNil(FPresentReadbackStaging);
+  for FaceIdx := 0 to 5 do
+    SetLength(FMip0FacePixels[FaceIdx], 0);
   SetLength(FHostPixels, 0);
   inherited;
 end;
@@ -8155,12 +8163,105 @@ begin
     0, 0, nil, 0, nil, 1, @Barrier);
 end;
 
+function TVulkanRHITexture.TryUploadPortabilityCubeMipmapsFromHost: Boolean;
+var
+  FaceIdx, MipIdx: Cardinal;
+  SrcW, SrcH, DstW, DstH, DX, DY, SX0, SX1, SY0, SY1, C: Integer;
+  PrevPixels, NextPixels: array of Byte;
+  MipImg: TRGBAlphaImage;
+  SavedUploads: Cardinal;
+  P00, P10, P01, P11, DstOff: PtrUInt;
+begin
+  Result := False;
+  if (VulkanDevice = nil) or (VulkanDevice.Handle = nil) or
+     (not VulkanDevice.IsPortabilitySubsetDevice) or
+     (FDesc.Dimension <> tdCube) or (FDesc.MipLevels <= 1) or
+     not (FDesc.Format in [pfRGBA8_UNorm, pfRGBA8_sRGB, pfBGRA8_UNorm, pfBGRA8_sRGB]) then
+    Exit;
+
+  SrcW := Max(1, Integer(FDesc.Width));
+  SrcH := Max(1, Integer(FDesc.Height));
+  for FaceIdx := 0 to 5 do
+    if Length(FMip0FacePixels[FaceIdx]) <> SrcW * SrcH * 4 then
+      Exit;
+
+  if not ((ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+    VulkanDevice.FlushStagingUploads(nil);
+
+  SavedUploads := FTotalSubresourceUploads;
+  try
+    for FaceIdx := 0 to 5 do
+    begin
+      SrcW := Max(1, Integer(FDesc.Width));
+      SrcH := Max(1, Integer(FDesc.Height));
+      SetLength(PrevPixels, SrcW * SrcH * 4);
+      Move(FMip0FacePixels[FaceIdx][0], PrevPixels[0], Length(PrevPixels));
+
+      for MipIdx := 1 to FDesc.MipLevels - 1 do
+      begin
+        DstW := Max(1, SrcW div 2);
+        DstH := Max(1, SrcH div 2);
+        SetLength(NextPixels, DstW * DstH * 4);
+        for DY := 0 to DstH - 1 do
+        begin
+          SY0 := Min(SrcH - 1, DY * 2);
+          SY1 := Min(SrcH - 1, DY * 2 + 1);
+          for DX := 0 to DstW - 1 do
+          begin
+            SX0 := Min(SrcW - 1, DX * 2);
+            SX1 := Min(SrcW - 1, DX * 2 + 1);
+            P00 := (PtrUInt(SY0) * PtrUInt(SrcW) + PtrUInt(SX0)) * 4;
+            P10 := (PtrUInt(SY0) * PtrUInt(SrcW) + PtrUInt(SX1)) * 4;
+            P01 := (PtrUInt(SY1) * PtrUInt(SrcW) + PtrUInt(SX0)) * 4;
+            P11 := (PtrUInt(SY1) * PtrUInt(SrcW) + PtrUInt(SX1)) * 4;
+            DstOff := (PtrUInt(DY) * PtrUInt(DstW) + PtrUInt(DX)) * 4;
+            for C := 0 to 3 do
+              NextPixels[DstOff + PtrUInt(C)] := Byte(
+                (Cardinal(PrevPixels[P00 + PtrUInt(C)]) +
+                 Cardinal(PrevPixels[P10 + PtrUInt(C)]) +
+                 Cardinal(PrevPixels[P01 + PtrUInt(C)]) +
+                 Cardinal(PrevPixels[P11 + PtrUInt(C)]) + 2) shr 2);
+          end;
+        end;
+
+        MipImg := TRGBAlphaImage.Create(DstW, DstH);
+        try
+          Move(NextPixels[0], MipImg.RawPixels^, DstW * DstH * 4);
+          UploadImage(MipImg, MipIdx, FaceIdx);
+        finally
+          FreeAndNil(MipImg);
+        end;
+
+        PrevPixels := Copy(NextPixels);
+        SrcW := DstW;
+        SrcH := DstH;
+      end;
+    end;
+
+    if not ((ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+      VulkanDevice.FlushStagingUploads(nil);
+  finally
+    FTotalSubresourceUploads := SavedUploads;
+  end;
+
+  Result := True;
+end;
+
 procedure TVulkanRHITexture.GenerateMipmaps;
 var
   Cmd: VkCommandBuffer;
 begin
   if FDesc.MipLevels <= 1 then
     Exit;
+
+  if TryUploadPortabilityCubeMipmapsFromHost then
+  begin
+    Inc(FMipmapGenerationCount);
+    FLastGeneratedMipLevels := FDesc.MipLevels;
+    FMaxUploadedMipLevel := Max(FMaxUploadedMipLevel, FDesc.MipLevels - 1);
+    FCurrentState := rsShaderRead;
+    Exit;
+  end;
 
   if (ActiveCommandList <> nil) and
      not ((VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and ActiveCommandList.IsRendering) then
@@ -8433,6 +8534,17 @@ begin
       SetLength(FHostPixels, DataSize);
       if DataSize > 0 then
         Move(PixelsPtr^, FHostPixels[0], DataSize);
+    end;
+
+    if (PixelsPtr <> nil) and (AMipLevel = 0) and (AArrayLayer < 6) and
+       (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
+       VulkanDevice.IsPortabilitySubsetDevice and
+       (FDesc.Dimension = tdCube) and (FDesc.MipLevels > 1) and
+       (DataSize = PtrUInt(Max(Cardinal(1), FDesc.Width)) * PtrUInt(Max(Cardinal(1), FDesc.Height)) * 4) then
+    begin
+      SetLength(FMip0FacePixels[AArrayLayer], DataSize);
+      if DataSize > 0 then
+        Move(PixelsPtr^, FMip0FacePixels[AArrayLayer][0], DataSize);
     end;
 
     if (VulkanDevice <> nil) and (VulkanDevice.StagingUploader <> nil) and
@@ -10509,6 +10621,12 @@ begin
   Inc(VkTex.FMipmapGenerationCount);
   VkTex.FLastGeneratedMipLevels := VkTex.Desc.MipLevels;
   VkTex.FMaxUploadedMipLevel := Max(VkTex.FMaxUploadedMipLevel, VkTex.Desc.MipLevels - 1);
+
+  if VkTex.TryUploadPortabilityCubeMipmapsFromHost then
+  begin
+    Texture.CurrentState := rsShaderRead;
+    Exit;
+  end;
 
   if (FHandle <> nil) and Assigned(vkCmdBlitImage) then
   begin

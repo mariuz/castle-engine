@@ -711,7 +711,7 @@ begin
           if Arrays.HasIndexes then
           begin
             if (Shape.Cache <> nil) and (Shape.Cache.RHIIndexBuffer <> nil) then
-              ActiveCommandList.BindIndexBuffer(Shape.Cache.RHIIndexBuffer, 0, itUInt32);
+              ActiveCommandList.BindIndexBuffer(Shape.Cache.RHIIndexBuffer, 0, {$ifdef GLIndexesShort}itUInt16{$else}itUInt32{$endif});
 
             if Arrays.Counts = nil then
               ActiveCommandList.DrawIndexed(Arrays.IndexesCount, 1, First, 0, 0)

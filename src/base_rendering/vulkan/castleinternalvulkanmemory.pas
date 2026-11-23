@@ -237,7 +237,8 @@ type
     FForceExplicitHostFlush: Boolean;
 
     function SelectMemoryType(const ATypeBits: UInt32;
-      const AUsage: TRHIMemoryUsage; out AIsHostVisible, AIsHostCoherent: Boolean): Cardinal;
+      const AUsage: TRHIMemoryUsage; const AIsLinearResource: Boolean;
+      out AIsHostVisible, AIsHostCoherent: Boolean): Cardinal;
     function GetPreferredBlockSize(const AUsage: TRHIMemoryUsage): VkDeviceSize;
     function CanAllocateDedicated(const ARequiresDedicated: Boolean): Boolean;
     function AllocateInternal(const AMemReq: VkMemoryRequirements;
@@ -891,7 +892,8 @@ begin
 end;
 
 function TCastleVulkanMemoryAllocator.SelectMemoryType(const ATypeBits: UInt32;
-  const AUsage: TRHIMemoryUsage; out AIsHostVisible, AIsHostCoherent: Boolean): Cardinal;
+  const AUsage: TRHIMemoryUsage; const AIsLinearResource: Boolean;
+  out AIsHostVisible, AIsHostCoherent: Boolean): Cardinal;
 
   function TryFindWithFlags(const Required, Preferred: VkMemoryPropertyFlags;
     out FoundIdx: Cardinal): Boolean;
@@ -930,7 +932,16 @@ begin
     muGpuOnly:
       begin
         RequiredFlags := VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        PreferredFlags := VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        if FForceExplicitHostFlush and AIsLinearResource then
+          { On Apple Silicon / MoltenVK Unified Memory Architecture (UMA), prefer
+            MTLStorageModeShared (DEVICE_LOCAL | HOST_VISIBLE | HOST_COHERENT) for linear
+            VkBuffers so sub-allocated buffers use native MTLBuffer slices instead of
+            MTLHeap placement buffers while keeping full UMA GPU bandwidth. }
+          PreferredFlags := VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT or
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or
+                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+        else
+          PreferredFlags := VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         AIsHostVisible := False;
       end;
     muCpuToGpu:
@@ -1002,7 +1013,8 @@ var
   I: Integer;
 begin
   FillChar(Result, SizeOf(Result), 0);
-  MemTypeIdx := SelectMemoryType(AMemReq.memoryTypeBits, AUsage, IsHostVisible, IsHostCoherent);
+  MemTypeIdx := SelectMemoryType(AMemReq.memoryTypeBits, AUsage, AIsLinearResource,
+    IsHostVisible, IsHostCoherent);
   PrefBlockSize := GetPreferredBlockSize(AUsage);
 
   FLock.Acquire;

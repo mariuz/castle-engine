@@ -3051,7 +3051,7 @@ begin
   if (Arrays <> nil) and Arrays.HasIndexes then
   begin
     if Cache.RHIIndexBuffer <> nil then
-      ACmd.BindIndexBuffer(Cache.RHIIndexBuffer, 0, itUInt32);
+      ACmd.BindIndexBuffer(Cache.RHIIndexBuffer, 0, {$ifdef GLIndexesShort}itUInt16{$else}itUInt32{$endif});
     if Arrays.Counts = nil then
     begin
       ACmd.DrawIndexed(Arrays.IndexesCount, 1, First, 0, 0);
@@ -3084,8 +3084,8 @@ begin
   end else
   if Cache.RHIIndexBuffer <> nil then
   begin
-    ACmd.BindIndexBuffer(Cache.RHIIndexBuffer, 0, itUInt32);
-    ACmd.DrawIndexed(Cache.RHIIndexBuffer.Desc.Size div SizeOf(UInt32), 1, 0, 0, 0);
+    ACmd.BindIndexBuffer(Cache.RHIIndexBuffer, 0, {$ifdef GLIndexesShort}itUInt16{$else}itUInt32{$endif});
+    ACmd.DrawIndexed(Cache.RHIIndexBuffer.Desc.Size div SizeOf(TGeometryIndex), 1, 0, 0, 0);
     Result := 1;
   end else
   if Cache.RHICoordinateBuffer <> nil then

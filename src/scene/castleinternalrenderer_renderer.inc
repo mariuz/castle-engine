@@ -607,7 +607,7 @@ begin
       if HasIndexes then
       begin
         if IndexBuf <> nil then
-          ACmd.BindIndexBuffer(IndexBuf, 0, itUInt32);
+          ACmd.BindIndexBuffer(IndexBuf, 0, {$ifdef GLIndexesShort}itUInt16{$else}itUInt32{$endif});
         if Length(SubDrawCounts) = 0 then
           ACmd.DrawIndexed(Count, 1, First, 0, 0)
         else

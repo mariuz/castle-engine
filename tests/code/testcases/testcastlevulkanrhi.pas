@@ -33375,8 +33375,8 @@ var
   MetalMat, RoughMat: TPhysicalMaterialNode;
   MetalSphere, RoughSphere: TSphereNode;
   ShotIBL, ShotDiag: TRGBAlphaImage;
-  MetalUpperPx, MetalLowerPx, RoughCenterPx, DiagPx, Frame2Px, SoloRoughPx: TVector4Byte;
-  DX, DY, LeftNonBg, RightNonBg, MaxNonBgX: Integer;
+  MetalUpperPx, MetalLowerPx, RoughCenterPx, DiagPx, Frame2Px, SoloRoughPx, SampleRightPx: TVector4Byte;
+  DX, DY, LeftNonBg, RightNonBg, MaxNonBgX, MinRightX, MinRightY, MaxRightY, SampleRX, SampleRY: Integer;
   DiagIBL: String;
 begin
   RealDev := nil;
@@ -33529,13 +33529,33 @@ begin
       LeftNonBg := 0;
       RightNonBg := 0;
       MaxNonBgX := -1;
+      MinRightX := 999;
+      MinRightY := 999;
+      MaxRightY := -1;
+      SampleRX := -1;
+      SampleRY := -1;
+      SampleRightPx := Vector4Byte(0, 0, 0, 0);
       for DY := 0 to 127 do
         for DX := 0 to 127 do
         begin
           DiagPx := ShotIBL.PixelPtr(DX, DY)^;
           if (DiagPx.X <> 3) or (DiagPx.Y <> 3) or (DiagPx.Z <> 5) then
           begin
-            if DX < 64 then Inc(LeftNonBg) else Inc(RightNonBg);
+            if DX < 64 then
+              Inc(LeftNonBg)
+            else
+            begin
+              Inc(RightNonBg);
+              if DX < MinRightX then MinRightX := DX;
+              if DY < MinRightY then MinRightY := DY;
+              if DY > MaxRightY then MaxRightY := DY;
+              if SampleRX < 0 then
+              begin
+                SampleRX := DX;
+                SampleRY := DY;
+                SampleRightPx := DiagPx;
+              end;
+            end;
             if DX > MaxNonBgX then MaxNonBgX := DX;
           end;
         end;
@@ -33572,8 +33592,10 @@ begin
       end;
       MetalShape.Visible := True;
 
-      DiagIBL := Format(' leftNonBg=%d rightNonBg=%d maxX=%d frame2=(%d,%d,%d) soloRough=(%d,%d,%d) pipes=%d',
-        [LeftNonBg, RightNonBg, MaxNonBgX,
+      DiagIBL := Format(
+        ' leftNonBg=%d rightNonBg=%d rBox=(%d..%d,%d..%d) rSamp@(%d,%d)=(%d,%d,%d) frame2=(%d,%d,%d) soloRough=(%d,%d,%d) pipes=%d',
+        [LeftNonBg, RightNonBg, MinRightX, MaxNonBgX, MinRightY, MaxRightY,
+         SampleRX, SampleRY, SampleRightPx.X, SampleRightPx.Y, SampleRightPx.Z,
          Frame2Px.X, Frame2Px.Y, Frame2Px.Z,
          SoloRoughPx.X, SoloRoughPx.Y, SoloRoughPx.Z,
          RealDev.PipelineCount]);
