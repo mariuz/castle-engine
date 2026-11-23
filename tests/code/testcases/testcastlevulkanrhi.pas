@@ -33374,8 +33374,10 @@ var
   MetalApp, RoughApp: TAppearanceNode;
   MetalMat, RoughMat: TPhysicalMaterialNode;
   MetalSphere, RoughSphere: TSphereNode;
-  ShotIBL: TRGBAlphaImage;
-  MetalUpperPx, MetalLowerPx, RoughCenterPx: TVector4Byte;
+  ShotIBL, ShotDiag: TRGBAlphaImage;
+  MetalUpperPx, MetalLowerPx, RoughCenterPx, DiagPx, Frame2Px, SoloRoughPx: TVector4Byte;
+  DX, DY, LeftNonBg, RightNonBg, MaxNonBgX: Integer;
+  DiagIBL: String;
 begin
   RealDev := nil;
   if not TVulkanRHIDevice.TryCreateOffscreen(RealDev, True) then
@@ -33520,15 +33522,70 @@ begin
     AssertTrue('Metallic sphere lower hemisphere (33,46) must reflect -Y warm amber ground via Split-Sum IBL (R > B + 50, R > 120), got R=' +
       IntToStr(MetalLowerPx.X) + ' G=' + IntToStr(MetalLowerPx.Y) + ' B=' + IntToStr(MetalLowerPx.Z),
       (MetalLowerPx.X > MetalLowerPx.Z + 50) and (MetalLowerPx.X > 120));
+
+    DiagIBL := '';
+    if Integer(RoughCenterPx.X) + Integer(RoughCenterPx.Y) + Integer(RoughCenterPx.Z) <= 180 then
+    begin
+      LeftNonBg := 0;
+      RightNonBg := 0;
+      MaxNonBgX := -1;
+      for DY := 0 to 127 do
+        for DX := 0 to 127 do
+        begin
+          DiagPx := ShotIBL.PixelPtr(DX, DY)^;
+          if (DiagPx.X <> 3) or (DiagPx.Y <> 3) or (DiagPx.Z <> 5) then
+          begin
+            if DX < 64 then Inc(LeftNonBg) else Inc(RightNonBg);
+            if DX > MaxNonBgX then MaxNonBgX := DX;
+          end;
+        end;
+
+      { Frame 2 diagnostic: re-render with all GPU buffers/textures already uploaded }
+      RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+      SetActiveCommandList(RealCmd);
+      Viewport.BeforeRender;
+      RealCmd.BeginRendering(PassInfo);
+      Viewport.Render;
+      RealCmd.EndRendering;
+      RealDev.EndOffscreenFrame;
+      ShotDiag := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+      try
+        Frame2Px := ShotDiag.PixelPtr(95, 64)^;
+      finally
+        FreeAndNil(ShotDiag);
+      end;
+
+      { Solo RoughShape diagnostic: hide MetalShape so RoughShape is Draw #1 }
+      MetalShape.Visible := False;
+      RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+      SetActiveCommandList(RealCmd);
+      Viewport.BeforeRender;
+      RealCmd.BeginRendering(PassInfo);
+      Viewport.Render;
+      RealCmd.EndRendering;
+      RealDev.EndOffscreenFrame;
+      ShotDiag := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+      try
+        SoloRoughPx := ShotDiag.PixelPtr(95, 64)^;
+      finally
+        FreeAndNil(ShotDiag);
+      end;
+      MetalShape.Visible := True;
+
+      DiagIBL := Format(' leftNonBg=%d rightNonBg=%d maxX=%d frame2=(%d,%d,%d) soloRough=(%d,%d,%d) pipes=%d',
+        [LeftNonBg, RightNonBg, MaxNonBgX,
+         Frame2Px.X, Frame2Px.Y, Frame2Px.Z,
+         SoloRoughPx.X, SoloRoughPx.Y, SoloRoughPx.Z,
+         RealDev.PipelineCount]);
+    end;
+
     AssertTrue(Format(
-      'Rough dielectric sphere (95,64) with zero punctual lights must receive non-black diffuse+specular IBL (R+G+B > 180), got R=%d G=%d B=%d [p33_64=(%d,%d,%d) p64_64=(%d,%d,%d) p80_64=(%d,%d,%d) p110_64=(%d,%d,%d) draws=%d shapes=%d]',
+      'Rough dielectric sphere (95,64) with zero punctual lights must receive non-black diffuse+specular IBL (R+G+B > 180), got R=%d G=%d B=%d [p33_64=(%d,%d,%d) draws=%d shapes=%d%s]',
       [RoughCenterPx.X, RoughCenterPx.Y, RoughCenterPx.Z,
        ShotIBL.PixelPtr(33, 64)^.X, ShotIBL.PixelPtr(33, 64)^.Y, ShotIBL.PixelPtr(33, 64)^.Z,
-       ShotIBL.PixelPtr(64, 64)^.X, ShotIBL.PixelPtr(64, 64)^.Y, ShotIBL.PixelPtr(64, 64)^.Z,
-       ShotIBL.PixelPtr(80, 64)^.X, ShotIBL.PixelPtr(80, 64)^.Y, ShotIBL.PixelPtr(80, 64)^.Z,
-       ShotIBL.PixelPtr(110, 64)^.X, ShotIBL.PixelPtr(110, 64)^.Y, ShotIBL.PixelPtr(110, 64)^.Z,
        Viewport.Statistics.ShapesRendered,
-       Viewport.Statistics.ShapesVisible]),
+       Viewport.Statistics.ShapesVisible,
+       DiagIBL]),
       Integer(RoughCenterPx.X) + Integer(RoughCenterPx.Y) + Integer(RoughCenterPx.Z) > 180);
 
     RealDev.AssertZeroValidationErrors('Phase114.EnvironmentLightSplitSumIBL3DViewport');

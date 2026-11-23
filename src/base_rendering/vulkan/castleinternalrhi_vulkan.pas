@@ -4550,6 +4550,7 @@ type
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
     FDescriptorPool: VkDescriptorPool;
+    FSingleTimeCommandPool: VkCommandPool;
     FPipelineCache: VkPipelineCache;
     FPipelineMap: TVulkanPipelineMap;
     FComputePipelineMap: TVulkanComputePipelineMap;
@@ -27976,6 +27977,11 @@ begin
   end;
 
   FreeAndNil(FPersistentDescriptorAllocator);
+  if (FDevice <> nil) and (FSingleTimeCommandPool <> VK_NULL_HANDLE) and Assigned(vkDestroyCommandPool) then
+  begin
+    vkDestroyCommandPool(FDevice, FSingleTimeCommandPool, nil);
+    FSingleTimeCommandPool := VK_NULL_HANDLE;
+  end;
   if (FDevice <> nil) and (FDescriptorPool <> VK_NULL_HANDLE) then
     vkDestroyDescriptorPool(FDevice, FDescriptorPool, nil);
   if (FDevice <> nil) and (FPipelineCache <> VK_NULL_HANDLE) then
@@ -32684,15 +32690,27 @@ end;
 
 function TVulkanRHIDevice.BeginSingleTimeCommands: VkCommandBuffer;
 var
+  PoolInfo: VkCommandPoolCreateInfo;
   AllocInfo: VkCommandBufferAllocateInfo;
   BeginInfo: VkCommandBufferBeginInfo;
 begin
   Result := nil;
-  if (FDevice = nil) or (FFrames[0].CommandList = nil) then Exit;
+  if FDevice = nil then Exit;
+
+  if (FSingleTimeCommandPool = VK_NULL_HANDLE) and Assigned(vkCreateCommandPool) then
+  begin
+    FillChar(PoolInfo, SizeOf(PoolInfo), 0);
+    PoolInfo.sType := VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    PoolInfo.flags := VK_COMMAND_POOL_CREATE_TRANSIENT_BIT or VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    PoolInfo.queueFamilyIndex := FGraphicsQueueFamily;
+    CheckVk(vkCreateCommandPool(FDevice, @PoolInfo, nil, @FSingleTimeCommandPool),
+      'vkCreateCommandPool(SingleTime)');
+  end;
+  if FSingleTimeCommandPool = VK_NULL_HANDLE then Exit;
 
   FillChar(AllocInfo, SizeOf(AllocInfo), 0);
   AllocInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  AllocInfo.commandPool := FFrames[0].CommandList.FCommandPool;
+  AllocInfo.commandPool := FSingleTimeCommandPool;
   AllocInfo.level := VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   AllocInfo.commandBufferCount := 1;
   CheckVk(vkAllocateCommandBuffers(FDevice, @AllocInfo, @Result), 'vkAllocateCommandBuffers(SingleTime)');
@@ -32708,7 +32726,7 @@ var
   SubmitInfo: VkSubmitInfo;
   LocalCmd: VkCommandBuffer;
 begin
-  if (FDevice = nil) or (CmdBuf = nil) then Exit;
+  if (FDevice = nil) or (CmdBuf = nil) or (FSingleTimeCommandPool = VK_NULL_HANDLE) then Exit;
   CheckVk(vkEndCommandBuffer(CmdBuf), 'vkEndCommandBuffer(SingleTime)');
 
   LocalCmd := CmdBuf;
@@ -32720,7 +32738,7 @@ begin
   CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, VK_NULL_HANDLE), 'vkQueueSubmit(SingleTime)');
   CheckVk(vkQueueWaitIdle(FGraphicsQueue), 'vkQueueWaitIdle(SingleTime)');
 
-  vkFreeCommandBuffers(FDevice, FFrames[0].CommandList.FCommandPool, 1, @LocalCmd);
+  vkFreeCommandBuffers(FDevice, FSingleTimeCommandPool, 1, @LocalCmd);
 end;
 
 function TVulkanRHIDevice.FindMemoryType(const TypeFilter: Cardinal;
