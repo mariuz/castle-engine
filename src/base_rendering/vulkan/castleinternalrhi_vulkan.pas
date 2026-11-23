@@ -7324,6 +7324,7 @@ var
   StagingBuf: TVulkanRHIBuffer;
   Cmd: VkCommandBuffer;
   CopyRegion: VkBufferCopy;
+  BufBarrier: VkBufferMemoryBarrier;
   DestPtr: PByte;
 begin
   if Size = 0 then
@@ -7363,6 +7364,28 @@ begin
       CopyRegion.dstOffset := Offset;
       CopyRegion.size := Size;
       vkCmdCopyBuffer(Cmd, StagingBuf.Handle, FHandle, 1, @CopyRegion);
+      if Assigned(vkCmdPipelineBarrier) then
+      begin
+        FillChar(BufBarrier, SizeOf(BufBarrier), 0);
+        BufBarrier.sType := VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        BufBarrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+        BufBarrier.dstAccessMask :=
+          VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT or
+          VK_ACCESS_INDEX_READ_BIT or
+          VK_ACCESS_UNIFORM_READ_BIT or
+          VK_ACCESS_SHADER_READ_BIT;
+        BufBarrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+        BufBarrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+        BufBarrier.buffer := FHandle;
+        BufBarrier.offset := Offset;
+        BufBarrier.size := Size;
+        vkCmdPipelineBarrier(Cmd,
+          VK_PIPELINE_STAGE_TRANSFER_BIT,
+          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          0, 0, nil, 1, @BufBarrier, 0, nil);
+      end;
       VulkanDevice.EndSingleTimeCommands(Cmd);
     finally
       FreeAndNil(StagingBuf);
@@ -26496,6 +26519,7 @@ begin
   CreateLogicalDevice;
   FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice, 0, FSupportsBufferDeviceAddress);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
+  FMemoryAllocator.ForceExplicitHostFlush := FIsPortabilitySubsetDevice or (FVendorKind = vvApple);
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   CreateDescriptorPool;
   if FSupportsBindlessTextures and (FMaxBindlessTextures > 0) then
@@ -26559,6 +26583,7 @@ begin
 
   FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice, 0, FSupportsBufferDeviceAddress);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
+  FMemoryAllocator.ForceExplicitHostFlush := FIsPortabilitySubsetDevice or (FVendorKind = vvApple);
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   CreateDescriptorPool;
   if FSupportsBindlessTextures and (FMaxBindlessTextures > 0) then
@@ -26622,6 +26647,7 @@ begin
   CreateLogicalDevice;
   FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice, 0, FSupportsBufferDeviceAddress);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
+  FMemoryAllocator.ForceExplicitHostFlush := FIsPortabilitySubsetDevice or (FVendorKind = vvApple);
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   CreateDescriptorPool;
   if FSupportsBindlessTextures and (FMaxBindlessTextures > 0) then
@@ -26727,6 +26753,7 @@ begin
   FCapabilities.MaxBindlessTextures := FMaxBindlessTextures;
   FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice, 0, FSupportsBufferDeviceAddress);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
+  FMemoryAllocator.ForceExplicitHostFlush := FIsPortabilitySubsetDevice or (FVendorKind = vvApple);
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   FPersistentDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
     FDevice, 2048, True, 8192, FSupportsBindlessUpdateAfterBind, FSupportsAccelerationStructure);

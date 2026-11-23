@@ -234,6 +234,7 @@ type
     FTotalDefragmentFreedBlocks: Cardinal;
     FSupportsMemoryBudgetExt: Boolean;
     FSupportsBufferDeviceAddress: Boolean;
+    FForceExplicitHostFlush: Boolean;
 
     function SelectMemoryType(const ATypeBits: UInt32;
       const AUsage: TRHIMemoryUsage; out AIsHostVisible, AIsHostCoherent: Boolean): Cardinal;
@@ -339,6 +340,7 @@ type
     property SubAllocationCount: Cardinal read FSubAllocationCount;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt write FSupportsMemoryBudgetExt;
     property SupportsBufferDeviceAddress: Boolean read FSupportsBufferDeviceAddress write FSupportsBufferDeviceAddress;
+    property ForceExplicitHostFlush: Boolean read FForceExplicitHostFlush write FForceExplicitHostFlush;
   end;
 
 { Rounds AOffset down and ASize up to multiples of ANonCoherentAtomSize within
@@ -1384,7 +1386,7 @@ var
   Range: VkMappedMemoryRange;
   BlockSize, AlignedOffset, AlignedSize: VkDeviceSize;
 begin
-  if (not AAlloc.IsValid) or AAlloc.IsHostCoherent then Exit;
+  if (not AAlloc.IsValid) or (AAlloc.IsHostCoherent and (not FForceExplicitHostFlush)) then Exit;
   if (FDevice = nil) or (not Assigned(vkFlushMappedMemoryRanges)) then Exit;
 
   if AAlloc.Block <> nil then
@@ -1409,7 +1411,7 @@ var
   Range: VkMappedMemoryRange;
   BlockSize, AlignedOffset, AlignedSize: VkDeviceSize;
 begin
-  if (not AAlloc.IsValid) or AAlloc.IsHostCoherent then Exit;
+  if (not AAlloc.IsValid) or (AAlloc.IsHostCoherent and (not FForceExplicitHostFlush)) then Exit;
   if (FDevice = nil) or (not Assigned(vkInvalidateMappedMemoryRanges)) then Exit;
 
   if AAlloc.Block <> nil then

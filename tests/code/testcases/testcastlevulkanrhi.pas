@@ -33521,8 +33521,14 @@ begin
       IntToStr(MetalLowerPx.X) + ' G=' + IntToStr(MetalLowerPx.Y) + ' B=' + IntToStr(MetalLowerPx.Z),
       (MetalLowerPx.X > MetalLowerPx.Z + 50) and (MetalLowerPx.X > 120));
     AssertTrue(Format(
-      'Rough dielectric sphere (95,64) with zero punctual lights must receive non-black diffuse+specular IBL (R+G+B > 180), got R=%d G=%d B=%d',
-      [RoughCenterPx.X, RoughCenterPx.Y, RoughCenterPx.Z]),
+      'Rough dielectric sphere (95,64) with zero punctual lights must receive non-black diffuse+specular IBL (R+G+B > 180), got R=%d G=%d B=%d [p33_64=(%d,%d,%d) p64_64=(%d,%d,%d) p80_64=(%d,%d,%d) p110_64=(%d,%d,%d) draws=%d shapes=%d]',
+      [RoughCenterPx.X, RoughCenterPx.Y, RoughCenterPx.Z,
+       ShotIBL.PixelPtr(33, 64)^.X, ShotIBL.PixelPtr(33, 64)^.Y, ShotIBL.PixelPtr(33, 64)^.Z,
+       ShotIBL.PixelPtr(64, 64)^.X, ShotIBL.PixelPtr(64, 64)^.Y, ShotIBL.PixelPtr(64, 64)^.Z,
+       ShotIBL.PixelPtr(80, 64)^.X, ShotIBL.PixelPtr(80, 64)^.Y, ShotIBL.PixelPtr(80, 64)^.Z,
+       ShotIBL.PixelPtr(110, 64)^.X, ShotIBL.PixelPtr(110, 64)^.Y, ShotIBL.PixelPtr(110, 64)^.Z,
+       Viewport.Statistics.ShapesRendered,
+       Viewport.Statistics.ShapesVisible]),
       Integer(RoughCenterPx.X) + Integer(RoughCenterPx.Y) + Integer(RoughCenterPx.Z) > 180);
 
     RealDev.AssertZeroValidationErrors('Phase114.EnvironmentLightSplitSumIBL3DViewport');
