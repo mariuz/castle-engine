@@ -161,6 +161,7 @@
     FRHIHasMultiTextureStage: array[2..3] of Boolean;
     FRHIMultiTextureStageEnv: array[2..3] of TTextureEnv;
     FRHIMultiTextureStageConstantColor: array[2..3] of TVector4;
+    FRHIMultiTextureStageDimension: array[1..3] of TRHITextureDimension;
     FRHIBaseColorTextureDimension: TRHITextureDimension;
     FRHIClipPlane: TVector4;
     FRHIHasClipPlane: Boolean;
@@ -303,6 +304,9 @@
       const AHasStageTex: Boolean;
       const AEnv: TTextureEnv;
       const AConstantColor: TVector4);
+    procedure SetMultiTextureStageDimension(
+      const AStageIndex: Cardinal;
+      const ADimension: TRHITextureDimension);
     procedure SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
     procedure SetClipPlanes(const APlanes: array of TVector4; const ACount: Cardinal);
     procedure SetShadowMapParams(const ASampling: TShadowSampling; const ASize: Cardinal = 128);
@@ -1223,6 +1227,20 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetMultiTextureStageDimension(
+  const AStageIndex: Cardinal;
+  const ADimension: TRHITextureDimension);
+begin
+  if not (AStageIndex in [1..3]) then
+    Exit;
+  if FRHIMultiTextureStageDimension[AStageIndex] <> ADimension then
+  begin
+    FRHIMultiTextureStageDimension[AStageIndex] := ADimension;
+    FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
 begin
   if (FRHIHasClipPlane <> AHasClipPlane) or
@@ -1514,6 +1532,100 @@ procedure TShapeCache.EnsureRHIShaders(
   const AHasShaderEffects: Boolean;
   const AHasComposedShader: Boolean);
 
+  function StripGLSLComments(const ASource: String): String;
+  var
+    SB: TStringBuilder;
+    Idx, SrcLen: Integer;
+    InLineComment, InBlockComment: Boolean;
+    Ch: Char;
+  begin
+    if ASource = '' then
+      Exit('');
+    SrcLen := Length(ASource);
+    SB := TStringBuilder.Create(SrcLen);
+    try
+      Idx := 1;
+      InLineComment := False;
+      InBlockComment := False;
+      while Idx <= SrcLen do
+      begin
+        Ch := ASource[Idx];
+        if InLineComment then
+        begin
+          if (Ch = #10) or (Ch = #13) then
+          begin
+            InLineComment := False;
+            SB.Append(Ch);
+          end;
+          Inc(Idx);
+        end else
+        if InBlockComment then
+        begin
+          if (Idx < SrcLen) and (Ch = '*') and (ASource[Idx + 1] = '/') then
+          begin
+            InBlockComment := False;
+            SB.Append('  ');
+            Inc(Idx, 2);
+          end else
+          begin
+            if (Ch = #10) or (Ch = #13) then
+              SB.Append(Ch);
+            Inc(Idx);
+          end;
+        end else
+        begin
+          if (Idx < SrcLen) and (Ch = '/') and (ASource[Idx + 1] = '/') then
+          begin
+            InLineComment := True;
+            SB.Append('  ');
+            Inc(Idx, 2);
+          end else
+          if (Idx < SrcLen) and (Ch = '/') and (ASource[Idx + 1] = '*') then
+          begin
+            InBlockComment := True;
+            SB.Append('  ');
+            Inc(Idx, 2);
+          end else
+          begin
+            SB.Append(Ch);
+            Inc(Idx);
+          end;
+        end;
+      end;
+      Result := SB.ToString;
+    finally
+      FreeAndNil(SB);
+    end;
+  end;
+
+  function IsPlugDefinitionAfterName(const ASource: String; const AAfterIdx: Integer): Boolean;
+  var
+    ScanIdx, SrcLen, ParenDepth: Integer;
+  begin
+    Result := False;
+    SrcLen := Length(ASource);
+    ScanIdx := AAfterIdx;
+    while (ScanIdx <= SrcLen) and (ASource[ScanIdx] in [' ', #9, #10, #13]) do
+      Inc(ScanIdx);
+    if (ScanIdx > SrcLen) or (ASource[ScanIdx] <> '(') then
+      Exit;
+    ParenDepth := 1;
+    Inc(ScanIdx);
+    while (ScanIdx <= SrcLen) and (ParenDepth > 0) do
+    begin
+      if ASource[ScanIdx] = '(' then
+        Inc(ParenDepth)
+      else if ASource[ScanIdx] = ')' then
+        Dec(ParenDepth);
+      Inc(ScanIdx);
+    end;
+    if ParenDepth <> 0 then
+      Exit;
+    while (ScanIdx <= SrcLen) and (ASource[ScanIdx] in [' ', #9, #10, #13]) do
+      Inc(ScanIdx);
+    Result := (ScanIdx <= SrcLen) and (ASource[ScanIdx] = '{');
+  end;
+
   function HasPlugFunction(const ASource, APlugName: String): Boolean;
   var
     P, AfterIdx: Integer;
@@ -1525,7 +1637,8 @@ procedure TShapeCache.EnsureRHIShaders(
       AfterIdx := P + Length(APlugName);
       if ((P = 1) or not (ASource[P - 1] in ['A'..'Z', 'a'..'z', '0'..'9', '_'])) and
          (AfterIdx <= Length(ASource)) and
-         (ASource[AfterIdx] in ['(', ' ', #9, #10, #13]) then
+         (ASource[AfterIdx] in ['(', ' ', #9, #10, #13]) and
+         IsPlugDefinitionAfterName(ASource, AfterIdx) then
         Exit(True);
       P := Pos(APlugName, ASource, P + 1);
     end;
@@ -1545,7 +1658,8 @@ procedure TShapeCache.EnsureRHIShaders(
       AfterIdx := P + Length(APlugName);
       if ((P = 1) or not (ASource[P - 1] in ['A'..'Z', 'a'..'z', '0'..'9', '_'])) and
          (AfterIdx <= Length(ASource)) and
-         (ASource[AfterIdx] in ['(', ' ', #9, #10, #13]) then
+         (ASource[AfterIdx] in ['(', ' ', #9, #10, #13]) and
+         IsPlugDefinitionAfterName(ASource, AfterIdx) then
       begin
         Inc(Count);
         if Count >= 2 then
@@ -1826,6 +1940,10 @@ begin
     (FRHIOcclusionTexCoordIndex > 0);
   if NeedTexCoord1Attr then
     Mask := Mask or (QWord(1) shl 53);
+  Mask := Mask or
+    (QWord(Ord(FRHIMultiTextureStageDimension[1]) and 3) shl 54) or
+    (QWord(Ord(FRHIMultiTextureStageDimension[2]) and 3) shl 56) or
+    (QWord(Ord(FRHIMultiTextureStageDimension[3]) and 3) shl 58);
 
   EnsureRHIDeviceMatch;
 
@@ -1877,7 +1995,7 @@ begin
   FRHIGeometryShaderSource := '';
   Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
   try
-    DedupVertEffect := FRHIVertexEffectCode;
+    DedupVertEffect := StripGLSLComments(FRHIVertexEffectCode);
     if DedupVertEffect <> '' then
     begin
       DeduplicatePlugDefinitions(DedupVertEffect, 'PLUG_vertex_object_space');
@@ -1885,7 +2003,7 @@ begin
       DeduplicatePlugDefinitions(DedupVertEffect, 'PLUG_vertex_eye_space_extended');
       DeduplicatePlugDefinitions(DedupVertEffect, 'PLUG_vertex_eye_space');
     end;
-    DedupFragEffect := FRHIFragmentEffectCode;
+    DedupFragEffect := StripGLSLComments(FRHIFragmentEffectCode);
     if DedupFragEffect <> '' then
     begin
       DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_fog_apply');
@@ -1909,7 +2027,7 @@ begin
       DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_texture_apply');
       DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_texture_color');
     end;
-    DedupGeomEffect := FRHIGeometryEffectCode;
+    DedupGeomEffect := StripGLSLComments(FRHIGeometryEffectCode);
     if DedupGeomEffect <> '' then
     begin
       DeduplicatePlugDefinitions(DedupGeomEffect, 'PLUG_geometry_vertex_set');
@@ -3000,48 +3118,158 @@ begin
         'texture(castle_occlusion_texture, castle_tex_coord0)',
         'texture(castle_occlusion_texture, castle_tex_coord1)',
         [rfReplaceAll]);
-    if AHasBaseColorTex and FRHIHasSecondTexture then
+    if AHasBaseColorTex and FRHIHasSecondTexture and
+       (0 >= Length(FRHIUserEffectLayout.Samplers)) then
     begin
-      FRHIFragmentShaderSource := StringReplace(
-        FRHIFragmentShaderSource,
-        'void main() {',
-        'CASTLE_DESCRIPTOR_SET(2, 2) uniform sampler2D castle_multi_texture_1;' + LineEnding +
-        'void main() {',
-        []);
       if (Arrays = nil) or (Arrays.TexCoords.Count >= 2) or FRHIHasTextureTransform1 then
         SecondTexUV := 'castle_tex_coord1'
       else
         SecondTexUV := 'castle_tex_coord0';
+      case FRHIMultiTextureStageDimension[1] of
+        tdCube:
+          begin
+            FRHIFragmentShaderSource := StringReplace(
+              FRHIFragmentShaderSource,
+              'void main() {',
+              'CASTLE_DESCRIPTOR_SET(2, 2) uniform samplerCube castle_multi_texture_1;' + LineEnding +
+              'void main() {',
+              []);
+            if (Arrays <> nil) and (Arrays.TexCoords.Count > 1) and (Arrays.TexCoords[1] <> nil) then
+              case Arrays.TexCoords[1].Generation of
+                tgCameraSpaceNormal:
+                  SecondTexUV := 'normalize(castle_normal_eye)';
+                tgWorldSpaceNormal:
+                  SecondTexUV := '(mat3(castle_ViewMatrixInverse) * normalize(castle_normal_eye))';
+                tgCameraSpaceReflectionVector:
+                  SecondTexUV := '(-reflect(-normalize(castle_vertex_eye.xyz), normalize(castle_normal_eye)))';
+                else
+                  SecondTexUV := '(mat3(castle_ViewMatrixInverse) * (-reflect(-normalize(castle_vertex_eye.xyz), normalize(castle_normal_eye))))';
+              end
+            else
+              SecondTexUV := '(mat3(castle_ViewMatrixInverse) * (-reflect(-normalize(castle_vertex_eye.xyz), normalize(castle_normal_eye))))';
+          end;
+        td3D:
+          begin
+            FRHIFragmentShaderSource := StringReplace(
+              FRHIFragmentShaderSource,
+              'void main() {',
+              'CASTLE_DESCRIPTOR_SET(2, 2) uniform sampler3D castle_multi_texture_1;' + LineEnding +
+              'void main() {',
+              []);
+            SecondTexUV := '((castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)).xyz * 0.5 + vec3(0.5))';
+          end;
+        else
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            'void main() {',
+            'CASTLE_DESCRIPTOR_SET(2, 2) uniform sampler2D castle_multi_texture_1;' + LineEnding +
+            'void main() {',
+            []);
+      end;
       SecondTexSnippet := BuildMultiTexStageSnippet(
         1, FRHISecondTextureEnv, FRHISecondTextureCombineRGB, FRHISecondTextureCombineAlpha,
         FRHISecondTextureConstantColor, SecondTexUV, HasLinearColorSpace);
-      if FRHIHasMultiTextureStage[2] then
+      if FRHIHasMultiTextureStage[2] and (1 >= Length(FRHIUserEffectLayout.Samplers)) then
       begin
-        FRHIFragmentShaderSource := StringReplace(
-          FRHIFragmentShaderSource,
-          'void main() {',
-          'CASTLE_DESCRIPTOR_SET(2, 3) uniform sampler2D castle_multi_texture_2;' + LineEnding +
-          'void main() {',
-          []);
-        SecondTexSnippet := SecondTexSnippet + LineEnding +
-          BuildMultiTexStageSnippet(
-            2, FRHIMultiTextureStageEnv[2],
-            FRHIMultiTextureStageEnv[2].Combine[cRGB], FRHIMultiTextureStageEnv[2].Combine[cAlpha],
-            FRHIMultiTextureStageConstantColor[2], 'castle_tex_coord0', HasLinearColorSpace);
+        case FRHIMultiTextureStageDimension[2] of
+          tdCube:
+            begin
+              FRHIFragmentShaderSource := StringReplace(
+                FRHIFragmentShaderSource,
+                'void main() {',
+                'CASTLE_DESCRIPTOR_SET(2, 3) uniform samplerCube castle_multi_texture_2;' + LineEnding +
+                'void main() {',
+                []);
+              SecondTexSnippet := SecondTexSnippet + LineEnding +
+                BuildMultiTexStageSnippet(
+                  2, FRHIMultiTextureStageEnv[2],
+                  FRHIMultiTextureStageEnv[2].Combine[cRGB], FRHIMultiTextureStageEnv[2].Combine[cAlpha],
+                  FRHIMultiTextureStageConstantColor[2],
+                  '(mat3(castle_ViewMatrixInverse) * (-reflect(-normalize(castle_vertex_eye.xyz), normalize(castle_normal_eye))))',
+                  HasLinearColorSpace);
+            end;
+          td3D:
+            begin
+              FRHIFragmentShaderSource := StringReplace(
+                FRHIFragmentShaderSource,
+                'void main() {',
+                'CASTLE_DESCRIPTOR_SET(2, 3) uniform sampler3D castle_multi_texture_2;' + LineEnding +
+                'void main() {',
+                []);
+              SecondTexSnippet := SecondTexSnippet + LineEnding +
+                BuildMultiTexStageSnippet(
+                  2, FRHIMultiTextureStageEnv[2],
+                  FRHIMultiTextureStageEnv[2].Combine[cRGB], FRHIMultiTextureStageEnv[2].Combine[cAlpha],
+                  FRHIMultiTextureStageConstantColor[2],
+                  '((castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)).xyz * 0.5 + vec3(0.5))',
+                  HasLinearColorSpace);
+            end;
+          else
+            begin
+              FRHIFragmentShaderSource := StringReplace(
+                FRHIFragmentShaderSource,
+                'void main() {',
+                'CASTLE_DESCRIPTOR_SET(2, 3) uniform sampler2D castle_multi_texture_2;' + LineEnding +
+                'void main() {',
+                []);
+              SecondTexSnippet := SecondTexSnippet + LineEnding +
+                BuildMultiTexStageSnippet(
+                  2, FRHIMultiTextureStageEnv[2],
+                  FRHIMultiTextureStageEnv[2].Combine[cRGB], FRHIMultiTextureStageEnv[2].Combine[cAlpha],
+                  FRHIMultiTextureStageConstantColor[2], 'castle_tex_coord0', HasLinearColorSpace);
+            end;
+        end;
       end;
-      if FRHIHasMultiTextureStage[3] then
+      if FRHIHasMultiTextureStage[3] and (2 >= Length(FRHIUserEffectLayout.Samplers)) then
       begin
-        FRHIFragmentShaderSource := StringReplace(
-          FRHIFragmentShaderSource,
-          'void main() {',
-          'CASTLE_DESCRIPTOR_SET(2, 4) uniform sampler2D castle_multi_texture_3;' + LineEnding +
-          'void main() {',
-          []);
-        SecondTexSnippet := SecondTexSnippet + LineEnding +
-          BuildMultiTexStageSnippet(
-            3, FRHIMultiTextureStageEnv[3],
-            FRHIMultiTextureStageEnv[3].Combine[cRGB], FRHIMultiTextureStageEnv[3].Combine[cAlpha],
-            FRHIMultiTextureStageConstantColor[3], 'castle_tex_coord0', HasLinearColorSpace);
+        case FRHIMultiTextureStageDimension[3] of
+          tdCube:
+            begin
+              FRHIFragmentShaderSource := StringReplace(
+                FRHIFragmentShaderSource,
+                'void main() {',
+                'CASTLE_DESCRIPTOR_SET(2, 4) uniform samplerCube castle_multi_texture_3;' + LineEnding +
+                'void main() {',
+                []);
+              SecondTexSnippet := SecondTexSnippet + LineEnding +
+                BuildMultiTexStageSnippet(
+                  3, FRHIMultiTextureStageEnv[3],
+                  FRHIMultiTextureStageEnv[3].Combine[cRGB], FRHIMultiTextureStageEnv[3].Combine[cAlpha],
+                  FRHIMultiTextureStageConstantColor[3],
+                  '(mat3(castle_ViewMatrixInverse) * (-reflect(-normalize(castle_vertex_eye.xyz), normalize(castle_normal_eye))))',
+                  HasLinearColorSpace);
+            end;
+          td3D:
+            begin
+              FRHIFragmentShaderSource := StringReplace(
+                FRHIFragmentShaderSource,
+                'void main() {',
+                'CASTLE_DESCRIPTOR_SET(2, 4) uniform sampler3D castle_multi_texture_3;' + LineEnding +
+                'void main() {',
+                []);
+              SecondTexSnippet := SecondTexSnippet + LineEnding +
+                BuildMultiTexStageSnippet(
+                  3, FRHIMultiTextureStageEnv[3],
+                  FRHIMultiTextureStageEnv[3].Combine[cRGB], FRHIMultiTextureStageEnv[3].Combine[cAlpha],
+                  FRHIMultiTextureStageConstantColor[3],
+                  '((castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)).xyz * 0.5 + vec3(0.5))',
+                  HasLinearColorSpace);
+            end;
+          else
+            begin
+              FRHIFragmentShaderSource := StringReplace(
+                FRHIFragmentShaderSource,
+                'void main() {',
+                'CASTLE_DESCRIPTOR_SET(2, 4) uniform sampler2D castle_multi_texture_3;' + LineEnding +
+                'void main() {',
+                []);
+              SecondTexSnippet := SecondTexSnippet + LineEnding +
+                BuildMultiTexStageSnippet(
+                  3, FRHIMultiTextureStageEnv[3],
+                  FRHIMultiTextureStageEnv[3].Combine[cRGB], FRHIMultiTextureStageEnv[3].Combine[cAlpha],
+                  FRHIMultiTextureStageConstantColor[3], 'castle_tex_coord0', HasLinearColorSpace);
+            end;
+        end;
       end;
       if Pos('  baseColor *= texture(castle_base_color_texture, castle_tex_coord1);', FRHIFragmentShaderSource) > 0 then
         FRHIFragmentShaderSource := StringReplace(

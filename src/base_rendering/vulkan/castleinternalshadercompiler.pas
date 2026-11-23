@@ -8800,10 +8800,10 @@ begin
                   (Pos('castle_color_per_vertex', Copy(AGLSLSource, Max(1, Pos('void main()', AGLSLSource)), MaxInt)) > 0) then
             CopyWords(BuiltIn3DColorPerVertexFragSPIRV)
           else if (ADebugName = 'CastleMultiTexAdd3DFrag') or
-                  ((Pos('castle_multi_texture_1', AGLSLSource) > 0) and (Pos('+= multiTex1.rgb', AGLSLSource) > 0)) then
+                  ((Pos('uniform sampler2D castle_multi_texture_1;', AGLSLSource) > 0) and (Pos('+= multiTex1.rgb', AGLSLSource) > 0)) then
             CopyWords(BuiltIn3DMultiTexAddFragSPIRV)
           else if (ADebugName = 'CastleMultiTex3DFrag') or
-                  (Pos('castle_multi_texture_1', AGLSLSource) > 0) then
+                  (Pos('uniform sampler2D castle_multi_texture_1;', AGLSLSource) > 0) then
             CopyWords(BuiltIn3DMultiTexModulateFragSPIRV)
           else if (ADebugName = 'CastleCubeTex3DFrag') or
                   (Pos('samplerCube castle_base_color_texture', AGLSLSource) > 0) then

@@ -38422,10 +38422,10 @@ const
     begin
       Comp := AOwner.FindComponent('SceneTexturedSampleThing2');
       if Comp is TCastleScene then
-        AttachSingleTextureEffect(TCastleScene(Comp), 'castle-data:/texture_effect_sepia.fs');
+        AttachSingleTextureEffect(TCastleScene(Comp), 'castle-data:/shaders/texture_effect_sepia.fs');
       Comp2 := AOwner.FindComponent('SceneTexturedSampleThing3');
       if Comp2 is TCastleScene then
-        AttachSingleTextureEffect(TCastleScene(Comp2), 'castle-data:/texture_effect_invert.fs');
+        AttachSingleTextureEffect(TCastleScene(Comp2), 'castle-data:/shaders/texture_effect_invert.fs');
     end else
     if ASpecName = 'shaders/shader_effects_on_background' then
     begin

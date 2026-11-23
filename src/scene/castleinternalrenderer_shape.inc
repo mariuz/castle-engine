@@ -3112,8 +3112,20 @@ begin
       Cache.SetTextureTransform(HasTexTransform, TexTransformMatrix);
       Cache.SetTextureTransform1(HasTexTransform1, TexTransform1Matrix);
       Cache.SetSecondTextureEnv(HasSecondTex, SecondEnv, SecondConstColor);
+      if HasSecondTex and (SecondTex <> nil) then
+        Cache.SetMultiTextureStageDimension(1, SecondTex.Desc.Dimension)
+      else
+        Cache.SetMultiTextureStageDimension(1, td2D);
       Cache.SetMultiTextureStageEnv(2, HasMultiTex2, MultiEnv2, MultiConst2);
+      if HasMultiTex2 and (MultiTex2 <> nil) then
+        Cache.SetMultiTextureStageDimension(2, MultiTex2.Desc.Dimension)
+      else
+        Cache.SetMultiTextureStageDimension(2, td2D);
       Cache.SetMultiTextureStageEnv(3, HasMultiTex3, MultiEnv3, MultiConst3);
+      if HasMultiTex3 and (MultiTex3 <> nil) then
+        Cache.SetMultiTextureStageDimension(3, MultiTex3.Desc.Dimension)
+      else
+        Cache.SetMultiTextureStageDimension(3, td2D);
       Cache.SetClipPlanes(ClipPlanes, ClipPlaneCount);
       Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT, TexGenBoundsR);
       if MirrorPlaneUniforms <> nil then
@@ -3158,23 +3170,20 @@ begin
         HasShaderEffects or HasPointSize or HasLineStipple,
         HasComposedShader);
       UserUniformCount := ExtractRHIUserEffectUniforms;
-      if (UserUniformCount = 0) and (Length(Cache.RHIUserEffectLayout.Samplers) = 0) then
+      if (0 >= Length(Cache.RHIUserEffectLayout.Samplers)) and HasSecondTex and (SecondTex <> nil) then
+        Cache.BindUserEffectTexture(0, SecondTex, SecondSampler);
+      if 1 >= Length(Cache.RHIUserEffectLayout.Samplers) then
       begin
-        if HasSecondTex and (SecondTex <> nil) then
-          Cache.BindUserEffectTexture(0, SecondTex, SecondSampler);
         if HasMultiTex2 and (MultiTex2 <> nil) then
           Cache.BindUserEffectTexture(1, MultiTex2, MultiSamp2)
         else if AlphaTex <> nil then
           Cache.BindUserEffectTexture(1, AlphaTex, AlphaSamp);
+      end;
+      if 2 >= Length(Cache.RHIUserEffectLayout.Samplers) then
+      begin
         if HasMultiTex3 and (MultiTex3 <> nil) then
           Cache.BindUserEffectTexture(2, MultiTex3, MultiSamp3)
         else if SepShinTex <> nil then
-          Cache.BindUserEffectTexture(2, SepShinTex, SepShinSamp);
-      end else
-      begin
-        if (AlphaTex <> nil) and (1 >= Length(Cache.RHIUserEffectLayout.Samplers)) then
-          Cache.BindUserEffectTexture(1, AlphaTex, AlphaSamp);
-        if (SepShinTex <> nil) and (2 >= Length(Cache.RHIUserEffectLayout.Samplers)) then
           Cache.BindUserEffectTexture(2, SepShinTex, SepShinSamp);
       end;
       if (EnvDiffuseTex <> nil) and (EnvDiffuseTex <> EnvCubemapTex) and
