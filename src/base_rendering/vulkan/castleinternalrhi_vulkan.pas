@@ -7169,6 +7169,7 @@ var
   MemProps: VkMemoryPropertyFlags;
   RequiredAlign: VkDeviceSize;
   MovableOwner: Pointer;
+  ForceDedicatedBuf: Boolean;
 begin
   inherited Create(ADevice, ADesc);
 
@@ -7208,9 +7209,14 @@ begin
       MovableOwner := Self;
 
     { Sub-allocate from pooled VkDeviceMemory blocks via TCastleVulkanMemoryAllocator
-      to stay well below Windows WDDM's 4096 maxMemoryAllocationCount limit }
+      to stay well below Windows WDDM's 4096 maxMemoryAllocationCount limit.
+      On live Portability Subset / MoltenVK devices (where maxMemoryAllocationCount is unlimited
+      and Apple Paravirtual MTLHeap / shared-block sub-allocation at non-zero offsets can truncate),
+      use 1:1 dedicated MTLBuffer allocations at offset 0 unless small defragmentation test blocks are configured. }
+    ForceDedicatedBuf := (ADevice.Handle <> nil) and ADevice.IsPortabilitySubsetDevice and
+      (ADevice.MemoryAllocator.PreferredGpuOnlyBlockSize >= 16 * 1024 * 1024);
     FAllocation := ADevice.MemoryAllocator.AllocateBufferMemory(
-      FHandle, ADesc.Size, ADesc.MemoryUsage, False, RequiredAlign, MovableOwner);
+      FHandle, ADesc.Size, ADesc.MemoryUsage, ForceDedicatedBuf, RequiredAlign, MovableOwner);
     FDeviceMemory := FAllocation.DeviceMemory;
     FMemoryOffset := FAllocation.Offset;
     FAllocatedSize := FAllocation.Size;
@@ -7333,9 +7339,7 @@ begin
   if Size = 0 then
     Exit;
 
-  if (FDesc.MemoryUsage = muCpuToGpu) or
-     ((FAllocation.MappedPtr <> nil) and (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
-      (ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+  if FDesc.MemoryUsage = muCpuToGpu then
   begin
     DestPtr := PByte(Map);
     if DestPtr <> nil then
@@ -12764,7 +12768,8 @@ begin
 
   Align := Max(VkDeviceSize(16), FDevice.MemoryAllocator.OptimalBufferCopyOffsetAlignment);
   FRingAllocations[Slot] := FDevice.MemoryAllocator.AllocateBufferMemory(
-    FRingBuffers[Slot], FRingCapacityPerFrame, muCpuToGpu, False, Align);
+    FRingBuffers[Slot], FRingCapacityPerFrame, muCpuToGpu,
+    (FDevice.Handle <> nil) and FDevice.IsPortabilitySubsetDevice, Align);
 
   if (FDevice.Handle <> nil) and Assigned(vkBindBufferMemory) then
     CheckVk(vkBindBufferMemory(FDevice.Handle, FRingBuffers[Slot],
@@ -12833,7 +12838,8 @@ begin
       FOverflowChunks[Slot][ChunkIdx].Buffer := VkBuffer(PtrUInt($71000000) + PtrUInt(FOverflowChunkCount) + 1);
 
     FOverflowChunks[Slot][ChunkIdx].Allocation := FDevice.MemoryAllocator.AllocateBufferMemory(
-      FOverflowChunks[Slot][ChunkIdx].Buffer, ASize, muCpuToGpu, False, EffAlign);
+      FOverflowChunks[Slot][ChunkIdx].Buffer, ASize, muCpuToGpu,
+      (FDevice.Handle <> nil) and FDevice.IsPortabilitySubsetDevice, EffAlign);
 
     if (FDevice.Handle <> nil) and Assigned(vkBindBufferMemory) then
       CheckVk(vkBindBufferMemory(FDevice.Handle, FOverflowChunks[Slot][ChunkIdx].Buffer,
