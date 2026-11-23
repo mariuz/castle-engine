@@ -246,9 +246,16 @@
       const AModelView: TMatrix4;
       const AMaterialIndex: Cardinal = 0): Cardinal;
 
+  private
+    FRHIActiveLightNodes: array[0..CASTLE_MAX_LIGHTS - 1] of TAbstractLightNode;
+    FRHIActiveLightNodeCount: Cardinal;
+    FRHIActiveLightsAssigned: Boolean;
   public
     RHIBindlessMaterialIndex: Cardinal;
     RHIBindlessMaterialRegistered: Boolean;
+
+    procedure SetRHIActiveLightNodes(const ASource: TLightsRenderer);
+    procedure ClearRHIActiveLightNodes;
 
     { Extracts the shape's PBR/Phong/Unlit material block and uploads it to Cache.RHIMaterialBuffer (Set 1, Binding 0). }
     procedure UploadRHIMaterialToCache(out AShadingModel: TCastleShadingModelRHI);
@@ -2072,8 +2079,155 @@ const
     'vec3 direction_eye_to_world_space(vec3 direction_eye) { return castle_CameraRotationInverseMatrix * direction_eye; }';
 var
   UseEyeWorldSpaceLib: Boolean;
+  PerLightPlugSeq: Integer;
 
-  procedure AppendEffectList(const Nodes: TX3DNodeList);
+  function IsGLSLIdentChar(const C: Char): Boolean;
+  begin
+    Result := C in ['A'..'Z', 'a'..'z', '0'..'9', '_'];
+  end;
+
+  function ReplaceGLSLWordIdentifier(const ASource, AOldIdent, ANewIdent: String): String;
+  var
+    SB: TStringBuilder;
+    Idx, SrcLen, IdentLen: Integer;
+    InLineComment, InBlockComment: Boolean;
+    PrevCharOk, NextCharOk: Boolean;
+  begin
+    if (ASource = '') or (AOldIdent = '') or (AOldIdent = ANewIdent) or (Pos(AOldIdent, ASource) = 0) then
+      Exit(ASource);
+    SrcLen := Length(ASource);
+    IdentLen := Length(AOldIdent);
+    SB := TStringBuilder.Create(SrcLen + 64);
+    try
+      Idx := 1;
+      InLineComment := False;
+      InBlockComment := False;
+      while Idx <= SrcLen do
+      begin
+        if InLineComment then
+        begin
+          SB.Append(ASource[Idx]);
+          if ASource[Idx] in [#10, #13] then
+            InLineComment := False;
+          Inc(Idx);
+          Continue;
+        end;
+        if InBlockComment then
+        begin
+          if (Idx < SrcLen) and (ASource[Idx] = '*') and (ASource[Idx + 1] = '/') then
+          begin
+            SB.Append('*/');
+            InBlockComment := False;
+            Inc(Idx, 2);
+          end else
+          begin
+            SB.Append(ASource[Idx]);
+            Inc(Idx);
+          end;
+          Continue;
+        end;
+        if (Idx < SrcLen) and (ASource[Idx] = '/') and (ASource[Idx + 1] = '/') then
+        begin
+          SB.Append('//');
+          InLineComment := True;
+          Inc(Idx, 2);
+          Continue;
+        end;
+        if (Idx < SrcLen) and (ASource[Idx] = '/') and (ASource[Idx + 1] = '*') then
+        begin
+          SB.Append('/*');
+          InBlockComment := True;
+          Inc(Idx, 2);
+          Continue;
+        end;
+        if (Idx + IdentLen - 1 <= SrcLen) and
+           (Copy(ASource, Idx, IdentLen) = AOldIdent) then
+        begin
+          PrevCharOk := (Idx = 1) or (not IsGLSLIdentChar(ASource[Idx - 1]));
+          NextCharOk := (Idx + IdentLen > SrcLen) or (not IsGLSLIdentChar(ASource[Idx + IdentLen]));
+          if PrevCharOk and NextCharOk then
+          begin
+            SB.Append(ANewIdent);
+            Inc(Idx, IdentLen);
+            Continue;
+          end;
+        end;
+        SB.Append(ASource[Idx]);
+        Inc(Idx);
+      end;
+      Result := SB.ToString;
+    finally
+      FreeAndNil(SB);
+    end;
+  end;
+
+  function HasGLSLFunctionDefinition(const ASource, AFuncName: String): Boolean;
+  var
+    P, AfterIdx: Integer;
+  begin
+    Result := False;
+    P := Pos(AFuncName, ASource);
+    while P > 0 do
+    begin
+      AfterIdx := P + Length(AFuncName);
+      if ((P = 1) or (not IsGLSLIdentChar(ASource[P - 1]))) and
+         (AfterIdx <= Length(ASource)) and
+         (ASource[AfterIdx] in ['(', ' ', #9, #10, #13]) then
+        Exit(True);
+      P := Pos(AFuncName, ASource, P + 1);
+    end;
+  end;
+
+  function ScopePerLightEffectSource(const AEffect: TEffectNode;
+    const APartSource: String; const AShaderType: TShaderType;
+    const AUboLightIndex: Integer): String;
+  var
+    DeclIdx: Integer;
+    DeclField: TX3DField;
+    FieldName, ScopedFieldName, ScopedPlugName: String;
+  begin
+    Result := APartSource;
+    if (AUboLightIndex < 0) or (Result = '') then
+      Exit;
+    if AEffect.InterfaceDeclarations <> nil then
+      for DeclIdx := 0 to AEffect.InterfaceDeclarations.Count - 1 do
+      begin
+        DeclField := AEffect.InterfaceDeclarations[DeclIdx].FieldOrLastEventValue;
+        if DeclField <> nil then
+          FieldName := DeclField.X3DName
+        else
+          FieldName := '';
+        if (FieldName = '') and (AEffect.InterfaceDeclarations[DeclIdx].FieldOrEvent <> nil) then
+          FieldName := AEffect.InterfaceDeclarations[DeclIdx].FieldOrEvent.X3DName;
+        if FieldName <> '' then
+        begin
+          ScopedFieldName := Format('castle_light%d_%s', [AUboLightIndex, FieldName]);
+          Result := ReplaceGLSLWordIdentifier(Result, FieldName, ScopedFieldName);
+        end;
+      end;
+    if (AShaderType = stFragment) and HasGLSLFunctionDefinition(Result, 'PLUG_light_scale') then
+    begin
+      Inc(PerLightPlugSeq);
+      ScopedPlugName := Format('castle_perlight_scale_%d_%d', [AUboLightIndex, PerLightPlugSeq]);
+      Result := ReplaceGLSLWordIdentifier(Result, 'PLUG_light_scale', ScopedPlugName) + LineEnding +
+        'void PLUG_light_scale(inout float castle_ls_scale, const in vec3 castle_ls_normal_eye, const in vec3 castle_ls_light_dir)' + LineEnding +
+        '{' + LineEnding +
+        Format('  if (castle_current_light_index == %du)', [AUboLightIndex]) + LineEnding +
+        Format('    %s(castle_ls_scale, castle_ls_normal_eye, castle_ls_light_dir);', [ScopedPlugName]) + LineEnding +
+        '}';
+    end;
+  end;
+
+  function IsSupportedPunctualLightNode(const ANode: TAbstractLightNode): Boolean;
+  begin
+    Result := (ANode <> nil) and ANode.FdOn.Value and
+      ((ANode is TAbstractDirectionalLightNode) or
+       (ANode is TSpotLightNode_1) or
+       (ANode is TSpotLightNode) or
+       (ANode is TAbstractPointLightNode));
+  end;
+
+  procedure AppendEffectList(const Nodes: TX3DNodeList; const AUboLightIndex: Integer = -1);
   var
     I, J: Integer;
     Effect: TEffectNode;
@@ -2096,6 +2250,9 @@ var
             begin
               Part := TEffectPartNode(Effect.FdParts[J]);
               PartSource := Trim(Part.Contents);
+              if AUboLightIndex >= 0 then
+                PartSource := ScopePerLightEffectSource(
+                  Effect, PartSource, Part.ShaderType, AUboLightIndex);
               if PartSource <> '' then
                 case Part.ShaderType of
                   stVertex:
@@ -2140,12 +2297,13 @@ var
 var
   ShapeState: TX3DGraphTraverseState;
   App: TAppearanceNode;
-  I: Integer;
+  I, UboLightIdx: Integer;
 begin
   AVertexEffectCode := '';
   AFragmentEffectCode := '';
   AGeometryEffectCode := '';
   UseEyeWorldSpaceLib := False;
+  PerLightPlugSeq := 0;
   ShapeState := OriginalState;
   if ShapeState = nil then
     ShapeState := State;
@@ -2179,12 +2337,24 @@ begin
     end;
   end;
   if State <> nil then
-  begin
     AppendEffectList(State.Effects);
-    if State.Lights <> nil then
-      for I := 0 to State.Lights.Count - 1 do
-        if State.Lights.L[I].Node <> nil then
-          AppendEffectList(State.Lights.L[I].Node.FdEffects.InternalItems);
+  if FRHIActiveLightsAssigned then
+  begin
+    for I := 0 to Integer(FRHIActiveLightNodeCount) - 1 do
+      if FRHIActiveLightNodes[I] <> nil then
+        AppendEffectList(FRHIActiveLightNodes[I].FdEffects.InternalItems, I);
+  end else
+  if (State <> nil) and (State.Lights <> nil) then
+  begin
+    UboLightIdx := 0;
+    for I := 0 to State.Lights.Count - 1 do
+      if IsSupportedPunctualLightNode(State.Lights.L[I].Node) then
+      begin
+        AppendEffectList(State.Lights.L[I].Node.FdEffects.InternalItems, UboLightIdx);
+        Inc(UboLightIdx);
+        if UboLightIdx >= CASTLE_MAX_LIGHTS then
+          Break;
+      end;
   end;
   if UseEyeWorldSpaceLib then
   begin
@@ -2349,7 +2519,8 @@ var
     end;
   end;
 
-  procedure ProcessInterfaceDeclarations(const AIDecls: TX3DInterfaceDeclarationList);
+  procedure ProcessInterfaceDeclarations(const AIDecls: TX3DInterfaceDeclarationList;
+    const AFieldNamePrefix: String = '');
   var
     I, J, K: Integer;
     Field: TX3DField;
@@ -2375,6 +2546,8 @@ var
       FieldName := Field.X3DName;
       if FieldName = '' then
         FieldName := AIDecls[I].FieldOrEvent.X3DName;
+      if (AFieldNamePrefix <> '') and (FieldName <> '') then
+        FieldName := AFieldNamePrefix + FieldName;
       if Field is TSFNode then
       begin
         if UseNamedLayout and Cache.RHIUserEffectLayout.FindSampler(FieldName, SDesc) then
@@ -2623,7 +2796,16 @@ var
     end;
   end;
 
-  procedure ProcessEffectList(const ANodes: TX3DNodeList);
+  function IsSupportedPunctualLightNode(const ANode: TAbstractLightNode): Boolean;
+  begin
+    Result := (ANode <> nil) and ANode.FdOn.Value and
+      ((ANode is TAbstractDirectionalLightNode) or
+       (ANode is TSpotLightNode_1) or
+       (ANode is TSpotLightNode) or
+       (ANode is TAbstractPointLightNode));
+  end;
+
+  procedure ProcessEffectList(const ANodes: TX3DNodeList; const AFieldNamePrefix: String = '');
   var
     I: Integer;
     Effect: TEffectNode;
@@ -2635,7 +2817,7 @@ var
       begin
         Effect := TEffectNode(ANodes[I]);
         if Effect.FdEnabled.Value and (Effect.Language in [slDefault, slGLSL]) then
-          ProcessInterfaceDeclarations(Effect.InterfaceDeclarations);
+          ProcessInterfaceDeclarations(Effect.InterfaceDeclarations, AFieldNamePrefix);
       end;
   end;
 
@@ -2659,7 +2841,7 @@ var
 var
   ShapeState: TX3DGraphTraverseState;
   App: TAppearanceNode;
-  I: Integer;
+  I, UboLightIdx: Integer;
 begin
   Result := 0;
   UBOOffset := 0;
@@ -2683,13 +2865,17 @@ begin
   ShapeState := OriginalState;
   if ShapeState = nil then
     ShapeState := State;
-  if ShapeState = nil then
+  if (ShapeState = nil) and (not FRHIActiveLightsAssigned) then
     Exit;
 
-  if ShapeState.ShapeNode <> nil then
-    App := ShapeState.ShapeNode.Appearance
-  else
-    App := ShapeState.Appearance;
+  if ShapeState <> nil then
+  begin
+    if ShapeState.ShapeNode <> nil then
+      App := ShapeState.ShapeNode.Appearance
+    else
+      App := ShapeState.Appearance;
+  end else
+    App := nil;
 
   if App <> nil then
   begin
@@ -2721,12 +2907,26 @@ begin
       ProcessTextureNodeEffects(TUnlitMaterialNode(App.Material).EmissiveTexture);
   end;
   if State <> nil then
-  begin
     ProcessEffectList(State.Effects);
-    if State.Lights <> nil then
-      for I := 0 to State.Lights.Count - 1 do
-        if State.Lights.L[I].Node <> nil then
-          ProcessEffectList(State.Lights.L[I].Node.FdEffects.InternalItems);
+  if FRHIActiveLightsAssigned then
+  begin
+    for I := 0 to Integer(FRHIActiveLightNodeCount) - 1 do
+      if FRHIActiveLightNodes[I] <> nil then
+        ProcessEffectList(FRHIActiveLightNodes[I].FdEffects.InternalItems,
+          Format('castle_light%d_', [I]));
+  end else
+  if (State <> nil) and (State.Lights <> nil) then
+  begin
+    UboLightIdx := 0;
+    for I := 0 to State.Lights.Count - 1 do
+      if IsSupportedPunctualLightNode(State.Lights.L[I].Node) then
+      begin
+        ProcessEffectList(State.Lights.L[I].Node.FdEffects.InternalItems,
+          Format('castle_light%d_', [UboLightIdx]));
+        Inc(UboLightIdx);
+        if UboLightIdx >= CASTLE_MAX_LIGHTS then
+          Break;
+      end;
   end;
 
   if UseNamedLayout and
@@ -2736,6 +2936,28 @@ begin
 
   if (MaxUploadEnd > 0) and (Cache <> nil) then
     Cache.UploadUserEffectBlock(@UBOData[0], MaxUploadEnd);
+end;
+
+procedure TX3DRendererShape.SetRHIActiveLightNodes(const ASource: TLightsRenderer);
+var
+  I: Cardinal;
+begin
+  FillChar(FRHIActiveLightNodes, SizeOf(FRHIActiveLightNodes), 0);
+  FRHIActiveLightNodeCount := 0;
+  FRHIActiveLightsAssigned := ASource <> nil;
+  if ASource = nil then
+    Exit;
+  FRHIActiveLightNodeCount := Min(ASource.RHIActiveLightNodeCount, Cardinal(CASTLE_MAX_LIGHTS));
+  if FRHIActiveLightNodeCount > 0 then
+    for I := 0 to FRHIActiveLightNodeCount - 1 do
+      FRHIActiveLightNodes[I] := ASource.GetRHIActiveLightNode(I);
+end;
+
+procedure TX3DRendererShape.ClearRHIActiveLightNodes;
+begin
+  FillChar(FRHIActiveLightNodes, SizeOf(FRHIActiveLightNodes), 0);
+  FRHIActiveLightNodeCount := 0;
+  FRHIActiveLightsAssigned := True;
 end;
 
 function TX3DRendererShape.BuildRHIBindlessMaterialEntry(

@@ -1890,7 +1890,11 @@ begin
       SceneLights := nil;
 
     LightsRenderer.Render(Shape, FinalGlobalLights, SceneLights, Shader);
-  end;
+    if RHIDevice <> nil then
+      Shape.SetRHIActiveLightNodes(LightsRenderer);
+  end else
+  if RHIDevice <> nil then
+    Shape.ClearRHIActiveLightNodes;
 
   RenderShapeFog(Shape, RenderOptions, Shader, Lighting);
 end;

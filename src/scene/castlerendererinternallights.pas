@@ -41,6 +41,8 @@ type
     FRHILightsBuffer: TRHIBuffer;
     FRHILightsOwnerDevice: TRHIDevice;
     FLightsUniformBlock: TCastleLightsUniformBlock;
+    FRHIActiveLightNodes: array[0..CASTLE_MAX_LIGHTS - 1] of TAbstractLightNode;
+    FRHIActiveLightNodeCount: Cardinal;
     function InsideLightRadius(const Light: TLightInstance; const Shader: TShader): Boolean;
     { This avoids configuring the same light many times in case of fixed-function.
 
@@ -76,6 +78,8 @@ type
 
     property RHILightsBuffer: TRHIBuffer read FRHILightsBuffer;
     property LightsUniformBlock: TCastleLightsUniformBlock read FLightsUniformBlock;
+    property RHIActiveLightNodeCount: Cardinal read FRHIActiveLightNodeCount;
+    function GetRHIActiveLightNode(const AIndex: Cardinal): TAbstractLightNode;
 
     { Maximum lights per shape.
 
@@ -428,6 +432,12 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
 
         if Idx >= 0 then
         begin
+          if Idx < CASTLE_MAX_LIGHTS then
+          begin
+            FRHIActiveLightNodes[Idx] := Node;
+            if Cardinal(Idx + 1) > FRHIActiveLightNodeCount then
+              FRHIActiveLightNodeCount := Cardinal(Idx + 1);
+          end;
           if AddedCount < CASTLE_MAX_LIGHTS then
           begin
             AddedLights[AddedCount] := Light;
@@ -463,6 +473,8 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
 
 begin
   UniformBlock.Clear;
+  FRHIActiveLightNodeCount := 0;
+  FillChar(FRHIActiveLightNodes, SizeOf(FRHIActiveLightNodes), 0);
   NextShadowSlotIdx := 0;
   AddedCount := 0;
   EffectiveMaxLights := Min(FMaxLightsPerShape, Cardinal(CASTLE_MAX_LIGHTS));
@@ -471,6 +483,14 @@ begin
   AddList(GlobalLights, True);
   if UniformBlock.Count < EffectiveMaxLights then
     AddList(SceneLights, False);
+end;
+
+function TLightsRenderer.GetRHIActiveLightNode(const AIndex: Cardinal): TAbstractLightNode;
+begin
+  if AIndex < FRHIActiveLightNodeCount then
+    Result := FRHIActiveLightNodes[AIndex]
+  else
+    Result := nil;
 end;
 
 procedure TLightsRenderer.UploadLightsToRHI;

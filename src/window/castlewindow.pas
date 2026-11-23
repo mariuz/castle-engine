@@ -2200,10 +2200,18 @@ type
     FSwitchingRenderBackend: Boolean;
     FPendingRenderBackendSwitch: Boolean;
     FRenderBackendHotSwitchCount: Cardinal;
+    FAutoExitFrames: Cardinal;
+    FAutoExitRenderedFrames: Cardinal;
+    FCaptureScreenshot: String;
+    FCaptureScreenshotDone: Boolean;
 
     FOpenWindows: TWindowList;
     procedure HandleApplicationRenderBackendChange(Sender: TObject);
     procedure PerformRenderBackendHotSwitch;
+    procedure SetAutoExitFrames(const Value: Cardinal);
+    procedure SetCaptureScreenshot(const Value: String);
+    procedure ApplyAutoExitEnvironmentVariables;
+    procedure NotifyWindowFrameRendered(const AWindow: TCastleWindow);
     function GetOpenWindows(Index: integer): TCastleWindow;
     { Run @link(OnInitialize) and
       @link(TCastleApplicationProperties.OnInitializeJavaActivity) callbacks,
@@ -2614,6 +2622,16 @@ end.
         @item(Select the active rendering backend
           (@link(TCastleApplicationProperties.RenderBackend ApplicationProperties.RenderBackend))
           without modifying @code(CastleEngineManifest.xml).)
+
+        @itemLabel @--auto-exit-frames COUNT
+        @item(Automatically close open windows and exit cleanly after rendering
+          COUNT frames (0 disables automatic exit). Also configurable via
+          @code(CASTLE_AUTO_EXIT_FRAMES).)
+
+        @itemLabel @--capture-screenshot FILE-OR-URL
+        @item(Capture a screenshot to FILE-OR-URL right before automatic exit
+          (or after the first rendered frame when @code(--auto-exit-frames) is 0).
+          Also configurable via @code(CASTLE_CAPTURE_SCREENSHOT).)
       )
 
       Moreover this also handles parameters from @link(TCastleWindow.ParseParameters),
@@ -2700,6 +2718,14 @@ end.
       TCastleWindow instances (GLContextClose -> device teardown/recreation -> resource re-prep). }
     function SwitchRenderBackend(const ANewBackend: TRenderBackend): Boolean;
     property RenderBackendHotSwitchCount: Cardinal read FRenderBackendHotSwitchCount;
+
+    { Automatically close all open windows and exit after rendering @name frames (0 disables). }
+    property AutoExitFrames: Cardinal read FAutoExitFrames write SetAutoExitFrames;
+    property AutoExitRenderedFrames: Cardinal read FAutoExitRenderedFrames;
+    { Optional screenshot filename or URL captured automatically before @link(AutoExitFrames) closes. }
+    property CaptureScreenshot: String read FCaptureScreenshot write SetCaptureScreenshot;
+    { Reset @link(AutoExitRenderedFrames), screenshot completion state, and Terminated flag. }
+    procedure ResetAutoExitState(const ClearConfig: Boolean = False);
 
     {$ifdef FPC}
     property LimitFPS: Single read GetLimitFPS write SetLimitFPS;
@@ -3731,9 +3757,13 @@ begin
     FrameProfiler.Stop(fmRender);
   end;
 
-  if (not UnitFinalization) and Application.FPendingRenderBackendSwitch and
+      if (not UnitFinalization) and Application.FPendingRenderBackendSwitch and
      (ActiveCommandList = nil) then
     Application.PerformRenderBackendHotSwitch;
+
+  if (not UnitFinalization) and (not Closed) and
+     (ActiveCommandList = nil) then
+    Application.NotifyWindowFrameRendered(Self);
 end;
 
 procedure TCastleWindow.DoKeyDown(const Key: TKey; const KeyString: String);
@@ -3955,6 +3985,10 @@ end;
 
 function TCastleWindow.AllowSuspendForInput: boolean;
 begin
+  if (not UnitFinalization) and
+     ((Application.FAutoExitFrames > 0) or
+      ((Application.FCaptureScreenshot <> '') and (not Application.FCaptureScreenshotDone))) then
+    Exit(false);
   Result := Container.AllowSuspendForInput and not (Invalidated or FpsShowOnCaption);
 end;
 
@@ -4649,6 +4683,7 @@ begin
   if ApplicationProperties <> nil then
     ApplicationProperties.OnRenderBackendChange.Add(
       {$ifdef FPC}@{$endif}HandleApplicationRenderBackendChange);
+  ApplyAutoExitEnvironmentVariables;
 end;
 
 destructor TCastleApplication.Destroy;
@@ -4778,6 +4813,94 @@ begin
   if FPendingRenderBackendSwitch and (ActiveCommandList = nil) then
     PerformRenderBackendHotSwitch;
   Result := (ANewBackend <> backendVulkan) or (RHIDevice is TVulkanRHIDevice);
+end;
+
+procedure TCastleApplication.SetAutoExitFrames(const Value: Cardinal);
+begin
+  FAutoExitFrames := Value;
+  FAutoExitRenderedFrames := 0;
+  if (Value > 0) and (FOpenWindows <> nil) then
+    FOpenWindows.Invalidate;
+end;
+
+procedure TCastleApplication.SetCaptureScreenshot(const Value: String);
+begin
+  FCaptureScreenshot := Value;
+  FCaptureScreenshotDone := False;
+  if (Value <> '') and (FOpenWindows <> nil) then
+    FOpenWindows.Invalidate;
+end;
+
+procedure TCastleApplication.ResetAutoExitState(const ClearConfig: Boolean);
+begin
+  FAutoExitRenderedFrames := 0;
+  FCaptureScreenshotDone := False;
+  if ClearConfig then
+  begin
+    FAutoExitFrames := 0;
+    FCaptureScreenshot := '';
+  end;
+  inherited Initialize;
+end;
+
+procedure TCastleApplication.ApplyAutoExitEnvironmentVariables;
+var
+  EnvFramesStr, EnvScreenshotStr: String;
+  ParsedEnvFrames: Integer;
+begin
+  EnvFramesStr := Trim(GetEnvironmentVariable('CASTLE_AUTO_EXIT_FRAMES'));
+  if (EnvFramesStr <> '') and (FAutoExitFrames = 0) and
+     TryStrToInt(EnvFramesStr, ParsedEnvFrames) and (ParsedEnvFrames > 0) then
+    SetAutoExitFrames(Cardinal(ParsedEnvFrames));
+
+  EnvScreenshotStr := Trim(GetEnvironmentVariable('CASTLE_CAPTURE_SCREENSHOT'));
+  if (EnvScreenshotStr <> '') and (FCaptureScreenshot = '') then
+    SetCaptureScreenshot(EnvScreenshotStr);
+end;
+
+procedure TCastleApplication.NotifyWindowFrameRendered(const AWindow: TCastleWindow);
+var
+  ShouldCaptureNow: Boolean;
+  ScreenshotUrl, ScreenshotFile, ScreenshotDir: String;
+begin
+  if (AWindow = nil) or AWindow.Closed then
+    Exit;
+  if (FAutoExitFrames = 0) and
+     ((FCaptureScreenshot = '') or FCaptureScreenshotDone) then
+    Exit;
+
+  Inc(FAutoExitRenderedFrames);
+
+  ShouldCaptureNow := (FCaptureScreenshot <> '') and (not FCaptureScreenshotDone) and
+    (((FAutoExitFrames > 0) and (FAutoExitRenderedFrames >= FAutoExitFrames)) or
+     ((FAutoExitFrames = 0) and (FAutoExitRenderedFrames >= 1)));
+  if ShouldCaptureNow then
+  begin
+    FCaptureScreenshotDone := True;
+    ScreenshotUrl := AbsoluteUri(FCaptureScreenshot);
+    ScreenshotFile := UriToFilenameSafe(ScreenshotUrl);
+    if ScreenshotFile <> '' then
+    begin
+      ScreenshotDir := ExtractFileDir(ScreenshotFile);
+      if ScreenshotDir <> '' then
+        ForceDirectories(ScreenshotDir);
+    end;
+    AWindow.Container.SaveScreen(ScreenshotUrl);
+  end;
+
+  if FAutoExitFrames > 0 then
+  begin
+    if FAutoExitRenderedFrames < FAutoExitFrames then
+      AWindow.Invalidate
+    else
+    begin
+      if (GetEnvironmentVariable('CASTLE_VULKAN_VALIDATION') = '1') and
+         (RHIDevice is TVulkanRHIDevice) then
+        TVulkanRHIDevice(RHIDevice).AssertZeroValidationErrors(
+          'AutoExitSmokeGate.' + ApplicationName);
+      CloseAllOpenWindows;
+    end;
+  end;
 end;
 
 function TCastleApplication.GetMainContainer: TCastleContainer;
@@ -5022,6 +5145,10 @@ function TCastleApplication.AllowSuspendForInput: boolean;
 var
   I: Integer;
 begin
+  if (FAutoExitFrames > 0) or
+     ((FCaptureScreenshot <> '') and (not FCaptureScreenshotDone)) then
+    Exit(false);
+
   Result := ApplicationProperties.OnUpdate.Count = 0;
   if not Result then Exit;
 
@@ -5082,6 +5209,8 @@ var
   NowTime: TTimerResult;
   TimeRemainingFloat: Single;
 begin
+  if FAutoExitFrames > 0 then
+    Exit;
   if ApplicationProperties.LimitFPS > 0 then
   begin
     NowTime := Timer;
@@ -5262,7 +5391,9 @@ begin
     OptionDescription('--no-limit-fps', 'Disable FPS limit. (We cap FPS by default, to save CPU and laptop battery.) Use this along with disabled V-Sync to see the maximum possible FPS.') + NL +
     OptionDescription('--capabilities automatic|force-fixed-function|force-modern', 'Force OpenGL context to have specific capabilities, to test rendering on modern or ancient GPUs.') + NL +
     OptionDescription('--pretend-touch-device', 'Pretend this is a device with a touch screen, for debugging purposes.') + NL +
-    OptionDescription('--render-backend auto|opengl|opengles|vulkan', 'Force active rendering backend (Vulkan 1.3+, OpenGL, OpenGLES, or automatic).');
+    OptionDescription('--render-backend auto|opengl|opengles|vulkan', 'Force active rendering backend (Vulkan 1.3+, OpenGL, OpenGLES, or automatic).') + NL +
+    OptionDescription('--auto-exit-frames COUNT', 'Automatically close windows and exit after rendering COUNT frames (0 disables).') + NL +
+    OptionDescription('--capture-screenshot FILE-OR-URL', 'Save screenshot to FILE-OR-URL before auto-exit (or after frame 1 when --auto-exit-frames is 0).');
 end;
 
 // TODO: why this doesn't work as static TCastleApplication.OptionProc ?
@@ -5271,6 +5402,7 @@ procedure ApplicationOptionProc(OptionNum: Integer; HasArgument: boolean;
 var
   HelpString: String;
   ParsedBackend: TRenderBackend;
+  ParsedAutoExitFrames: Integer;
 begin
   case OptionNum of
     0:begin
@@ -5317,13 +5449,21 @@ begin
             [Argument]);
         ApplicationProperties.ApplyOverrideRenderBackend(ParsedBackend);
       end;
+    8:begin
+        if (not TryStrToInt(Argument, ParsedAutoExitFrames)) or (ParsedAutoExitFrames < 0) then
+          raise EInvalidParams.CreateFmt(
+            'Invalid --auto-exit-frames value "%s" (expected non-negative integer)',
+            [Argument]);
+        Application.AutoExitFrames := Cardinal(ParsedAutoExitFrames);
+      end;
+    9:Application.CaptureScreenshot := Argument;
     else raise EInternalError.Create('ApplicationOptionProc: unhandled OptionNum');
   end;
 end;
 
 procedure TCastleApplication.ParseStandardParameters;
 const
-  Options: array [0..7] of TOption =
+  Options: array [0..9] of TOption =
   (
     (Short: 'h'; Long: 'help'; Argument: oaNone),
     (Short: 'v'; Long: 'version'; Argument: oaNone),
@@ -5332,7 +5472,9 @@ const
     (Short: #0 ; Long: 'no-limit-fps'; Argument: oaNone),
     (Short: #0 ; Long: 'capabilities'; Argument: oaRequired),
     (Short: #0 ; Long: 'pretend-touch-device'; Argument: oaNone),
-    (Short: #0 ; Long: 'render-backend'; Argument: oaRequired)
+    (Short: #0 ; Long: 'render-backend'; Argument: oaRequired),
+    (Short: #0 ; Long: 'auto-exit-frames'; Argument: oaRequired),
+    (Short: #0 ; Long: 'capture-screenshot'; Argument: oaRequired)
   );
 
   {$ifdef DARWIN}
@@ -5363,6 +5505,7 @@ begin
     if MainWindow <> nil then
       MainWindow.ParseParameters;
 
+    ApplyAutoExitEnvironmentVariables;
     Parameters.Parse(Options, @ApplicationOptionProc, Self, true);
 
   { With FPC, if something here raises an exception,

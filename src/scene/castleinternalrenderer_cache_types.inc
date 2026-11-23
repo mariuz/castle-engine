@@ -239,13 +239,26 @@
     FRHIMaterialBlock: TCastleMaterialUniformBlock;
     FRHIMaterialUploadCount: Cardinal;
     FRHIUploadCount: Cardinal;
+    FRHIUserEffectSlots: array of record
+      Buffer: TRHIBuffer;
+      DescriptorSet: TRHIDescriptorSet;
+      Data: TBytes;
+      SkinningBuffer: TRHIBuffer;
+      Textures: array[0..CASTLE_MAX_USER_EFFECT_SAMPLERS - 1] of TRHITexture;
+      Samplers: array[0..CASTLE_MAX_USER_EFFECT_SAMPLERS - 1] of TRHISampler;
+    end;
+    FActiveRHIUserEffectSlot: Integer;
+    FNextRHIUserEffectSlotEvict: Cardinal;
 
     { Like TX3DRendererShape.LoadArraysToVbo,
       but takes explicit DynamicGeometry. }
     procedure LoadArraysToVbo(const DynamicGeometry: boolean);
     procedure GLContextClose;
+    procedure FreeRHIUserEffectSlots;
     procedure EnsureRHIDeviceMatch;
     procedure EnsureRHISet2DescriptorSet;
+    function GetActiveRHIUserEffectBuffer: TRHIBuffer;
+    function GetActiveRHISkinningDescriptorSet: TRHIDescriptorSet;
     function GetRHIUserEffectTexture(const AIndex: Cardinal): TRHITexture;
     function GetRHIUserEffectSampler(const AIndex: Cardinal): TRHISampler;
     function GetRHIClipPlane(const AIndex: Cardinal): TVector4;
@@ -415,12 +428,12 @@
     property RHIComposedFragSource: String read FRHIComposedFragSource;
     property RHIComposedGeomSource: String read FRHIComposedGeomSource;
     property RHIUserEffectLayout: TUserEffectShaderLayout read FRHIUserEffectLayout;
-    property RHIUserEffectBuffer: TRHIBuffer read FRHIUserEffectBuffer;
+    property RHIUserEffectBuffer: TRHIBuffer read GetActiveRHIUserEffectBuffer;
     property RHIUserEffectUploadCount: Cardinal read FRHIUserEffectUploadCount;
     property RHIUserEffectTexture[const AIndex: Cardinal]: TRHITexture read GetRHIUserEffectTexture;
     property RHIUserEffectSampler[const AIndex: Cardinal]: TRHISampler read GetRHIUserEffectSampler;
     property RHISkinningDescriptorLayout: TRHIDescriptorSetLayout read FRHISkinningDescriptorLayout;
-    property RHISkinningDescriptorSet: TRHIDescriptorSet read FRHISkinningDescriptorSet;
+    property RHISkinningDescriptorSet: TRHIDescriptorSet read GetActiveRHISkinningDescriptorSet;
     property RHIVertexShader: TRHIShaderModule read FRHIVertexShader;
     property RHIFragmentShader: TRHIShaderModule read FRHIFragmentShader;
     property RHIGeometryShader: TRHIShaderModule read FRHIGeometryShader;
@@ -472,6 +485,21 @@ begin
   FRHIEnvLightColorIntensity := Vector3(1.0, 1.0, 1.0);
   FRHITexGenProjectorMatrix := TMatrix4.Identity;
   FRHIShadowMapSize := 128;
+  FActiveRHIUserEffectSlot := -1;
+end;
+
+procedure TShapeCache.FreeRHIUserEffectSlots;
+var
+  SlotIdx: Integer;
+begin
+  for SlotIdx := 0 to High(FRHIUserEffectSlots) do
+  begin
+    FreeAndNil(FRHIUserEffectSlots[SlotIdx].DescriptorSet);
+    FreeAndNil(FRHIUserEffectSlots[SlotIdx].Buffer);
+  end;
+  SetLength(FRHIUserEffectSlots, 0);
+  FActiveRHIUserEffectSlot := -1;
+  FNextRHIUserEffectSlotEvict := 0;
 end;
 
 destructor TShapeCache.Destroy;
@@ -501,6 +529,7 @@ begin
   FreeAndNil(FRHIIndexBuffer);
   FreeAndNil(FRHIJointBuffer);
   FreeAndNil(FRHISkinningUBOBuffer);
+  FreeRHIUserEffectSlots;
   FreeAndNil(FRHIUserEffectBuffer);
   FreeAndNil(FRHISet2FallbackUBO);
   FreeAndNil(FRHIMaterialBuffer);
@@ -540,6 +569,7 @@ begin
     FreeAndNil(FRHIIndexBuffer);
     FreeAndNil(FRHIJointBuffer);
     FreeAndNil(FRHISkinningUBOBuffer);
+    FreeRHIUserEffectSlots;
     FreeAndNil(FRHIUserEffectBuffer);
     FreeAndNil(FRHISet2FallbackUBO);
     FillChar(FRHIUserEffectTextures, SizeOf(FRHIUserEffectTextures), 0);
@@ -628,6 +658,22 @@ begin
       FRHISkinningDescriptorSet.Update;
     end;
   end;
+end;
+
+function TShapeCache.GetActiveRHIUserEffectBuffer: TRHIBuffer;
+begin
+  if (FActiveRHIUserEffectSlot >= 0) and (FActiveRHIUserEffectSlot <= High(FRHIUserEffectSlots)) then
+    Result := FRHIUserEffectSlots[FActiveRHIUserEffectSlot].Buffer
+  else
+    Result := FRHIUserEffectBuffer;
+end;
+
+function TShapeCache.GetActiveRHISkinningDescriptorSet: TRHIDescriptorSet;
+begin
+  if (FActiveRHIUserEffectSlot >= 0) and (FActiveRHIUserEffectSlot <= High(FRHIUserEffectSlots)) then
+    Result := FRHIUserEffectSlots[FActiveRHIUserEffectSlot].DescriptorSet
+  else
+    Result := FRHISkinningDescriptorSet;
 end;
 
 function TShapeCache.GetRHIUserEffectTexture(const AIndex: Cardinal): TRHITexture;
@@ -724,15 +770,118 @@ begin
 end;
 
 procedure TShapeCache.UploadUserEffectBlock(const AData: Pointer; const ASize: PtrUInt);
+const
+  MaxRHIUserEffectSlots = 16;
 var
   BufDesc: TRHIBufferDesc;
   AlignedSize: PtrUInt;
+  {$ifndef WASI}
+  ActiveSkinBuf: TRHIBuffer;
+  FoundSlot, SlotIdx, TexIdx: Integer;
+  TexMatch: Boolean;
+  {$endif}
 begin
   if (RHIDevice = nil) or (AData = nil) or (ASize = 0) then
     Exit;
 
   AlignedSize := (ASize + 15) and not PtrUInt(15);
   EnsureRHISet2DescriptorSet;
+  {$ifndef WASI}
+  if (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) and
+     (FRHISkinningDescriptorLayout <> nil) then
+  begin
+    if FRHISkinningUBOBuffer <> nil then
+      ActiveSkinBuf := FRHISkinningUBOBuffer
+    else if FRHIJointBuffer <> nil then
+      ActiveSkinBuf := FRHIJointBuffer
+    else
+      ActiveSkinBuf := FRHISet2FallbackUBO;
+
+    FoundSlot := -1;
+    for SlotIdx := 0 to High(FRHIUserEffectSlots) do
+    begin
+      if (Length(FRHIUserEffectSlots[SlotIdx].Data) = Integer(ASize)) and
+         (FRHIUserEffectSlots[SlotIdx].SkinningBuffer = ActiveSkinBuf) and
+         CompareMem(@FRHIUserEffectSlots[SlotIdx].Data[0], AData, ASize) then
+      begin
+        TexMatch := True;
+        for TexIdx := 0 to High(FRHIUserEffectTextures) do
+          if (FRHIUserEffectSlots[SlotIdx].Textures[TexIdx] <> FRHIUserEffectTextures[TexIdx]) or
+             (FRHIUserEffectSlots[SlotIdx].Samplers[TexIdx] <> FRHIUserEffectSamplers[TexIdx]) then
+          begin
+            TexMatch := False;
+            Break;
+          end;
+        if TexMatch then
+        begin
+          FoundSlot := SlotIdx;
+          Break;
+        end;
+      end;
+    end;
+
+    if FoundSlot >= 0 then
+    begin
+      FActiveRHIUserEffectSlot := FoundSlot;
+      Inc(FRHIUserEffectUploadCount);
+      Exit;
+    end;
+
+    if Length(FRHIUserEffectSlots) < MaxRHIUserEffectSlots then
+    begin
+      SlotIdx := Length(FRHIUserEffectSlots);
+      SetLength(FRHIUserEffectSlots, SlotIdx + 1);
+      FRHIUserEffectSlots[SlotIdx].Buffer := nil;
+      FRHIUserEffectSlots[SlotIdx].DescriptorSet := RHIDevice.CreateDescriptorSet(FRHISkinningDescriptorLayout);
+    end else
+    begin
+      SlotIdx := Integer(FNextRHIUserEffectSlotEvict mod MaxRHIUserEffectSlots);
+      Inc(FNextRHIUserEffectSlotEvict);
+    end;
+
+    if (FRHIUserEffectSlots[SlotIdx].Buffer <> nil) and
+       (FRHIUserEffectSlots[SlotIdx].Buffer.Desc.Size = AlignedSize) then
+      FRHIUserEffectSlots[SlotIdx].Buffer.UploadData(AData^, ASize)
+    else
+    begin
+      FreeAndNil(FRHIUserEffectSlots[SlotIdx].Buffer);
+      BufDesc := TRHIBufferDesc.Create(AlignedSize, [buUniform], muCpuToGpu, 'CastleUserEffectUBO');
+      FRHIUserEffectSlots[SlotIdx].Buffer := RHIDevice.CreateBuffer(BufDesc, nil);
+      FRHIUserEffectSlots[SlotIdx].Buffer.UploadData(AData^, ASize);
+    end;
+
+    SetLength(FRHIUserEffectSlots[SlotIdx].Data, ASize);
+    Move(AData^, FRHIUserEffectSlots[SlotIdx].Data[0], ASize);
+    FRHIUserEffectSlots[SlotIdx].SkinningBuffer := ActiveSkinBuf;
+    for TexIdx := 0 to High(FRHIUserEffectTextures) do
+    begin
+      FRHIUserEffectSlots[SlotIdx].Textures[TexIdx] := FRHIUserEffectTextures[TexIdx];
+      FRHIUserEffectSlots[SlotIdx].Samplers[TexIdx] := FRHIUserEffectSamplers[TexIdx];
+    end;
+
+    if FRHIUserEffectSlots[SlotIdx].DescriptorSet <> nil then
+    begin
+      if ActiveSkinBuf <> nil then
+        FRHIUserEffectSlots[SlotIdx].DescriptorSet.BindUniformBuffer(0, ActiveSkinBuf);
+      if FRHIUserEffectSlots[SlotIdx].Buffer <> nil then
+        FRHIUserEffectSlots[SlotIdx].DescriptorSet.BindUniformBuffer(1, FRHIUserEffectSlots[SlotIdx].Buffer);
+      for TexIdx := 0 to High(FRHIUserEffectTextures) do
+        if FRHIUserEffectTextures[TexIdx] <> nil then
+          FRHIUserEffectSlots[SlotIdx].DescriptorSet.BindTexture(
+            Cardinal(2 + TexIdx), FRHIUserEffectTextures[TexIdx], FRHIUserEffectSamplers[TexIdx])
+        else
+          FRHIUserEffectSlots[SlotIdx].DescriptorSet.BindTexture(
+            Cardinal(2 + TexIdx), TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
+      FRHIUserEffectSlots[SlotIdx].DescriptorSet.Update;
+    end;
+
+    FActiveRHIUserEffectSlot := SlotIdx;
+    Inc(FRHIUserEffectUploadCount);
+    Exit;
+  end;
+  {$endif}
+
+  FActiveRHIUserEffectSlot := -1;
   if (FRHIUserEffectBuffer <> nil) and (FRHIUserEffectBuffer.Desc.Size = AlignedSize) then
     FRHIUserEffectBuffer.UploadData(AData^, ASize)
   else
@@ -763,6 +912,16 @@ begin
   begin
     FRHISkinningDescriptorSet.BindTexture(2 + ASlotIndex, ATexture, ASampler);
     FRHISkinningDescriptorSet.Update;
+  end;
+  if (FActiveRHIUserEffectSlot >= 0) and (FActiveRHIUserEffectSlot <= High(FRHIUserEffectSlots)) and
+     (FRHIUserEffectSlots[FActiveRHIUserEffectSlot].DescriptorSet <> nil) and
+     ((FRHIUserEffectSlots[FActiveRHIUserEffectSlot].Textures[ASlotIndex] <> ATexture) or
+      (FRHIUserEffectSlots[FActiveRHIUserEffectSlot].Samplers[ASlotIndex] <> ASampler)) then
+  begin
+    FRHIUserEffectSlots[FActiveRHIUserEffectSlot].Textures[ASlotIndex] := ATexture;
+    FRHIUserEffectSlots[FActiveRHIUserEffectSlot].Samplers[ASlotIndex] := ASampler;
+    FRHIUserEffectSlots[FActiveRHIUserEffectSlot].DescriptorSet.BindTexture(2 + ASlotIndex, ATexture, ASampler);
+    FRHIUserEffectSlots[FActiveRHIUserEffectSlot].DescriptorSet.Update;
   end;
 end;
 
@@ -2454,6 +2613,8 @@ begin
     begin
       UpgradedFragEffect := Gen.UpgradeUserEffectStageSource(
         ssFragment, DedupFragEffect, FRHIUserEffectLayout);
+      if HasPlugFunction(DedupFragEffect, 'PLUG_light_scale') then
+        UpgradedFragEffect := 'uint castle_current_light_index = 0u;' + LineEnding + UpgradedFragEffect;
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
         'void main() {',
@@ -2470,6 +2631,7 @@ begin
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
           '    vec3 radiance = light.Color.rgb * (attenuation * shadowVis);',
+          '    castle_current_light_index = i;' + LineEnding +
           BuildChainedPlugCalls(DedupFragEffect, 'PLUG_light_scale', 'attenuation, N, L', '    ') + LineEnding +
           '    vec3 radiance = light.Color.rgb * (attenuation * shadowVis);',
           []);

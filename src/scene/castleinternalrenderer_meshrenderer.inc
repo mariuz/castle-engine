@@ -849,7 +849,7 @@ procedure TTextureCoordinateRenderer.RenderCoordinateBegin;
       of this is entirely inside EnableTexGen. }
     procedure TextureTransformToWorldSpace(const SuccessName, FailName: string);
     begin
-      if (RHIDevice = nil) and (GLFeatures <> nil) and (not GLFeatures.EnableFixedFunction) then
+      if (RHIDevice <> nil) or (GLFeatures = nil) or (not GLFeatures.EnableFixedFunction) then
         Exit;
 
       { Set the 4th texture coord component (Q) to 0.0.

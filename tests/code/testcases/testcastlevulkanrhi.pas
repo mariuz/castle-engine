@@ -435,6 +435,9 @@ type
     procedure TestMoltenVKPortabilitySubsetNegotiationAndPipelineAdaptationRHI;
     procedure TestAndroidWSISurfacePreTransformCompositeAlphaAndApkCacheBundlingRHI;
     procedure TestLiveHardwareVendorWSIAndOffscreenValidationMatrixRHI;
+    procedure TestAutoExitFramesAndCaptureScreenshotCLIFlagsRHI;
+    procedure TestPerLightShaderEffectsUniformScopingAndVisualParityRHI;
+    procedure TestBroaderExampleCatalogVulkanSmokeAndOpenGLVisualParitySweepRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -467,6 +470,9 @@ type
     procedure ParallelQuadWorkerCallback(const AWorkerIndex: Cardinal;
       const ACommandList: TVulkanRHICommandList);
     function CreateHeadlessSurfaceForTest(const AInstance: VkInstance): VkSurfaceKHR;
+    procedure CollectSingleTextureNodeCallback(Node: TX3DNode);
+  private
+    FCollectedSingleTexNodes: TX3DNodeList;
   end;
 
 implementation
@@ -37677,6 +37683,1117 @@ begin
     SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
     FreeAndNil(RealDev);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.CollectSingleTextureNodeCallback(Node: TX3DNode);
+begin
+  if (FCollectedSingleTexNodes <> nil) and
+     (Node is TAbstractSingleTextureNode) and
+     (FCollectedSingleTexNodes.IndexOf(Node) < 0) then
+    FCollectedSingleTexNodes.Add(Node);
+end;
+
+procedure TTestCastleVulkanRHI.TestAutoExitFramesAndCaptureScreenshotCLIFlagsRHI;
+var
+  SavedParams: TStringList;
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedOnInit: TProcedure;
+  HelpText, ExeArg, TempShotPath: String;
+  InvalidRaised: Boolean;
+  I: Integer;
+  Win: TCastleWindow;
+  Viewport: TCastleViewport;
+  Box: TCastleBox;
+  DirLight: TCastleDirectionalLight;
+  SavedImg: TRGBImage;
+  Px: TVector3Byte;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {$endif}
+begin
+  SavedParams := TStringList.Create;
+  for I := 0 to Parameters.Count - 1 do
+    SavedParams.Add(Parameters[I]);
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedOnInit := Application.OnInitialize;
+  Win := nil;
+  SavedImg := nil;
+  TempShotPath := '';
+  try
+    Application.ResetAutoExitState(True);
+
+    { 1. Standard CLI help & parameter parsing (--auto-exit-frames, --capture-screenshot) }
+    HelpText := Application.ParseStandardParametersHelp;
+    AssertTrue('ParseStandardParametersHelp must document --auto-exit-frames',
+      Pos('--auto-exit-frames', HelpText) > 0);
+    AssertTrue('ParseStandardParametersHelp must document --capture-screenshot',
+      Pos('--capture-screenshot', HelpText) > 0);
+
+    if SavedParams.Count > 0 then
+      ExeArg := SavedParams[0]
+    else
+      ExeArg := 'castle_tester';
+
+    Parameters.Clear;
+    Parameters.Add(ExeArg);
+    Parameters.Add('--auto-exit-frames=5');
+    Parameters.Add('--capture-screenshot=/tmp/cge_phase121_cli_test.png');
+    Application.ParseStandardParameters;
+    AssertEquals('CLI --auto-exit-frames=5 must set Application.AutoExitFrames',
+      5, Integer(Application.AutoExitFrames));
+    AssertEquals('CLI --capture-screenshot must set Application.CaptureScreenshot',
+      '/tmp/cge_phase121_cli_test.png', Application.CaptureScreenshot);
+    AssertEquals('Parsed CLI flags must be consumed from Parameters', 1, Parameters.Count);
+
+    Parameters.Clear;
+    Parameters.Add(ExeArg);
+    Parameters.Add('--auto-exit-frames=0');
+    Application.ParseStandardParameters;
+    AssertEquals('CLI --auto-exit-frames=0 must disable AutoExitFrames',
+      0, Integer(Application.AutoExitFrames));
+
+    InvalidRaised := False;
+    Parameters.Clear;
+    Parameters.Add(ExeArg);
+    Parameters.Add('--auto-exit-frames=-4');
+    try
+      Application.ParseStandardParameters;
+    except
+      on EInvalidParams do
+        InvalidRaised := True;
+    end;
+    AssertTrue('Negative --auto-exit-frames must raise EInvalidParams', InvalidRaised);
+
+    Application.ResetAutoExitState(True);
+    AssertEquals(0, Integer(Application.AutoExitFrames));
+    AssertEquals('', Application.CaptureScreenshot);
+
+    { 2. Live Vulkan Window Auto-Exit + Screenshot Capture Execution }
+    if not CanCreateWindowForTest then
+      Exit;
+    {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+    HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                  (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+    if not HasDisplay then
+      Exit;
+    {$endif}
+    try
+      if not LoadVulkan then
+        Exit;
+    except
+      Exit;
+    end;
+
+    TempShotPath := InclPathDelim(GetTempDir(False)) +
+      Format('cge_phase121_auto_exit_%d_%d.png', [GetTickCount64, Random(100000)]);
+    if FileExists(TempShotPath) then
+      SysUtils.DeleteFile(TempShotPath);
+
+    Application.OnInitialize := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    Application.ResetAutoExitState(True);
+    Application.AutoExitFrames := 3;
+    Application.CaptureScreenshot := TempShotPath;
+
+    Win := CreateWindowForTest;
+    Win.Visible := False;
+    Win.Width := 160;
+    Win.Height := 120;
+    Win.AutoRedisplay := False;
+
+    Viewport := TCastleViewport.Create(Win);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(0.05, 0.08, 0.16, 1.0);
+    Win.Controls.InsertFront(Viewport);
+
+    Box := TCastleBox.Create(Win);
+    Box.Size := Vector3(2.4, 2.4, 2.4);
+    Box.Color := Vector4(0.95, 0.42, 0.15, 1.0);
+    Viewport.Items.Add(Box);
+
+    DirLight := TCastleDirectionalLight.Create(Win);
+    DirLight.Rotation := Vector4(1.0, -0.6, 0.0, 0.45);
+    DirLight.Intensity := 2.2;
+    Viewport.Items.Add(DirLight);
+
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 4.2),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+
+    Win.Open;
+    if RHIDevice is TVulkanRHIDevice then
+    begin
+      TVulkanRHIDevice(RHIDevice).ResetValidationCounters;
+      Application.Run;
+
+      AssertTrue('Application.Run must close window automatically after AutoExitFrames=3',
+        Win.Closed);
+      AssertEquals('AutoExitRenderedFrames must equal 3',
+        3, Integer(Application.AutoExitRenderedFrames));
+      AssertTrue('CaptureScreenshot PNG must be saved before window auto-close',
+        FileExists(TempShotPath));
+
+      SavedImg := LoadImage(FilenameToUriSafe(TempShotPath), [TRGBImage]) as TRGBImage;
+      AssertTrue('Captured screenshot dimensions must be at least 160x120',
+        (SavedImg <> nil) and (SavedImg.Width >= 160) and (SavedImg.Height >= 120));
+      Px := SavedImg.PixelPtr(SavedImg.Width div 2, SavedImg.Height div 2)^;
+      AssertTrue(Format('Captured screenshot center pixel must show warm-lit orange 3D box (got R=%d G=%d B=%d)',
+        [Px.X, Px.Y, Px.Z]),
+        (Px.X > 90) and (Px.X > Px.Z + 25));
+    end else
+      Win.Close(False);
+  finally
+    FreeAndNil(SavedImg);
+    if (TempShotPath <> '') and FileExists(TempShotPath) then
+      SysUtils.DeleteFile(TempShotPath);
+    if (Win <> nil) and (not Win.Closed) then
+      Win.Close(False);
+    if Win <> nil then
+      DestroyWindowForTest(Win);
+    Application.ResetAutoExitState(True);
+    Parameters.Clear;
+    for I := 0 to SavedParams.Count - 1 do
+      Parameters.Add(SavedParams[I]);
+    FreeAndNil(SavedParams);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPerLightShaderEffectsUniformScopingAndVisualParityRHI;
+const
+  RingsLightGLSL =
+    'uniform float ring_count;' + LineEnding +
+    'vec3 direction_eye_to_world_space(vec3 direction_eye);' + LineEnding +
+    'void PLUG_light_scale(inout float scale, const in vec3 normal_eye, const in vec3 light_dir)' + LineEnding +
+    '{' + LineEnding +
+    '  vec3 to_light = direction_eye_to_world_space(light_dir);' + LineEnding +
+    '  float spread = length(to_light.xz) / max(to_light.y, 0.001);' + LineEnding +
+    '  scale *= smoothstep(0.0, 0.6, 0.5 + 0.5 * cos(spread * ring_count * 6.2831853));' + LineEnding +
+    '}';
+  RingValues: array[0..2] of Single = (1.0, 2.0, 4.0);
+
+  function CreatePerLightRingsEffect(const ARingCount: Single): TEffectNode;
+  var
+    Part: TEffectPartNode;
+    RingField: TSFFloat;
+  begin
+    Result := TEffectNode.Create;
+    Result.Language := slGLSL;
+    Result.SetShaderLibraries(['castle-shader:/EyeWorldSpace.glsl']);
+    RingField := TSFFloat.Create(Result, True, 'ring_count', ARingCount);
+    Result.AddCustomField(RingField);
+    Part := TEffectPartNode.Create;
+    Part.ShaderType := stFragment;
+    Part.Contents := RingsLightGLSL;
+    Result.SetParts([Part]);
+  end;
+
+  procedure AttachRingsEffectsToLamps(const AOwner: TComponent);
+  const
+    LampNames: array[0..2] of String = ('Lamp1', 'Lamp2', 'Lamp3');
+  var
+    LampIdx: Integer;
+    LampComp: TComponent;
+  begin
+    for LampIdx := 0 to 2 do
+    begin
+      LampComp := AOwner.FindComponent(LampNames[LampIdx]);
+      if LampComp is TCastleAbstractLight then
+        TCastleAbstractLight(LampComp).SetEffects([CreatePerLightRingsEffect(RingValues[LampIdx])]);
+    end;
+  end;
+
+var
+  MockDev, RealDev: TVulkanRHIDevice;
+  MockCmd: TVulkanRHICommandList;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  SavedOnInit: TProcedure;
+  SavedAppData: String;
+  MockContainer: TTestHeadlessVulkanContainer;
+  OffscreenContainer: TTestSizedVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  BoxNode: TBoxNode;
+  PointLight: TPointLightNode;
+  Lamps: array[0..2] of TCastlePointLight;
+  RShape: TX3DRendererShape;
+  VertCode, FragCode, LightsUiPath, DataDir: String;
+  UDesc0, UDesc1, UDesc2: TUserEffectUniformDesc;
+  I, X, Y, LitLeft, LitMid, LitRight, DiffTile1Vs3: Integer;
+  ColorDesc, DepthDesc: TRHITextureDesc;
+  ColorTarget, DepthTarget: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  DesignOwner: TComponent;
+  LoadedUi: TCastleUserInterface;
+  LblInfo: TComponent;
+  OffscreenImg, ImgGL, ImgVk: TRGBAlphaImage;
+  PxA, PxB: TVector4Byte;
+  Win: TCastleWindow;
+  ParitySuite: TRHIVisualRegressionSuite;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {$endif}
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedOnInit := Application.OnInitialize;
+  SavedAppData := ApplicationDataOverride;
+
+  { 1. Deterministic Unit Verification: 3 overlapping lights with identical uniform name
+       ("ring_count") and PLUG_light_scale must be scoped per punctual UBO light index (0, 1, 2) }
+  MockDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7521)));
+  MockDev.ResizeSwapchain(256, 256);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(MockDev);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  MockContainer := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(MockContainer);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 6.0, 6.0),
+      Vector3(0.0, -0.7071, -0.7071),
+      Vector3(0.0, 0.7071, -0.7071));
+    Viewport.GLContextOpen;
+    MockContainer.Controls.InsertFront(Viewport);
+
+    for I := 0 to 2 do
+    begin
+      Lamps[I] := TCastlePointLight.Create(MockContainer);
+      Lamps[I].Translation := Vector3((I - 1) * 2.0, 1.5, 0.0);
+      Lamps[I].Radius := 20.0;
+      Lamps[I].SetEffects([CreatePerLightRingsEffect(RingValues[I])]);
+      Viewport.Items.Add(Lamps[I]);
+    end;
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(8.0, 0.2, 8.0);
+    ShapeNode.Geometry := BoxNode;
+    Root.AddChildren(ShapeNode);
+
+    PointLight := TPointLightNode.Create;
+    PointLight.FdOn.Value := False;
+    Root.AddChildren(PointLight);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    MockCmd := MockDev.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(MockCmd);
+    try
+      MockContainer.EventBeforeRender;
+      MockContainer.EventRender;
+
+      RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+      AssertTrue('ExtractRHIShaderEffects must extract per-light fragment effects from BaseLights',
+        RShape.ExtractRHIShaderEffects(VertCode, FragCode));
+      AssertTrue('Per-light FragCode must include EyeWorldSpace library',
+        Pos('vec3 direction_eye_to_world_space(vec3 direction_eye) {', FragCode) > 0);
+      AssertTrue('Per-light FragCode must scope ring_count into castle_light0..2_ring_count',
+        (Pos('castle_light0_ring_count', FragCode) > 0) and
+        (Pos('castle_light1_ring_count', FragCode) > 0) and
+        (Pos('castle_light2_ring_count', FragCode) > 0));
+      AssertTrue('Per-light FragCode must guard each PLUG_light_scale by castle_current_light_index == 0u..2u',
+        (Pos('if (castle_current_light_index == 0u)', FragCode) > 0) and
+        (Pos('if (castle_current_light_index == 1u)', FragCode) > 0) and
+        (Pos('if (castle_current_light_index == 2u)', FragCode) > 0));
+      AssertTrue('Upgraded fragment shader must declare global castle_current_light_index and update it in light loop',
+        (RShape.Cache <> nil) and
+        (Pos('uint castle_current_light_index = 0u;', RShape.Cache.RHIFragmentShaderSource) > 0) and
+        (Pos('castle_current_light_index = i;', RShape.Cache.RHIFragmentShaderSource) > 0) and
+        (Pos('PLUG_light_scale(attenuation, N, L);', RShape.Cache.RHIFragmentShaderSource) > 0) and
+        (Pos('PLUG_light_scale_2(attenuation, N, L);', RShape.Cache.RHIFragmentShaderSource) > 0) and
+        (Pos('PLUG_light_scale_3(attenuation, N, L);', RShape.Cache.RHIFragmentShaderSource) > 0));
+      AssertTrue('UserEffectLayout must register all 3 distinct per-light uniform offsets',
+        RShape.Cache.RHIUserEffectLayout.FindUniform('castle_light0_ring_count', UDesc0) and
+        RShape.Cache.RHIUserEffectLayout.FindUniform('castle_light1_ring_count', UDesc1) and
+        RShape.Cache.RHIUserEffectLayout.FindUniform('castle_light2_ring_count', UDesc2) and
+        (UDesc0.ByteOffset <> UDesc1.ByteOffset) and
+        (UDesc1.ByteOffset <> UDesc2.ByteOffset));
+    finally
+      MockDev.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(MockContainer);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(TestCtx);
+    FreeAndNil(MockDev);
+  end;
+
+  { 2. Live Vulkan GPU Offscreen & OpenGL-vs-Vulkan Parity on shader_effects_on_lights }
+  LightsUiPath := ResolveRepoExampleFile(
+    'examples/shaders/shader_effects_on_lights/data/gameviewmain.castle-user-interface');
+  if (LightsUiPath = '') or (not FileExists(LightsUiPath)) or
+     (not TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable) then
+  begin
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Exit;
+  end;
+
+  DataDir := ExtractFilePath(LightsUiPath);
+  RealDev := nil;
+  ColorTarget := nil;
+  DepthTarget := nil;
+  OffscreenContainer := nil;
+  DesignOwner := nil;
+  OffscreenImg := nil;
+  ImgGL := nil;
+  ImgVk := nil;
+  Win := nil;
+  ParitySuite := nil;
+  try
+    if not TVulkanRHIDevice.TryCreateOffscreen(RealDev, True) then
+      Exit;
+
+    ApplicationDataOverride := FilenameToUriSafe(IncludeTrailingPathDelimiter(DataDir));
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+    RealDev.ResetValidationCounters;
+
+    ColorDesc := TRHITextureDesc.Create2D(240, 160, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], 1);
+    ColorDesc.DebugName := 'Phase121PerLightColor';
+    ColorTarget := RealDev.CreateTexture(ColorDesc);
+
+    DepthDesc := TRHITextureDesc.Create2D(240, 160, RealDev.SwapchainDepthFormat,
+      [tuDepthStencil], 1);
+    DepthDesc.DebugName := 'Phase121PerLightDepth';
+    DepthTarget := RealDev.CreateTexture(DepthDesc);
+
+    OffscreenContainer := TTestSizedVulkanContainer.Create(nil);
+    OffscreenContainer.TestWidth := 240;
+    OffscreenContainer.TestHeight := 160;
+    RenderContext := OffscreenContainer.Context;
+
+    DesignOwner := TComponent.Create(nil);
+    LoadedUi := UserInterfaceLoad('castle-data:/' + ExtractFileName(LightsUiPath), DesignOwner);
+    LblInfo := DesignOwner.FindComponent('LabelInfo');
+    if LblInfo is TCastleUserInterface then
+      TCastleUserInterface(LblInfo).Exists := False;
+    AttachRingsEffectsToLamps(DesignOwner);
+    OffscreenContainer.Controls.InsertFront(LoadedUi);
+
+    OffscreenContainer.EventOpen(1);
+    for I := 0 to 1 do
+    begin
+      OffscreenContainer.EventUpdate;
+      OffscreenContainer.EventBeforeRender;
+      Cmd := RealDev.BeginOffscreenFrame;
+      SetActiveCommandList(Cmd);
+      try
+        RealDev.ActiveColorTarget := ColorTarget;
+        RealDev.ActiveDepthTarget := DepthTarget;
+        PassInfo := Default(TRHIRenderingInfo);
+        PassInfo.RenderArea := Rectangle(0, 0, 240, 160);
+        SetLength(PassInfo.ColorAttachments, 1);
+        PassInfo.ColorAttachments[0].Texture := ColorTarget;
+        PassInfo.ColorAttachments[0].LoadOp := loClear;
+        PassInfo.ColorAttachments[0].StoreOp := soStore;
+        PassInfo.ColorAttachments[0].ClearColor := Vector4(0.05, 0.05, 0.08, 1.0);
+        PassInfo.HasDepthAttachment := True;
+        PassInfo.DepthAttachment.Texture := DepthTarget;
+        PassInfo.DepthAttachment.LoadOp := loClear;
+        PassInfo.DepthAttachment.StoreOp := soStore;
+        PassInfo.DepthAttachment.ClearDepth := 1.0;
+        PassInfo.DepthAttachment.ClearStencil := 0;
+        Cmd.BeginRendering(PassInfo);
+        Cmd.SetViewport(FloatRectangle(0, 0, 240, 160), 0.0, 1.0);
+        Cmd.SetScissor(Rectangle(0, 0, 240, 160));
+        OffscreenContainer.EventRender;
+        TDrawableImage.BatchingFlush;
+        if Cmd.IsRendering then
+          Cmd.EndRendering;
+      finally
+        RealDev.ActiveColorTarget := nil;
+        RealDev.ActiveDepthTarget := nil;
+        SetActiveCommandList(nil);
+        RealDev.EndOffscreenFrame;
+      end;
+    end;
+
+    OffscreenImg := RealDev.GrabTextureImage(ColorTarget, Rectangle(0, 0, 240, 160));
+    RealDev.AssertZeroValidationErrors('Phase121.PerLightEffectsOffscreen');
+
+    LitLeft := 0;
+    LitMid := 0;
+    LitRight := 0;
+    DiffTile1Vs3 := 0;
+    for Y := 45 to 115 do
+    begin
+      for X := 15 to 75 do
+      begin
+        PxA := OffscreenImg.PixelPtr(X, Y)^;
+        if (PxA.X > 25) or (PxA.Y > 25) or (PxA.Z > 30) then
+          Inc(LitLeft);
+      end;
+      for X := 90 to 150 do
+      begin
+        PxA := OffscreenImg.PixelPtr(X, Y)^;
+        if (PxA.X > 25) or (PxA.Y > 25) or (PxA.Z > 30) then
+          Inc(LitMid);
+      end;
+      for X := 165 to 225 do
+      begin
+        PxB := OffscreenImg.PixelPtr(X, Y)^;
+        if (PxB.X > 25) or (PxB.Y > 25) or (PxB.Z > 30) then
+          Inc(LitRight);
+      end;
+      for X := 0 to 50 do
+      begin
+        PxA := OffscreenImg.PixelPtr(20 + X, Y)^;
+        PxB := OffscreenImg.PixelPtr(170 + X, Y)^;
+        if Abs(Integer(PxA.X) + Integer(PxA.Y) + Integer(PxA.Z) -
+               (Integer(PxB.X) + Integer(PxB.Y) + Integer(PxB.Z))) > 35 then
+          Inc(DiffTile1Vs3);
+      end;
+    end;
+    AssertTrue(Format('All 3 tiles in shader_effects_on_lights must be lit (L=%d M=%d R=%d)',
+      [LitLeft, LitMid, LitRight]),
+      (LitLeft > 80) and (LitMid > 80) and (LitRight > 80));
+    AssertTrue('Tile1 (ring_count=1) and Tile3 (ring_count=4) must exhibit distinct ring patterns',
+      DiffTile1Vs3 > 60);
+
+    OffscreenContainer.EventClose(1);
+    RenderContext := SavedCtx;
+    FreeAndNil(DesignOwner);
+    FreeAndNil(OffscreenContainer);
+    FreeGlobalBatch2DRenderer;
+    FreeAndNil(DepthTarget);
+    FreeAndNil(ColorTarget);
+    SetRHIDevice(nil);
+    FreeAndNil(RealDev);
+
+    { 3. Windowed OpenGL vs Vulkan Visual Parity on shader_effects_on_lights }
+    if not CanCreateWindowForTest then
+      Exit;
+    {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+    HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                  (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+    if not HasDisplay then
+      Exit;
+    {$endif}
+
+    Application.OnInitialize := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    Win := CreateWindowForTest;
+    Win.Visible := False;
+    Win.Width := 240;
+    Win.Height := 160;
+
+    DesignOwner := TComponent.Create(nil);
+    LoadedUi := UserInterfaceLoad('castle-data:/' + ExtractFileName(LightsUiPath), DesignOwner);
+    LblInfo := DesignOwner.FindComponent('LabelInfo');
+    if LblInfo is TCastleUserInterface then
+      TCastleUserInterface(LblInfo).Exists := False;
+    AttachRingsEffectsToLamps(DesignOwner);
+    Win.Controls.InsertFront(LoadedUi);
+
+    Win.Open;
+    if RHIDevice is TVulkanRHIDevice then
+    begin
+      TVulkanRHIDevice(RHIDevice).ResetValidationCounters;
+      for I := 0 to 2 do
+      begin
+        Win.Container.EventUpdate;
+        Win.Invalidate;
+        Application.ProcessAllMessages;
+      end;
+      ImgVk := Win.Container.SaveScreenRgba;
+      TVulkanRHIDevice(RHIDevice).AssertZeroValidationErrors(
+        'Phase121.PerLightEffectsWindowedVulkan');
+
+      ApplicationProperties.RenderBackend := backendOpenGL;
+      for I := 0 to 2 do
+      begin
+        Win.Container.EventUpdate;
+        Win.Invalidate;
+        Application.ProcessAllMessages;
+      end;
+      ImgGL := Win.Container.SaveScreenRgba;
+
+      ParitySuite := TRHIVisualRegressionSuite.Create(4);
+      ParitySuite.RecordComparison('Shaders_ShaderEffectsOnLights_PerLightRings',
+        ImgGL, ImgVk, 0.085);
+      AssertTrue('shader_effects_on_lights OpenGL vs Vulkan parity must pass: ' +
+        LineEnding + ParitySuite.BuildSummaryReport,
+        ParitySuite.AllPassed);
+    end;
+    Win.Close(False);
+  finally
+    FreeAndNil(ParitySuite);
+    FreeAndNil(ImgGL);
+    FreeAndNil(ImgVk);
+    FreeAndNil(OffscreenImg);
+    if (Win <> nil) and (not Win.Closed) then
+      Win.Close(False);
+    FreeAndNil(DesignOwner);
+    if Win <> nil then
+      DestroyWindowForTest(Win);
+    if OffscreenContainer <> nil then
+    begin
+      RenderContext := SavedCtx;
+      FreeAndNil(OffscreenContainer);
+    end;
+    FreeGlobalBatch2DRenderer;
+    FreeAndNil(DepthTarget);
+    FreeAndNil(ColorTarget);
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(RealDev);
+    ApplicationDataOverride := SavedAppData;
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBroaderExampleCatalogVulkanSmokeAndOpenGLVisualParitySweepRHI;
+type
+  TCatalogExampleSpec = record
+    Name: String;
+    RelUiPath: String;
+    RequiresRuntimeGLSL: Boolean;
+    RunWindowedParity: Boolean;
+    UpdateFrames: Integer;
+    MaxParityRMSE: Single;
+  end;
+const
+  CatalogSpecs: array[0..10] of TCatalogExampleSpec = (
+    (Name: 'animations/animate_bones_by_code';
+     RelUiPath: 'examples/animations/animate_bones_by_code/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: False; RunWindowedParity: False; UpdateFrames: 3; MaxParityRMSE: 0.12),
+    (Name: 'animations/simultaneous_animations_one_scene';
+     RelUiPath: 'examples/animations/simultaneous_animations_one_scene/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: False; RunWindowedParity: True; UpdateFrames: 3; MaxParityRMSE: 0.12),
+    (Name: 'viewport_and_scenes/bump_mapping';
+     RelUiPath: 'examples/viewport_and_scenes/bump_mapping/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: False; RunWindowedParity: True; UpdateFrames: 2; MaxParityRMSE: 0.12),
+    (Name: 'viewport_and_scenes/cars_demo';
+     RelUiPath: 'examples/viewport_and_scenes/cars_demo/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: False; RunWindowedParity: True; UpdateFrames: 2; MaxParityRMSE: 0.12),
+    (Name: 'viewport_and_scenes/multiple_viewports';
+     RelUiPath: 'examples/viewport_and_scenes/multiple_viewports/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: False; RunWindowedParity: False; UpdateFrames: 2; MaxParityRMSE: 0.12),
+    (Name: 'physics/physics_3d_demo';
+     RelUiPath: 'examples/physics/physics_3d_demo/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: False; RunWindowedParity: True; UpdateFrames: 4; MaxParityRMSE: 0.12),
+    (Name: 'physics/physics_2d_collisions';
+     RelUiPath: 'examples/physics/physics_2d_collisions/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: False; RunWindowedParity: False; UpdateFrames: 4; MaxParityRMSE: 0.12),
+    (Name: 'shaders/shader_effects_simple';
+     RelUiPath: 'examples/shaders/shader_effects_simple/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: True; RunWindowedParity: True; UpdateFrames: 2; MaxParityRMSE: 0.12),
+    (Name: 'shaders/shader_effects_on_texture';
+     RelUiPath: 'examples/shaders/shader_effects_on_texture/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: True; RunWindowedParity: True; UpdateFrames: 2; MaxParityRMSE: 0.12),
+    (Name: 'shaders/shader_effects_on_background';
+     RelUiPath: 'examples/shaders/shader_effects_on_background/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: True; RunWindowedParity: False; UpdateFrames: 2; MaxParityRMSE: 0.12),
+    (Name: 'shaders/shader_override';
+     RelUiPath: 'examples/shaders/shader_override/data/gameviewmain.castle-user-interface';
+     RequiresRuntimeGLSL: True; RunWindowedParity: False; UpdateFrames: 2; MaxParityRMSE: 0.12)
+  );
+
+  procedure AttachSingleTextureEffect(const AScene: TCastleScene; const AShaderUrl: String);
+  var
+    Idx: Integer;
+    Eff: TEffectNode;
+    Part: TEffectPartNode;
+  begin
+    if (AScene = nil) or (AScene.RootNode = nil) then
+      Exit;
+    FCollectedSingleTexNodes := TX3DNodeList.Create(False);
+    try
+      AScene.RootNode.EnumerateNodes(TAbstractSingleTextureNode,
+        @CollectSingleTextureNodeCallback, False);
+      for Idx := 0 to FCollectedSingleTexNodes.Count - 1 do
+      begin
+        Eff := TEffectNode.Create;
+        Eff.Language := slGLSL;
+        Part := TEffectPartNode.Create;
+        Part.ShaderType := stFragment;
+        Part.SetUrl([AShaderUrl]);
+        Eff.SetParts([Part]);
+        TAbstractSingleTextureNode(FCollectedSingleTexNodes[Idx]).SetEffects([Eff]);
+      end;
+    finally
+      FreeAndNil(FCollectedSingleTexNodes);
+    end;
+  end;
+
+  procedure ConfigureCatalogDesignScene(const ASpecName: String; const AOwner: TComponent);
+  var
+    VpNormal, VpTransp, VpScreen, VpExam, Comp, Comp2: TComponent;
+    ScreenEff: TScreenEffectNode;
+    CompShader: TComposedShaderNode;
+    VertPart, FragPart: TShaderPartNode;
+    Eff: TEffectNode;
+    EffPart: TEffectPartNode;
+    IntensityField: TSFFloat;
+    AppNode: TAppearanceNode;
+  begin
+    Comp := AOwner.FindComponent('LabelFps');
+    if Comp is TCastleUserInterface then
+      TCastleUserInterface(Comp).Exists := False;
+
+    if ASpecName = 'viewport_and_scenes/multiple_viewports' then
+    begin
+      VpNormal := AOwner.FindComponent('ViewportNormal');
+      VpTransp := AOwner.FindComponent('ViewportTransparent');
+      VpScreen := AOwner.FindComponent('ViewportScreenEffect');
+      VpExam := AOwner.FindComponent('ViewportExamine');
+      if VpNormal is TCastleViewport then
+      begin
+        if VpTransp is TCastleViewport then
+          TCastleViewport(VpTransp).Items := TCastleViewport(VpNormal).Items;
+        if VpScreen is TCastleViewport then
+        begin
+          TCastleViewport(VpScreen).Items := TCastleViewport(VpNormal).Items;
+          if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
+          begin
+            FragPart := TShaderPartNode.Create;
+            FragPart.ShaderType := stFragment;
+            FragPart.Contents :=
+              'void main(void) {' + LineEnding +
+              '  vec4 left   = screen_get_color(ivec2(screen_x() - 1, screen_y()));' + LineEnding +
+              '  vec4 right  = screen_get_color(ivec2(screen_x() + 1, screen_y()));' + LineEnding +
+              '  vec4 top    = screen_get_color(ivec2(screen_x(), screen_y() - 1));' + LineEnding +
+              '  vec4 bottom = screen_get_color(ivec2(screen_x(), screen_y() + 1));' + LineEnding +
+              '  gl_FragColor = (1.0 + abs(left - right) + abs(top - bottom)) / 2.0;' + LineEnding +
+              '}';
+            CompShader := TComposedShaderNode.Create;
+            CompShader.SetParts([FragPart]);
+            ScreenEff := TScreenEffectNode.Create;
+            ScreenEff.SetShaders([CompShader]);
+            TCastleViewport(VpScreen).AddScreenEffect(ScreenEff);
+          end;
+        end;
+        if VpExam is TCastleViewport then
+          TCastleViewport(VpExam).Items := TCastleViewport(VpNormal).Items;
+      end;
+    end else
+    if ASpecName = 'shaders/shader_effects_simple' then
+    begin
+      Comp := AOwner.FindComponent('MyScene');
+      if Comp is TCastleScene then
+      begin
+        Eff := TEffectNode.Create;
+        Eff.Language := slGLSL;
+        EffPart := TEffectPartNode.Create;
+        EffPart.ShaderType := stFragment;
+        EffPart.SetUrl(['castle-data:/shader_color_effect.fs']);
+        Eff.SetParts([EffPart]);
+        TCastleScene(Comp).SetEffects([Eff]);
+      end;
+    end else
+    if ASpecName = 'shaders/shader_effects_on_texture' then
+    begin
+      Comp := AOwner.FindComponent('SceneTexturedSampleThing2');
+      if Comp is TCastleScene then
+        AttachSingleTextureEffect(TCastleScene(Comp), 'castle-data:/texture_effect_sepia.fs');
+      Comp2 := AOwner.FindComponent('SceneTexturedSampleThing3');
+      if Comp2 is TCastleScene then
+        AttachSingleTextureEffect(TCastleScene(Comp2), 'castle-data:/texture_effect_invert.fs');
+    end else
+    if ASpecName = 'shaders/shader_effects_on_background' then
+    begin
+      Comp := AOwner.FindComponent('MainBackground');
+      if Comp is TCastleBackground then
+      begin
+        Eff := TEffectNode.Create;
+        Eff.Language := slGLSL;
+        IntensityField := TSFFloat.Create(Eff, True, 'intensity', 0.55);
+        Eff.AddCustomField(IntensityField);
+        EffPart := TEffectPartNode.Create;
+        EffPart.ShaderType := stFragment;
+        EffPart.SetUrl(['castle-data:/shaders/skybox_color_effect.fs']);
+        Eff.SetParts([EffPart]);
+        TCastleBackground(Comp).SetEffects([Eff]);
+      end;
+    end else
+    if ASpecName = 'shaders/shader_override' then
+    begin
+      Comp := AOwner.FindComponent('Monkey2');
+      if (Comp is TCastleScene) and (TCastleScene(Comp).RootNode <> nil) then
+      begin
+        AppNode := TCastleScene(Comp).RootNode.FindNode(
+          TAppearanceNode, 'MatSuzanne', [fnNilOnMissing]) as TAppearanceNode;
+        if AppNode = nil then
+          AppNode := TCastleScene(Comp).RootNode.FindNode(
+            TAppearanceNode, '', [fnNilOnMissing]) as TAppearanceNode;
+        if AppNode <> nil then
+        begin
+          VertPart := TShaderPartNode.Create;
+          VertPart.ShaderType := stVertex;
+          VertPart.Contents :=
+            'uniform mat4 castle_ModelViewMatrix;' + LineEnding +
+            'uniform mat4 castle_ProjectionMatrix;' + LineEnding +
+            'attribute vec4 castle_Vertex;' + LineEnding +
+            'uniform mat3 castle_NormalMatrix;' + LineEnding +
+            'attribute vec3 castle_Normal;' + LineEnding +
+            'varying float intensity;' + LineEnding +
+            'void main(void) {' + LineEnding +
+            '  intensity = dot(normalize(vec3(0.0, 0.0, 1.0)), normalize(castle_NormalMatrix * castle_Normal));' + LineEnding +
+            '  gl_Position = castle_ProjectionMatrix * (castle_ModelViewMatrix * castle_Vertex);' + LineEnding +
+            '}';
+          FragPart := TShaderPartNode.Create;
+          FragPart.ShaderType := stFragment;
+          FragPart.Contents :=
+            'varying float intensity;' + LineEnding +
+            'void main(void) {' + LineEnding +
+            '  vec4 color;' + LineEnding +
+            '  if (intensity > 0.90) color = vec4(0.5, 0.5, 1.0, 1.0);' + LineEnding +
+            '  else if (intensity > 0.25) color = vec4(0.3, 0.3, 0.7, 1.0);' + LineEnding +
+            '  else color = vec4(0.1, 0.1, 0.3, 1.0);' + LineEnding +
+            '  gl_FragColor = color;' + LineEnding +
+            '}';
+          CompShader := TComposedShaderNode.Create;
+          CompShader.SetParts([VertPart, FragPart]);
+          AppNode.SetShaders([CompShader]);
+        end;
+      end;
+    end;
+  end;
+
+  function CountActiveImagePixels(const AImg: TRGBAlphaImage): Integer;
+  var
+    X, Y: Integer;
+    P0, Px: TVector4Byte;
+  begin
+    Result := 0;
+    if (AImg = nil) or (AImg.Width < 8) or (AImg.Height < 8) then
+      Exit;
+    P0 := AImg.PixelPtr(2, 2)^;
+    for Y := 4 to AImg.Height - 5 do
+      for X := 4 to AImg.Width - 5 do
+      begin
+        Px := AImg.PixelPtr(X, Y)^;
+        if (Px.X > 10) or (Px.Y > 10) or (Px.Z > 10) or
+           (Abs(Integer(Px.X) - Integer(P0.X)) > 6) or
+           (Abs(Integer(Px.Y) - Integer(P0.Y)) > 6) or
+           (Abs(Integer(Px.Z) - Integer(P0.Z)) > 6) then
+          Inc(Result);
+      end;
+  end;
+
+var
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  SavedOnInit: TProcedure;
+  SavedAppData: String;
+  RealDev: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  ColorDesc, DepthDesc: TRHITextureDesc;
+  ColorTarget, DepthTarget: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  OffscreenContainer: TTestSizedVulkanContainer;
+  DesignOwner: TComponent;
+  LoadedUi: TCastleUserInterface;
+  GrabbedImg, ImgVk, ImgGL: TRGBAlphaImage;
+  Win: TCastleWindow;
+  ParitySuite: TRHIVisualRegressionSuite;
+  SpecIdx, FrameIdx, ExecutedOffscreenCount, ActivePx: Integer;
+  UiPath, DataDir: String;
+  CanRunWindowedParity: Boolean;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {$endif}
+begin
+  try
+    if not LoadVulkan then
+      Exit;
+  except
+    Exit;
+  end;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedOnInit := Application.OnInitialize;
+  SavedAppData := ApplicationDataOverride;
+
+  RealDev := nil;
+  ColorTarget := nil;
+  DepthTarget := nil;
+  OffscreenContainer := nil;
+  DesignOwner := nil;
+  GrabbedImg := nil;
+  ImgVk := nil;
+  ImgGL := nil;
+  Win := nil;
+  ParitySuite := TRHIVisualRegressionSuite.Create(4);
+  ExecutedOffscreenCount := 0;
+  try
+    { 1. Headless Offscreen Live Vulkan Smoke Sweep across animations, shaders,
+         viewport_and_scenes, and physics (runs on all OSes including --no-window-create) }
+    if not TVulkanRHIDevice.TryCreateOffscreen(RealDev, True) then
+      Exit;
+
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+
+    ColorDesc := TRHITextureDesc.Create2D(192, 144, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], 1);
+    ColorDesc.DebugName := 'Phase121CatalogColor';
+    ColorTarget := RealDev.CreateTexture(ColorDesc);
+
+    DepthDesc := TRHITextureDesc.Create2D(192, 144, RealDev.SwapchainDepthFormat,
+      [tuDepthStencil], 1);
+    DepthDesc.DebugName := 'Phase121CatalogDepth';
+    DepthTarget := RealDev.CreateTexture(DepthDesc);
+
+    for SpecIdx := Low(CatalogSpecs) to High(CatalogSpecs) do
+    begin
+      if CatalogSpecs[SpecIdx].RequiresRuntimeGLSL and
+         (not TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable) then
+        Continue;
+      UiPath := ResolveRepoExampleFile(CatalogSpecs[SpecIdx].RelUiPath);
+      if (UiPath = '') or (not FileExists(UiPath)) then
+        Continue;
+
+      DataDir := ExtractFilePath(UiPath);
+      ApplicationDataOverride := FilenameToUriSafe(IncludeTrailingPathDelimiter(DataDir));
+      RealDev.ResetValidationCounters;
+
+      OffscreenContainer := TTestSizedVulkanContainer.Create(nil);
+      OffscreenContainer.TestWidth := 192;
+      OffscreenContainer.TestHeight := 144;
+      RenderContext := OffscreenContainer.Context;
+      DesignOwner := TComponent.Create(nil);
+      try
+        LoadedUi := UserInterfaceLoad('castle-data:/' + ExtractFileName(UiPath), DesignOwner);
+        ConfigureCatalogDesignScene(CatalogSpecs[SpecIdx].Name, DesignOwner);
+        OffscreenContainer.Controls.InsertFront(LoadedUi);
+        OffscreenContainer.EventOpen(1);
+
+        for FrameIdx := 1 to CatalogSpecs[SpecIdx].UpdateFrames do
+        begin
+          OffscreenContainer.EventUpdate;
+          OffscreenContainer.EventBeforeRender;
+          Cmd := RealDev.BeginOffscreenFrame;
+          SetActiveCommandList(Cmd);
+          try
+            RealDev.ActiveColorTarget := ColorTarget;
+            RealDev.ActiveDepthTarget := DepthTarget;
+            PassInfo := Default(TRHIRenderingInfo);
+            PassInfo.RenderArea := Rectangle(0, 0, 192, 144);
+            SetLength(PassInfo.ColorAttachments, 1);
+            PassInfo.ColorAttachments[0].Texture := ColorTarget;
+            PassInfo.ColorAttachments[0].LoadOp := loClear;
+            PassInfo.ColorAttachments[0].StoreOp := soStore;
+            PassInfo.ColorAttachments[0].ClearColor := Vector4(0.04, 0.05, 0.08, 1.0);
+            PassInfo.HasDepthAttachment := True;
+            PassInfo.DepthAttachment.Texture := DepthTarget;
+            PassInfo.DepthAttachment.LoadOp := loClear;
+            PassInfo.DepthAttachment.StoreOp := soStore;
+            PassInfo.DepthAttachment.ClearDepth := 1.0;
+            PassInfo.DepthAttachment.ClearStencil := 0;
+            Cmd.BeginRendering(PassInfo);
+            Cmd.SetViewport(FloatRectangle(0, 0, 192, 144), 0.0, 1.0);
+            Cmd.SetScissor(Rectangle(0, 0, 192, 144));
+            OffscreenContainer.EventRender;
+            TDrawableImage.BatchingFlush;
+            if Cmd.IsRendering then
+              Cmd.EndRendering;
+          finally
+            RealDev.ActiveColorTarget := nil;
+            RealDev.ActiveDepthTarget := nil;
+            SetActiveCommandList(nil);
+            RealDev.EndOffscreenFrame;
+          end;
+        end;
+
+        GrabbedImg := RealDev.GrabTextureImage(ColorTarget, Rectangle(0, 0, 192, 144));
+        RealDev.AssertZeroValidationErrors('Phase121.CatalogOffscreen.' + CatalogSpecs[SpecIdx].Name);
+        ActivePx := CountActiveImagePixels(GrabbedImg);
+        AssertTrue(Format('Catalog example "%s" must render non-empty Vulkan frame (%d active pixels)',
+          [CatalogSpecs[SpecIdx].Name, ActivePx]),
+          ActivePx > 120);
+        FreeAndNil(GrabbedImg);
+        Inc(ExecutedOffscreenCount);
+
+        OffscreenContainer.EventClose(1);
+      finally
+        RenderContext := SavedCtx;
+        FreeAndNil(GrabbedImg);
+        FreeAndNil(DesignOwner);
+        FreeAndNil(OffscreenContainer);
+        FreeGlobalBatch2DRenderer;
+      end;
+    end;
+
+    AssertTrue('Catalog Vulkan offscreen sweep must execute >= 7 examples across all 4 directories',
+      ExecutedOffscreenCount >= 7);
+
+    FreeAndNil(DepthTarget);
+    FreeAndNil(ColorTarget);
+    SetRHIDevice(nil);
+    FreeAndNil(RealDev);
+
+    { 2. Windowed Side-by-Side OpenGL vs Vulkan Perceptual RMSE Visual Parity Sweep }
+    CanRunWindowedParity := CanCreateWindowForTest;
+    {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+    HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                  (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+    CanRunWindowedParity := CanRunWindowedParity and HasDisplay;
+    {$endif}
+    if not CanRunWindowedParity then
+      Exit;
+
+    Application.OnInitialize := nil;
+    for SpecIdx := Low(CatalogSpecs) to High(CatalogSpecs) do
+    begin
+      if not CatalogSpecs[SpecIdx].RunWindowedParity then
+        Continue;
+      if CatalogSpecs[SpecIdx].RequiresRuntimeGLSL and
+         (not TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable) then
+        Continue;
+      UiPath := ResolveRepoExampleFile(CatalogSpecs[SpecIdx].RelUiPath);
+      if (UiPath = '') or (not FileExists(UiPath)) then
+        Continue;
+
+      DataDir := ExtractFilePath(UiPath);
+      ApplicationDataOverride := FilenameToUriSafe(IncludeTrailingPathDelimiter(DataDir));
+
+      { Render deterministic frame sequence on Vulkan }
+      ApplicationProperties.RenderBackend := backendVulkan;
+      Win := CreateWindowForTest;
+      Win.Visible := False;
+      Win.Width := 160;
+      Win.Height := 120;
+      DesignOwner := TComponent.Create(nil);
+      try
+        LoadedUi := UserInterfaceLoad('castle-data:/' + ExtractFileName(UiPath), DesignOwner);
+        ConfigureCatalogDesignScene(CatalogSpecs[SpecIdx].Name, DesignOwner);
+        Win.Controls.InsertFront(LoadedUi);
+        Win.Open;
+        if not (RHIDevice is TVulkanRHIDevice) then
+        begin
+          Win.Close(False);
+          Continue;
+        end;
+        TVulkanRHIDevice(RHIDevice).ResetValidationCounters;
+        for FrameIdx := 1 to CatalogSpecs[SpecIdx].UpdateFrames do
+        begin
+          Win.Container.EventUpdate;
+          Win.Invalidate;
+          Application.ProcessAllMessages;
+        end;
+        ImgVk := Win.Container.SaveScreenRgba;
+        TVulkanRHIDevice(RHIDevice).AssertZeroValidationErrors(
+          'Phase121.CatalogWindowedVulkan.' + CatalogSpecs[SpecIdx].Name);
+        Win.Close(False);
+      finally
+        if (Win <> nil) and (not Win.Closed) then
+          Win.Close(False);
+        FreeAndNil(DesignOwner);
+        if Win <> nil then
+          DestroyWindowForTest(Win);
+        Win := nil;
+      end;
+
+      { Render identical fresh deterministic frame sequence on OpenGL }
+      ApplicationProperties.RenderBackend := backendOpenGL;
+      Win := CreateWindowForTest;
+      Win.Visible := False;
+      Win.Width := 160;
+      Win.Height := 120;
+      DesignOwner := TComponent.Create(nil);
+      try
+        LoadedUi := UserInterfaceLoad('castle-data:/' + ExtractFileName(UiPath), DesignOwner);
+        ConfigureCatalogDesignScene(CatalogSpecs[SpecIdx].Name, DesignOwner);
+        Win.Controls.InsertFront(LoadedUi);
+        Win.Open;
+        for FrameIdx := 1 to CatalogSpecs[SpecIdx].UpdateFrames do
+        begin
+          Win.Container.EventUpdate;
+          Win.Invalidate;
+          Application.ProcessAllMessages;
+        end;
+        ImgGL := Win.Container.SaveScreenRgba;
+        Win.Close(False);
+      finally
+        if (Win <> nil) and (not Win.Closed) then
+          Win.Close(False);
+        FreeAndNil(DesignOwner);
+        if Win <> nil then
+          DestroyWindowForTest(Win);
+        Win := nil;
+      end;
+
+      if (ImgGL <> nil) and (ImgVk <> nil) and
+         (ImgGL.Width = ImgVk.Width) and (ImgGL.Height = ImgVk.Height) then
+        ParitySuite.RecordComparison(
+          StringReplace(CatalogSpecs[SpecIdx].Name, '/', '_', [rfReplaceAll]),
+          ImgGL, ImgVk, CatalogSpecs[SpecIdx].MaxParityRMSE);
+
+      FreeAndNil(ImgGL);
+      FreeAndNil(ImgVk);
+    end;
+
+    AssertTrue('Catalog OpenGL vs Vulkan visual parity sweep must record >= 4 cases',
+      ParitySuite.CaseCount >= 4);
+    AssertTrue('All catalog OpenGL vs Vulkan visual parity cases must pass: ' +
+      LineEnding + ParitySuite.BuildSummaryReport,
+      ParitySuite.AllPassed);
+  finally
+    FreeAndNil(ParitySuite);
+    FreeAndNil(ImgGL);
+    FreeAndNil(ImgVk);
+    FreeAndNil(GrabbedImg);
+    if (Win <> nil) and (not Win.Closed) then
+      Win.Close(False);
+    FreeAndNil(DesignOwner);
+    if Win <> nil then
+      DestroyWindowForTest(Win);
+    if OffscreenContainer <> nil then
+    begin
+      RenderContext := SavedCtx;
+      FreeAndNil(OffscreenContainer);
+    end;
+    FreeGlobalBatch2DRenderer;
+    FreeAndNil(DepthTarget);
+    FreeAndNil(ColorTarget);
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(RealDev);
+    ApplicationDataOverride := SavedAppData;
     ApplicationProperties.RenderBackend := SavedBackend;
     Application.OnInitialize := SavedOnInit;
   end;

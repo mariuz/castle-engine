@@ -77,6 +77,10 @@ jobs:
           ./tools/build-tool/castle-engine --project ./tests/ compile --mode=debug --compiler-option=-dCASTLE_WINDOW_XLIB
           xvfb-run -a ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI*
           CASTLE_SHADER_COMPILER=builtin xvfb-run -a ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI.TestBuiltInSPIRVCoreShadersAndRealLavapipeDrawPrimitive2DRHI
+      - name: Run Broader Example Catalog Vulkan Smoke & Screenshot Sweep (animations, shaders, viewport_and_scenes, physics)
+        run: |
+          chmod +x ./tools/internal/vulkan_example_sweep/run_vulkan_example_sweep.sh
+          xvfb-run -a ./tools/internal/vulkan_example_sweep/run_vulkan_example_sweep.sh --window-backend=xlib --clean-after
 
   vulkan-rhi-macos-moltenvk:
     name: Vulkan RHI + MoltenVK Portability Subset + Cocoa WSI (macOS Apple Silicon)
@@ -138,6 +142,10 @@ jobs:
         run: |
           ./tools/build-tool/castle-engine --project ./tests/ compile --mode=debug --compiler-option=-dCASTLE_WINDOW_COCOA
           ./tools/build-tool/castle-engine --project ./tests/ run -- --console --no-window-create --filter=TTestCastleVulkanRHI*
+      - name: Compile Broader Example Catalog on Cocoa WSI (animations, shaders, viewport_and_scenes, physics)
+        run: |
+          chmod +x ./tools/internal/vulkan_example_sweep/run_vulkan_example_sweep.sh
+          ./tools/internal/vulkan_example_sweep/run_vulkan_example_sweep.sh --window-backend=cocoa --compile-only --clean-after
 
   vulkan-rhi-windows:
     name: Vulkan RHI + Win32 WSI + Packaging (Windows x64)
@@ -176,3 +184,6 @@ jobs:
         run: |
           ./tools/build-tool/castle-engine.exe --project ./tests/ compile --mode=debug --compiler-option=-dCASTLE_WINDOW_WINAPI
           ./tools/build-tool/castle-engine.exe --project ./tests/ run -- --console --no-window-create --filter=TTestCastleVulkanRHI*
+      - name: Compile Broader Example Catalog on Win32 WSI (animations, shaders, viewport_and_scenes, physics)
+        run: |
+          bash ./tools/internal/vulkan_example_sweep/run_vulkan_example_sweep.sh --window-backend=winapi --compile-only --clean-after
