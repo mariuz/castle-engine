@@ -438,6 +438,7 @@ type
     procedure TestAutoExitFramesAndCaptureScreenshotCLIFlagsRHI;
     procedure TestPerLightShaderEffectsUniformScopingAndVisualParityRHI;
     procedure TestBroaderExampleCatalogVulkanSmokeAndOpenGLVisualParitySweepRHI;
+    procedure TestUpstreamPRSliceManifestAndDocumentationCompletenessRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -38796,6 +38797,216 @@ begin
     ApplicationDataOverride := SavedAppData;
     ApplicationProperties.RenderBackend := SavedBackend;
     Application.OnInitialize := SavedOnInit;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestUpstreamPRSliceManifestAndDocumentationCompletenessRHI;
+
+  function ReadRawTextFile(const AFileName: String): String;
+  var
+    Stream: TFileStream;
+  begin
+    Result := '';
+    Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+    try
+      if Stream.Size > 0 then
+      begin
+        SetLength(Result, Stream.Size);
+        Stream.ReadBuffer(Result[1], Stream.Size);
+      end;
+    finally
+      FreeAndNil(Stream);
+    end;
+  end;
+
+  procedure SplitTab4(const ALine: String; out C1, C2, C3, C4: String; out ColCount: Integer);
+  var
+    P1, P2, P3: SizeInt;
+    Rest1, Rest2: String;
+  begin
+    C1 := ''; C2 := ''; C3 := ''; C4 := '';
+    ColCount := 0;
+    P1 := Pos(#9, ALine);
+    if P1 <= 0 then Exit;
+    C1 := Copy(ALine, 1, P1 - 1);
+    Rest1 := Copy(ALine, P1 + 1, MaxInt);
+    P2 := Pos(#9, Rest1);
+    if P2 <= 0 then Exit;
+    C2 := Copy(Rest1, 1, P2 - 1);
+    Rest2 := Copy(Rest1, P2 + 1, MaxInt);
+    P3 := Pos(#9, Rest2);
+    if P3 <= 0 then Exit;
+    C3 := Copy(Rest2, 1, P3 - 1);
+    C4 := Copy(Rest2, P3 + 1, MaxInt);
+    if Pos(#9, C4) > 0 then
+      ColCount := 5
+    else
+      ColCount := 4;
+  end;
+
+var
+  SavedBackend: TRenderBackend;
+  DocRendererPath, DocReleaseNotesPath, DocPrGuidePath: String;
+  ManifestPath, ScriptPath, RepoRootDir, CandidateFullPath: String;
+  DocRendererText, DocReleaseText, DocPrGuideText: String;
+  RawManifest, RawScript, TrimmedLine, C1, C2, C3, C4: String;
+  Lines, SeenPaths: TStringList;
+  SliceCounts: array[0..8] of Integer;
+  I, ColCount, SliceId, TotalEntries, AutoDprojCount, Idx: Integer;
+begin
+  { 1. Public API Backward-Compatibility Invariant:
+       backendAuto remains the default and preserves OpenGL when RHIDevice is nil }
+  SavedBackend := ApplicationProperties.RenderBackend;
+  try
+    AssertEquals('Default ApplicationProperties.RenderBackend must remain backendAuto',
+      Ord(backendAuto), Ord(SavedBackend));
+    AssertTrue('RHIDevice must remain nil outside an active Vulkan session', RHIDevice = nil);
+    AssertEquals('SelectOptimalRenderBackend(backendVulkan, False) must cleanly fall back to backendOpenGL on desktop',
+      Ord(backendOpenGL), Ord(SelectOptimalRenderBackend(backendVulkan, False, 0, 0, False)));
+    AssertEquals('SelectOptimalRenderBackend(backendVulkan, False, MobileGLES=True) must cleanly fall back to backendOpenGLES on mobile',
+      Ord(backendOpenGLES), Ord(SelectOptimalRenderBackend(backendVulkan, False, 0, 0, True)));
+    AssertEquals('SelectOptimalRenderBackend(backendOpenGL, True) must preserve backendOpenGL even when Vulkan 1.4 is available',
+      Ord(backendOpenGL), Ord(SelectOptimalRenderBackend(backendOpenGL, True, 1, 4, False)));
+    AssertEquals('SelectOptimalRenderBackend(backendOpenGLES, True) must preserve backendOpenGLES even when Vulkan 1.4 is available',
+      Ord(backendOpenGLES), Ord(SelectOptimalRenderBackend(backendOpenGLES, True, 1, 4, True)));
+  finally
+    ApplicationProperties.RenderBackend := SavedBackend;
+  end;
+
+  { 2. Documentation & Release Notes Presence and Required Anchor Coverage }
+  DocRendererPath := ResolveRepoExampleFile('doc/vulkan_renderer.md');
+  DocReleaseNotesPath := ResolveRepoExampleFile('doc/vulkan_release_notes.md');
+  DocPrGuidePath := ResolveRepoExampleFile('doc/vulkan_upstream_pr_guide.md');
+  ManifestPath := ResolveRepoExampleFile('tools/internal/vulkan_upstream_slices/slice_manifest.tsv');
+  ScriptPath := ResolveRepoExampleFile('tools/internal/vulkan_upstream_slices/prepare_upstream_slices.sh');
+
+  AssertTrue('doc/vulkan_renderer.md must exist', FileExists(DocRendererPath));
+  AssertTrue('doc/vulkan_release_notes.md must exist', FileExists(DocReleaseNotesPath));
+  AssertTrue('doc/vulkan_upstream_pr_guide.md must exist', FileExists(DocPrGuidePath));
+  AssertTrue('slice_manifest.tsv must exist', FileExists(ManifestPath));
+  AssertTrue('prepare_upstream_slices.sh must exist', FileExists(ScriptPath));
+
+  DocRendererText := ReadRawTextFile(DocRendererPath);
+  DocReleaseText := ReadRawTextFile(DocReleaseNotesPath);
+  DocPrGuideText := ReadRawTextFile(DocPrGuidePath);
+  RawManifest := ReadRawTextFile(ManifestPath);
+  RawScript := ReadRawTextFile(ScriptPath);
+
+  AssertTrue('doc/vulkan_renderer.md must document --render-backend',
+    Pos('--render-backend', DocRendererText) > 0);
+  AssertTrue('doc/vulkan_renderer.md must document --auto-exit-frames',
+    Pos('--auto-exit-frames', DocRendererText) > 0);
+  AssertTrue('doc/vulkan_renderer.md must document --capture-screenshot',
+    Pos('--capture-screenshot', DocRendererText) > 0);
+  AssertTrue('doc/vulkan_renderer.md must document CASTLE_SHADER_COMPILER',
+    Pos('CASTLE_SHADER_COMPILER', DocRendererText) > 0);
+  AssertTrue('doc/vulkan_renderer.md must document CASTLE_VULKAN_VALIDATION',
+    Pos('CASTLE_VULKAN_VALIDATION', DocRendererText) > 0);
+  AssertTrue('doc/vulkan_renderer.md must document SwitchRenderBackend',
+    Pos('SwitchRenderBackend', DocRendererText) > 0);
+  AssertTrue('doc/vulkan_renderer.md must document bundle_vulkan_caches',
+    Pos('bundle_vulkan_caches', DocRendererText) > 0);
+
+  AssertTrue('doc/vulkan_release_notes.md must document backward compatibility (backendAuto)',
+    Pos('backendAuto', DocReleaseText) > 0);
+  AssertTrue('doc/vulkan_release_notes.md must document VK_KHR_portability_subset / MoltenVK',
+    Pos('VK_KHR_portability_subset', DocReleaseText) > 0);
+
+  for SliceId := 1 to 8 do
+    AssertTrue(Format('doc/vulkan_upstream_pr_guide.md must document PR #%d', [SliceId]),
+      Pos(Format('PR #%d', [SliceId]), DocPrGuideText) > 0);
+
+  { 3. Pure LF Hygiene on Shell Tooling & Complete Partition Validation of slice_manifest.tsv }
+  AssertTrue('slice_manifest.tsv must be non-empty', Length(RawManifest) > 0);
+  AssertEquals('prepare_upstream_slices.sh must use pure LF line endings (no CR)',
+    0, Pos(#13, RawScript));
+
+  RepoRootDir := ExpandFileName(InclPathDelim(ExtractFilePath(ManifestPath)) + '../../..');
+  RepoRootDir := InclPathDelim(RepoRootDir);
+
+  FillChar(SliceCounts, SizeOf(SliceCounts), 0);
+  TotalEntries := 0;
+  AutoDprojCount := 0;
+  Lines := TStringList.Create;
+  SeenPaths := TStringList.Create;
+  try
+    SeenPaths.Sorted := True;
+    SeenPaths.Duplicates := dupError;
+    Lines.Text := RawManifest;
+
+    for I := 0 to Lines.Count - 1 do
+    begin
+      TrimmedLine := Trim(Lines[I]);
+      if (TrimmedLine = '') or (TrimmedLine[1] = '#') then
+        Continue;
+
+      SplitTab4(Lines[I], C1, C2, C3, C4, ColCount);
+      AssertEquals('Manifest row must have exactly 4 tab-separated columns: ' + Lines[I],
+        4, ColCount);
+      SliceId := StrToIntDef(C1, -1);
+      AssertTrue('SliceId must be in 0..8 for ' + C4, (SliceId >= 0) and (SliceId <= 8));
+      AssertTrue('Category must be core, auto-dproj, or branch-meta for ' + C4,
+        (C3 = 'core') or (C3 = 'auto-dproj') or (C3 = 'branch-meta'));
+      AssertFalse('Duplicate path in slice_manifest.tsv: ' + C4, SeenPaths.Find(C4, Idx));
+      SeenPaths.AddObject(C4, TObject(PtrInt(SliceId)));
+
+      CandidateFullPath := RepoRootDir + StringReplace(C4, '/', PathDelim, [rfReplaceAll]);
+      AssertTrue('Manifest file must exist on disk: ' + CandidateFullPath,
+        FileExists(CandidateFullPath));
+
+      Inc(SliceCounts[SliceId]);
+      Inc(TotalEntries);
+      if C3 = 'auto-dproj' then
+        Inc(AutoDprojCount);
+    end;
+
+    AssertTrue('Manifest must track >= 315 total changed/added files', TotalEntries >= 315);
+    AssertTrue('Manifest must isolate >= 160 auto-regenerated example .dproj files', AutoDprojCount >= 160);
+    for SliceId := 1 to 8 do
+      AssertTrue(Format('Upstream PR Slice %d must contain >= 5 files', [SliceId]),
+        SliceCounts[SliceId] >= 5);
+
+    { Verify canonical anchor files land in their exact architectural slice }
+    AssertTrue('PLAN.md must be isolated in Slice 0 (branch-meta)',
+      SeenPaths.Find('PLAN.md', Idx) and (PtrInt(SeenPaths.Objects[Idx]) = 0));
+    AssertTrue('AGENTS.md must be isolated in Slice 0 (branch-meta)',
+      SeenPaths.Find('AGENTS.md', Idx) and (PtrInt(SeenPaths.Objects[Idx]) = 0));
+    AssertTrue('castleinternalvulkan.pas must belong to Slice 1',
+      SeenPaths.Find('src/base_rendering/vulkan/castleinternalvulkan.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 1));
+    AssertTrue('castleinternalrhi.pas must belong to Slice 2',
+      SeenPaths.Find('src/base_rendering/rhi/castleinternalrhi.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 2));
+    AssertTrue('castleinternalrhi_vulkan.pas must belong to Slice 2',
+      SeenPaths.Find('src/base_rendering/vulkan/castleinternalrhi_vulkan.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 2));
+    AssertTrue('castleinternalrhi_opengl.pas must belong to Slice 3',
+      SeenPaths.Find('src/base_rendering/opengl/castleinternalrhi_opengl.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 3));
+    AssertTrue('castlerendercontext.pas must belong to Slice 3',
+      SeenPaths.Find('src/base_rendering/castlerendercontext.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 3));
+    AssertTrue('castleviewport.pas must belong to Slice 4',
+      SeenPaths.Find('src/scene/castleviewport.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 4));
+    AssertTrue('castlewindow.pas must belong to Slice 5',
+      SeenPaths.Find('src/window/castlewindow.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 5));
+    AssertTrue('castlecontrol.pas must belong to Slice 5',
+      SeenPaths.Find('src/lcl/castlecontrol.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 5));
+    AssertTrue('toolpackage.pas must belong to Slice 6',
+      SeenPaths.Find('tools/build-tool/code/toolpackage.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 6));
+    AssertTrue('vulkan_3d_scene.dpr must belong to Slice 7',
+      SeenPaths.Find('examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 7));
+    AssertTrue('testcastlevulkanrhi.pas must belong to Slice 8',
+      SeenPaths.Find('tests/code/testcases/testcastlevulkanrhi.pas', Idx) and
+      (PtrInt(SeenPaths.Objects[Idx]) = 8));
+  finally
+    FreeAndNil(SeenPaths);
+    FreeAndNil(Lines);
   end;
 end;
 

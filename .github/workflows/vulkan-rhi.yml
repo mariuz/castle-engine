@@ -77,6 +77,10 @@ jobs:
           ./tools/build-tool/castle-engine --project ./tests/ compile --mode=debug --compiler-option=-dCASTLE_WINDOW_XLIB
           xvfb-run -a ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI*
           CASTLE_SHADER_COMPILER=builtin xvfb-run -a ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI.TestBuiltInSPIRVCoreShadersAndRealLavapipeDrawPrimitive2DRHI
+      - name: Verify Upstream PR Slice Manifest & Pascal uses DAG
+        run: |
+          chmod +x ./tools/internal/vulkan_upstream_slices/prepare_upstream_slices.sh
+          ./tools/internal/vulkan_upstream_slices/prepare_upstream_slices.sh --verify --summary
       - name: Run Broader Example Catalog Vulkan Smoke & Screenshot Sweep (animations, shaders, viewport_and_scenes, physics)
         run: |
           chmod +x ./tools/internal/vulkan_example_sweep/run_vulkan_example_sweep.sh
@@ -142,6 +146,10 @@ jobs:
         run: |
           ./tools/build-tool/castle-engine --project ./tests/ compile --mode=debug --compiler-option=-dCASTLE_WINDOW_COCOA
           ./tools/build-tool/castle-engine --project ./tests/ run -- --console --no-window-create --filter=TTestCastleVulkanRHI*
+      - name: Verify Upstream PR Slice Manifest & Pascal uses DAG
+        run: |
+          chmod +x ./tools/internal/vulkan_upstream_slices/prepare_upstream_slices.sh
+          ./tools/internal/vulkan_upstream_slices/prepare_upstream_slices.sh --verify --summary
       - name: Compile Broader Example Catalog on Cocoa WSI (animations, shaders, viewport_and_scenes, physics)
         run: |
           chmod +x ./tools/internal/vulkan_example_sweep/run_vulkan_example_sweep.sh
@@ -184,6 +192,9 @@ jobs:
         run: |
           ./tools/build-tool/castle-engine.exe --project ./tests/ compile --mode=debug --compiler-option=-dCASTLE_WINDOW_WINAPI
           ./tools/build-tool/castle-engine.exe --project ./tests/ run -- --console --no-window-create --filter=TTestCastleVulkanRHI*
+      - name: Verify Upstream PR Slice Manifest & Pascal uses DAG
+        run: |
+          bash ./tools/internal/vulkan_upstream_slices/prepare_upstream_slices.sh --verify --summary
       - name: Compile Broader Example Catalog on Win32 WSI (animations, shaders, viewport_and_scenes, physics)
         run: |
           bash ./tools/internal/vulkan_example_sweep/run_vulkan_example_sweep.sh --window-backend=winapi --compile-only --clean-after
