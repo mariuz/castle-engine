@@ -135,7 +135,7 @@ uses
   CastleOctahedralImpostor, CastlePoseSnapshot, CastleGravityField,
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
-  CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter;
+  CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -540,7 +540,7 @@ begin
     shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot studio hub',
     '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
 
-  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 107 UE Studios & 30 MCP Tools) }
+  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 108 UE Studios & 31 MCP Tools) }
   Reg('blueprint_editor', 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)', 'Blueprint',
     shcCharactersAiGas, 381, 'blueprint ublueprint kismet visual scripting eventgraph construction script exec pin variable branch forloop delay timeline breakpoint pascal codegen mcp',
     'EventGraph + Construction Script node VM, Exec/Data pins, latent Delay/Timeline, breakpoints & Pascal nativizer (24th MCP).');
@@ -562,6 +562,9 @@ begin
   Reg('ik_retargeter', 'Skeletal IK Retargeter (UIKRetargeter, T/A-Pose Delta & 7-Chain FK/IK)', 'IKRetarget',
     shcCharactersAiGas, 387, 'skeletal ik retargeter uikretargeter uikrigdefinition bone chain spine arm leg t pose a pose stride scale foot ik mcp',
     'Cross-skeleton 7-chain FK/IK retargeter with T/A-pose reference delta compensation, pelvis stride scaling & 30th MCP.');
+  Reg('physics_asset_phat', 'Physics Asset Editor (PhAT — Capsules, Joint Cones & Ragdoll Poke)', 'PhAT',
+    shcCharactersAiGas, 388, 'physics asset editor phat uphysicsasset uskeletalbodysetup capsule sphere box swing1 swing2 twist cone collision disable ragdoll poke mcp',
+    'Per-bone Capsule/Sphere/Box fitting, Swing1/Swing2/Twist cones, collision disable matrix, ragdoll poke & 31st MCP.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -759,6 +762,8 @@ var
     if C is TCastleWidgetAnimator then
       BumpSub(shcCinematicsAudioInput);
     if C is TCastleIkRetargeter then
+      BumpSub(shcCharactersAiGas);
+    if C is TCastlePhysicsAsset then
       BumpSub(shcCharactersAiGas);
 
     { Architecture, CSG, Splines & Soft-Body }

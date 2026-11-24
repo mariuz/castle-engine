@@ -214,6 +214,7 @@ uses
   TestToolNiagaraStack,
   TestToolWidgetAnim,
   TestToolIkRetargeter,
+  TestToolPhysicsAsset,
   TestCastleVulkanRHI;
 
 implementation

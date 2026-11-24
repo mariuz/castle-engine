@@ -88,9 +88,9 @@ begin
   FOnRefresh := AOnRefresh;
   FSelectedChainIdx := Ord(ircLeftLeg);
 
-  Caption := 'Skeletal IK Retargeter — UIKRetargeter & 7-Chain FK/IK Mapper (107 UE Studios / 30 MCP)';
+  Caption := 'Skeletal IK Retargeter — UIKRetargeter & 7-Chain FK/IK Mapper (108 UE Studios / 31 MCP)';
   Position := poScreenCenter;
-  Width := 1220;
+  Width := 1280;
   Height := 720;
 
   BuildUi;
@@ -123,43 +123,43 @@ begin
 
   BtnCompact := TButton.Create(Self);
   BtnCompact.Parent := PnlToolbar;
-  BtnCompact.SetBounds(8, 6, 166, 30);
+  BtnCompact.SetBounds(8, 6, 192, 30);
   BtnCompact.Caption := '+ Manny -> Compact A-Pose';
   BtnCompact.OnClick := @BtnSpawnCompactClick;
 
   BtnOgre := TButton.Create(Self);
   BtnOgre.Parent := PnlToolbar;
-  BtnOgre.SetBounds(178, 6, 156, 30);
+  BtnOgre.SetBounds(204, 6, 168, 30);
   BtnOgre.Caption := '+ Manny -> Brute Ogre';
   BtnOgre.OnClick := @BtnSpawnOgreClick;
 
   BtnTwoHand := TButton.Create(Self);
   BtnTwoHand.Parent := PnlToolbar;
-  BtnTwoHand.SetBounds(338, 6, 152, 30);
+  BtnTwoHand.SetBounds(376, 6, 166, 30);
   BtnTwoHand.Caption := '+ Two-Handed Grip IK';
   BtnTwoHand.OnClick := @BtnSpawnTwoHandClick;
 
   BtnStep := TButton.Create(Self);
   BtnStep.Parent := PnlToolbar;
-  BtnStep.SetBounds(494, 6, 114, 30);
+  BtnStep.SetBounds(546, 6, 132, 30);
   BtnStep.Caption := 'Step Walk +0.12s';
   BtnStep.OnClick := @BtnStepWalkClick;
 
   BtnRefDelta := TButton.Create(Self);
   BtnRefDelta.Parent := PnlToolbar;
-  BtnRefDelta.SetBounds(612, 6, 154, 30);
+  BtnRefDelta.SetBounds(682, 6, 168, 30);
   BtnRefDelta.Caption := 'Toggle T/A-Pose Delta';
   BtnRefDelta.OnClick := @BtnToggleRefCompClick;
 
   BtnTogIk := TButton.Create(Self);
   BtnTogIk.Parent := PnlToolbar;
-  BtnTogIk.SetBounds(770, 6, 136, 30);
+  BtnTogIk.SetBounds(854, 6, 150, 30);
   BtnTogIk.Caption := 'Toggle Chain FK/IK';
   BtnTogIk.OnClick := @BtnToggleChainIkClick;
 
   BtnCopy := TButton.Create(Self);
   BtnCopy.Parent := PnlToolbar;
-  BtnCopy.SetBounds(910, 6, 122, 30);
+  BtnCopy.SetBounds(1008, 6, 128, 30);
   BtnCopy.Caption := 'Copy Markdown';
   BtnCopy.OnClick := @BtnCopyMarkdownClick;
 

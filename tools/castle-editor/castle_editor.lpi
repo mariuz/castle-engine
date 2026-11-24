@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="247">
+    <Units Count="249">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1317,6 +1317,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormIkRetargeter"/>
       </Unit246>
+      <Unit247>
+        <Filename Value="../common-code/toolphysicsasset.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPhysicsAsset"/>
+      </Unit247>
+      <Unit248>
+        <Filename Value="code/formphysicsasset.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPhysicsAsset"/>
+      </Unit248>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

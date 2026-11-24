@@ -541,6 +541,7 @@
         <DCCReference Include="..\..\src\scene\castleniagarastack.pas"/>
         <DCCReference Include="..\..\src\scene\castlewidgetanim.pas"/>
         <DCCReference Include="..\..\src\scene\castleikretargeter.pas"/>
+        <DCCReference Include="..\..\src\scene\castlephysicsasset.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>

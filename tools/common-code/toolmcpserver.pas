@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1142,6 +1142,16 @@ begin
   AddToolDef('cge_retarget_ik_skeleton',
     'Spawn, step cross-skeleton stride retargeting, toggle T/A-pose reference delta compensation, or audit TCastleIkRetargeter rigs.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'PhAT operation: status, spawn_preset, step_sim, or poke_body (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastlePhysicsAsset name (defaults to first PhysicsAsset in design).'));
+  P.Add('bodyName', MakePropSchema('string', 'Target bone body name for poke_body (default "LowerArm_L").'));
+  P.Add('deltaSec', MakePropSchema('number', 'Delta seconds for step_sim (default 0.04).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: humanoid_ragdoll, pinned_test, or heavy_brute (default humanoid_ragdoll).'));
+  AddToolDef('cge_simulate_physics_asset',
+    'Spawn, step ragdoll simulation, poke skeletal bodies, or audit TCastlePhysicsAsset (PhAT) bodies & Swing1/Swing2 joint cones.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1302,6 +1312,10 @@ var
   IkRtgAudit: TIkRetargetSceneAuditReport;
   IkRtgComp: TCastleIkRetargeter;
   IkRtgPresetVal: TIkRetargetPreset;
+  PhAtAudit: TPhysicsAssetAuditReport;
+  PhAtComp: TCastlePhysicsAsset;
+  PhAtPresetVal: TPhAtAssetPreset;
+  PhAtBodyStr: String;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -2954,6 +2968,82 @@ begin
         OutPayload.Add('activeRetargeter', IkRtgComp.Name);
         OutPayload.Add('scaleRatio', IkRtgComp.PelvisHeightScaleRatio);
         OutPayload.Add('summaryBadge', IkRtgComp.IkRetargetSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_simulate_physics_asset' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    PhAtBodyStr := 'LowerArm_L';
+    MacroMult := 0.04;
+    PhAtPresetVal := papHumanoidRagdoll11Bodies;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      PhAtBodyStr := Trim(ArgsObj.Get('bodyName', 'LowerArm_L'));
+      MacroMult := ArgsObj.Get('deltaSec', 0.04);
+      if SameText(ArgsObj.Get('preset', ''), 'pinned_test') then
+        PhAtPresetVal := papKinematicPinnedUpperBodyTest
+      else if SameText(ArgsObj.Get('preset', ''), 'heavy_brute') then
+        PhAtPresetVal := papHeavyArmoredBruteRagdoll;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'step_sim') or
+       SameText(ActionStr, 'poke_body') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      PhAtComp := TPhysicsAssetHelper.SpawnPhysicsAssetPresetInDesign(
+        DesignRoot, DesignOwner, PhAtPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Physics Asset (PhAT)');
+    end else
+      PhAtComp := TPhysicsAssetHelper.FindPhysicsAssetByName(DesignRoot, DesignOwner, CompName);
+
+    if (PhAtComp <> nil) and SameText(ActionStr, 'poke_body') then
+    begin
+      PhAtComp.ApplyPokeImpulse(PhAtBodyStr, Vector3(28.0, 12.0, 8.0));
+      PhAtComp.StepSimulation(MacroMult);
+    end else if (PhAtComp <> nil) and SameText(ActionStr, 'step_sim') then
+      PhAtComp.StepSimulation(MacroMult);
+
+    PhAtAudit := TPhysicsAssetHelper.AuditPhysicsAssetsInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('assetCount', PhAtAudit.AssetCount);
+      OutPayload.Add('totalBodies', PhAtAudit.TotalBodies);
+      OutPayload.Add('totalConstraints', PhAtAudit.TotalConstraints);
+      OutPayload.Add('totalDisabledPairs', PhAtAudit.TotalDisabledPairs);
+      OutPayload.Add('totalMassKg', PhAtAudit.TotalMassKg);
+      OutPayload.Add('maxConeViolationDeg', PhAtAudit.MaxConeViolationDeg);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if PhAtComp <> nil then
+      begin
+        OutPayload.Add('activeAsset', PhAtComp.Name);
+        OutPayload.Add('pokeImpulseCount', PhAtComp.PokeImpulseCount);
+        OutPayload.Add('summaryBadge', PhAtComp.PhAtSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

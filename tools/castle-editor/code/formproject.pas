@@ -701,6 +701,7 @@ type
       MenuItemNiagaraStack: TMenuItem;
       MenuItemWidgetAnim: TMenuItem;
       MenuItemIkRetargeter: TMenuItem;
+      MenuItemPhysicsAsset: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -822,6 +823,7 @@ type
     procedure MenuItemNiagaraStackClick(Sender: TObject);
     procedure MenuItemWidgetAnimClick(Sender: TObject);
     procedure MenuItemIkRetargeterClick(Sender: TObject);
+    procedure MenuItemPhysicsAssetClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2987,6 +2989,11 @@ begin
   MenuItemIkRetargeter.Caption := 'Skeletal IK Retargeter (UIKRetargeter & 7-Chain FK/IK)...';
   MenuItemIkRetargeter.OnClick := @MenuItemIkRetargeterClick;
   MenuItemDesign.Add(MenuItemIkRetargeter);
+
+  MenuItemPhysicsAsset := TMenuItem.Create(MenuItemDesign);
+  MenuItemPhysicsAsset.Caption := 'Physics Asset Editor (PhAT — Capsules, Joint Cones & Ragdoll Poke)...';
+  MenuItemPhysicsAsset.OnClick := @MenuItemPhysicsAssetClick;
+  MenuItemDesign.Add(MenuItemPhysicsAsset);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6605,6 +6612,12 @@ procedure TProjectForm.MenuItemIkRetargeterClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowIkRetargeterDialog;
+end;
+
+procedure TProjectForm.MenuItemPhysicsAssetClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPhysicsAssetDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
