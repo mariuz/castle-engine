@@ -86,9 +86,9 @@ begin
   FOnRefresh := AOnRefresh;
   FSelectedBodyIdx := 4; { LowerArm_L }
 
-  Caption := 'Physics Asset Editor (PhAT — Capsules, Swing1/Swing2 Cones & Ragdoll Poke) (108 UE Studios / 31 MCP)';
+  Caption := 'Physics Asset Editor (PhAT — Capsules, Swing1/Swing2 Cones & Ragdoll Poke) (109 UE Studios / 32 MCP)';
   Position := poScreenCenter;
-  Width := 1260;
+  Width := 1280;
   Height := 720;
 
   BuildUi;

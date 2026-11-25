@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1152,6 +1152,15 @@ begin
   AddToolDef('cge_simulate_physics_asset',
     'Spawn, step ragdoll simulation, poke skeletal bodies, or audit TCastlePhysicsAsset (PhAT) bodies & Swing1/Swing2 joint cones.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'UV Editor operation: status, spawn_preset, or unwrap_pack (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleUvEditorMesh name (defaults to first UV mesh in design).'));
+  P.Add('projection', MakePropSchema('string', 'Projection mode for unwrap_pack: box6, cylindrical, planar, or conformal (default box6).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: crate_6islands, cylindrical_column, or overlap_demo (default crate_6islands).'));
+  AddToolDef('cge_unwrap_pack_uvs',
+    'Spawn, project/unwrap, rectilinearly shelf-pack UV islands, or audit overlapping UV triangles & world-space Texel Density.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1316,6 +1325,10 @@ var
   PhAtComp: TCastlePhysicsAsset;
   PhAtPresetVal: TPhAtAssetPreset;
   PhAtBodyStr: String;
+  UvAudit: TUvSceneAuditReport;
+  UvComp: TCastleUvEditorMesh;
+  UvPresetVal: TUvMeshPreset;
+  UvProjVal: TUvProjectionMode;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3044,6 +3057,81 @@ begin
         OutPayload.Add('activeAsset', PhAtComp.Name);
         OutPayload.Add('pokeImpulseCount', PhAtComp.PokeImpulseCount);
         OutPayload.Add('summaryBadge', PhAtComp.PhAtSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_unwrap_pack_uvs' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    UvPresetVal := umpArchitecturalCrate6Islands;
+    UvProjVal := upmBox6FaceTriplanar;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      if SameText(ArgsObj.Get('preset', ''), 'cylindrical_column') then
+        UvPresetVal := umpCylindricalColumnSeamUnwrap
+      else if SameText(ArgsObj.Get('preset', ''), 'overlap_demo') then
+        UvPresetVal := umpOverlappingStackedUvRepairDemo;
+
+      if SameText(ArgsObj.Get('projection', ''), 'cylindrical') then
+        UvProjVal := upmCylindricalSeam
+      else if SameText(ArgsObj.Get('projection', ''), 'planar') then
+        UvProjVal := upmPlanarTopXZ
+      else if SameText(ArgsObj.Get('projection', ''), 'conformal') then
+        UvProjVal := upmConformalSeamRelax;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'unwrap_pack') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      UvComp := TUvEditorHelper.SpawnUvMeshPresetInDesign(
+        DesignRoot, DesignOwner, UvPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn UV Editor Mesh');
+    end else
+      UvComp := TUvEditorHelper.FindUvMeshByName(DesignRoot, DesignOwner, CompName);
+
+    if (UvComp <> nil) and SameText(ActionStr, 'unwrap_pack') then
+      UvComp.AutoUnwrapAndPack(UvProjVal);
+
+    UvAudit := TUvEditorHelper.AuditUvMeshesInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('meshCount', UvAudit.MeshCount);
+      OutPayload.Add('totalTriangles', UvAudit.TotalTriangles);
+      OutPayload.Add('totalIslands', UvAudit.TotalIslands);
+      OutPayload.Add('totalOverlappingPairs', UvAudit.TotalOverlappingPairs);
+      OutPayload.Add('totalInvertedTriangles', UvAudit.TotalInvertedTriangles);
+      OutPayload.Add('avgCoveragePercent', UvAudit.AvgCoveragePercent);
+      OutPayload.Add('avgTexelsPerMeter', UvAudit.AvgTexelsPerMeter);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if UvComp <> nil then
+      begin
+        OutPayload.Add('activeMesh', UvComp.Name);
+        OutPayload.Add('summaryBadge', UvComp.UvSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

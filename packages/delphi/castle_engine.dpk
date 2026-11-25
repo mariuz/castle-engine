@@ -381,6 +381,7 @@ contains
   castlewidgetanim in '..\..\src\scene\castlewidgetanim.pas',
   castleikretargeter in '..\..\src\scene\castleikretargeter.pas',
   castlephysicsasset in '..\..\src\scene\castlephysicsasset.pas',
+  castleuveditor in '..\..\src\scene\castleuveditor.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

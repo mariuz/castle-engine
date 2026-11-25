@@ -702,6 +702,7 @@ type
       MenuItemWidgetAnim: TMenuItem;
       MenuItemIkRetargeter: TMenuItem;
       MenuItemPhysicsAsset: TMenuItem;
+      MenuItemUvEditor: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -824,6 +825,7 @@ type
     procedure MenuItemWidgetAnimClick(Sender: TObject);
     procedure MenuItemIkRetargeterClick(Sender: TObject);
     procedure MenuItemPhysicsAssetClick(Sender: TObject);
+    procedure MenuItemUvEditorClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2994,6 +2996,11 @@ begin
   MenuItemPhysicsAsset.Caption := 'Physics Asset Editor (PhAT — Capsules, Joint Cones & Ragdoll Poke)...';
   MenuItemPhysicsAsset.OnClick := @MenuItemPhysicsAssetClick;
   MenuItemDesign.Add(MenuItemPhysicsAsset);
+
+  MenuItemUvEditor := TMenuItem.Create(MenuItemDesign);
+  MenuItemUvEditor.Caption := 'Modeling Mode UV Editor & Texel-Density Studio...';
+  MenuItemUvEditor.OnClick := @MenuItemUvEditorClick;
+  MenuItemDesign.Add(MenuItemUvEditor);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6618,6 +6625,12 @@ procedure TProjectForm.MenuItemPhysicsAssetClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowPhysicsAssetDialog;
+end;
+
+procedure TProjectForm.MenuItemUvEditorClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowUvEditorDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

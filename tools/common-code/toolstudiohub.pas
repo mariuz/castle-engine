@@ -135,7 +135,8 @@ uses
   CastleOctahedralImpostor, CastlePoseSnapshot, CastleGravityField,
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
-  CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset;
+  CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
+  CastleUvEditor;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -540,7 +541,7 @@ begin
     shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot studio hub',
     '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
 
-  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 108 UE Studios & 31 MCP Tools) }
+  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 109 UE Studios & 32 MCP Tools) }
   Reg('blueprint_editor', 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)', 'Blueprint',
     shcCharactersAiGas, 381, 'blueprint ublueprint kismet visual scripting eventgraph construction script exec pin variable branch forloop delay timeline breakpoint pascal codegen mcp',
     'EventGraph + Construction Script node VM, Exec/Data pins, latent Delay/Timeline, breakpoints & Pascal nativizer (24th MCP).');
@@ -565,6 +566,9 @@ begin
   Reg('physics_asset_phat', 'Physics Asset Editor (PhAT — Capsules, Joint Cones & Ragdoll Poke)', 'PhAT',
     shcCharactersAiGas, 388, 'physics asset editor phat uphysicsasset uskeletalbodysetup capsule sphere box swing1 swing2 twist cone collision disable ragdoll poke mcp',
     'Per-bone Capsule/Sphere/Box fitting, Swing1/Swing2/Twist cones, collision disable matrix, ragdoll poke & 31st MCP.');
+  Reg('uv_editor', 'Modeling Mode UV Editor & Texel-Density Studio (Unwrap, Pack & Overlap Audit)', 'UVEditor',
+    shcArchitecturePcg, 389, 'modeling mode uv editor xatlas unwrap box triplanar cylindrical seam conformal shelf pack overlap texel density mcp',
+    'Planar/Box/Cylindrical/Conformal UV unwrap, rectilinear Shelf island packing, overlap audit, Texel Density & 32nd MCP.');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -765,6 +769,8 @@ var
       BumpSub(shcCharactersAiGas);
     if C is TCastlePhysicsAsset then
       BumpSub(shcCharactersAiGas);
+    if C is TCastleUvEditorMesh then
+      BumpSub(shcArchitecturePcg);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

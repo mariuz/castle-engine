@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="249">
+    <Units Count="251">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1327,6 +1327,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormPhysicsAsset"/>
       </Unit248>
+      <Unit249>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooluveditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolUvEditor"/>
+      </Unit249>
+      <Unit250>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formuveditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormUvEditor"/>
+      </Unit250>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

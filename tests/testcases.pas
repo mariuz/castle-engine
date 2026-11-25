@@ -215,6 +215,7 @@ uses
   TestToolWidgetAnim,
   TestToolIkRetargeter,
   TestToolPhysicsAsset,
+  TestToolUvEditor,
   TestCastleVulkanRHI;
 
 implementation
