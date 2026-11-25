@@ -136,7 +136,7 @@ uses
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
-  CastleUvEditor, CastleLevelInstance;
+  CastleUvEditor, CastleLevelInstance, CastleMaterialInstance;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -572,6 +572,11 @@ begin
   Reg('level_instance_ofpa', 'Level Instances, Packed Level Actors & One-File-Per-Actor (OFPA)', 'LevelInst',
     shcWorldEnvironment, 390, 'level instance alevelinstance apackedlevelactor packed ism one file per actor ofpa externalactors git merge world partition mcp',
     'In-place Level Instance Edit/Commit/Discard/Break, Packed ISM batching & OFPA conflict-free per-actor Git merge (33rd MCP).');
+
+  { Horizon 13 (Phases 391–400 — Remaining Production Unreal Engine 5.5 Sub-Editors) }
+  Reg('material_instance', 'Material Instance Editor & Material Parameter Collections (MPC)', 'MatInst',
+    shcMaterialsVfxLighting, 391, 'material instance umaterialinstanceconstant umaterialparametercollection mpc parent child override scalar vector texture static switch wetness snow mcp',
+    'Multi-level Parent->Child Material Instance overrides, zero-recompile tuning, Static Switches & Global MPC broadcast (34th MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -776,6 +781,8 @@ var
       BumpSub(shcArchitecturePcg);
     if C is TCastleLevelInstance then
       BumpSub(shcWorldEnvironment);
+    if (C is TCastleMaterialInstance) or (C is TCastleMaterialParameterCollection) then
+      BumpSub(shcMaterialsVfxLighting);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="253">
+    <Units Count="255">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1347,6 +1347,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormLevelInstance"/>
       </Unit252>
+      <Unit253>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmaterialinstance.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMaterialInstance"/>
+      </Unit253>
+      <Unit254>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmaterialinstance.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMaterialInstance"/>
+      </Unit254>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

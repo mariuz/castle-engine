@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1169,6 +1169,16 @@ begin
   AddToolDef('cge_manage_ofpa_actors',
     'Spawn, edit/commit/sync Level Instances & Packed ISM batches, or export One-File-Per-Actor (OFPA / __ExternalActors__) manifests.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Material Instance / MPC operation: status, spawn_showcase, override_scalar, reset_overrides, or broadcast_mpc (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleMaterialInstance name (defaults to first instance in design).'));
+  P.Add('paramName', MakePropSchema('string', 'Scalar parameter name for override_scalar (e.g. Roughness, Metallic, ClearCoat, UVTiling).'));
+  P.Add('scalarValue', MakePropSchema('number', 'Scalar value for override_scalar (default 0.25).'));
+  P.Add('mpcPreset', MakePropSchema('string', 'MPC environment preset for broadcast_mpc: dry_noon, monsoon_rain, blizzard_snow, or neon_night (default monsoon_rain).'));
+  AddToolDef('cge_override_material_instance',
+    'Spawn Parent->Child Material Instances & MPCs, override parameters with zero shader recompiles, reset to parent, or broadcast global MPC weather uniforms.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1343,6 +1353,13 @@ var
   OfpaRepo: TOfpaActorFileEntryArray;
   OfpaArr: TJSONArray;
   OfpaObj: TJSONObject;
+  MiAudit: TMaterialInstanceAuditReport;
+  MiComp, MiParentOut, MiChildOut: TCastleMaterialInstance;
+  MpcComp: TCastleMaterialParameterCollection;
+  MpcPresetVal: TMpcEnvironmentPreset;
+  MiSurf: TResolvedPbrSurface;
+  MiParamStr: String;
+  MiScalarVal: Single;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3231,6 +3248,107 @@ begin
           OfpaArr.Add(OfpaObj);
         end;
         OutPayload.Add('ofpaManifest', OfpaArr);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_override_material_instance' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    MiParamStr := 'Roughness';
+    MiScalarVal := 0.25;
+    MpcPresetVal := mpcpMonsoonRainStorm;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      MiParamStr := Trim(ArgsObj.Get('paramName', 'Roughness'));
+      MiScalarVal := ArgsObj.Get('scalarValue', 0.25);
+      if SameText(ArgsObj.Get('mpcPreset', ''), 'dry_noon') then
+        MpcPresetVal := mpcpClearNoonDry
+      else if SameText(ArgsObj.Get('mpcPreset', ''), 'blizzard_snow') then
+        MpcPresetVal := mpcpBlizzardSnowline
+      else if SameText(ArgsObj.Get('mpcPreset', ''), 'neon_night') then
+        MpcPresetVal := mpcpCyberpunkNeonNight;
+    end;
+
+    if SameText(ActionStr, 'spawn_showcase') or SameText(ActionStr, 'override_scalar') or
+       SameText(ActionStr, 'reset_overrides') or SameText(ActionStr, 'broadcast_mpc') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    MpcComp := TMaterialInstanceHelper.FindFirstMpc(DesignRoot);
+    if SameText(ActionStr, 'spawn_showcase') then
+    begin
+      TMaterialInstanceHelper.SpawnParentChildMpcShowcaseInDesign(
+        DesignRoot, DesignOwner, MpcComp, MiParentOut, MiChildOut);
+      MiComp := MiChildOut;
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Material Instance + MPC Showcase');
+    end else
+      MiComp := TMaterialInstanceHelper.FindMaterialInstanceByName(DesignRoot, DesignOwner, CompName);
+
+    if (MiComp <> nil) and SameText(ActionStr, 'override_scalar') then
+    begin
+      MiComp.SetScalarParameterValue(MiParamStr, MiScalarVal);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Override Material Instance Scalar ' + MiParamStr);
+    end else
+    if (MiComp <> nil) and SameText(ActionStr, 'reset_overrides') then
+    begin
+      MiComp.ResetAllOverrides;
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Reset Material Instance Overrides');
+    end else
+    if SameText(ActionStr, 'broadcast_mpc') then
+    begin
+      TMaterialInstanceHelper.BroadcastMpcPresetInDesign(DesignRoot, MpcPresetVal);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Broadcast MPC Preset');
+    end;
+
+    MiAudit := TMaterialInstanceHelper.AuditMaterialInstancesInDesign(DesignRoot);
+    MpcComp := TMaterialInstanceHelper.FindFirstMpc(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('materialInstanceCount', MiAudit.MaterialInstanceCount);
+      OutPayload.Add('parentLinkedInstanceCount', MiAudit.ParentLinkedInstanceCount);
+      OutPayload.Add('mpcCount', MiAudit.MpcCount);
+      OutPayload.Add('totalOverriddenSlots', MiAudit.TotalOverriddenSlots);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if MiComp <> nil then
+      begin
+        MiSurf := MiComp.EvaluateEffectiveSurface(MpcComp);
+        OutPayload.Add('activeMaterialInstance', MiComp.Name);
+        OutPayload.Add('hierarchyChain', MiComp.HierarchyChainString);
+        OutPayload.Add('finalRoughness', MiSurf.FinalRoughness);
+        OutPayload.Add('finalMetallic', MiSurf.FinalMetallic);
+        OutPayload.Add('shaderPermutationsCompiled', MiSurf.ShaderPermutationsCompiled);
+        OutPayload.Add('summaryBadge', MiComp.MaterialInstanceSummaryBadge);
+      end;
+      if MpcComp <> nil then
+      begin
+        OutPayload.Add('mpcCollectionKey', MpcComp.CollectionKey);
+        OutPayload.Add('globalWetness', MpcComp.GlobalWetness);
+        OutPayload.Add('snowCoverage', MpcComp.SnowCoverage);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

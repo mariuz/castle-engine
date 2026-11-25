@@ -704,6 +704,7 @@ type
       MenuItemPhysicsAsset: TMenuItem;
       MenuItemUvEditor: TMenuItem;
       MenuItemLevelInstance: TMenuItem;
+      MenuItemMaterialInstance: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -828,6 +829,7 @@ type
     procedure MenuItemPhysicsAssetClick(Sender: TObject);
     procedure MenuItemUvEditorClick(Sender: TObject);
     procedure MenuItemLevelInstanceClick(Sender: TObject);
+    procedure MenuItemMaterialInstanceClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3008,6 +3010,11 @@ begin
   MenuItemLevelInstance.Caption := 'Level Instances, Packed Level Actors & OFPA Studio...';
   MenuItemLevelInstance.OnClick := @MenuItemLevelInstanceClick;
   MenuItemDesign.Add(MenuItemLevelInstance);
+
+  MenuItemMaterialInstance := TMenuItem.Create(MenuItemDesign);
+  MenuItemMaterialInstance.Caption := 'Material Instance Editor & Material Parameter Collections (MPC)...';
+  MenuItemMaterialInstance.OnClick := @MenuItemMaterialInstanceClick;
+  MenuItemDesign.Add(MenuItemMaterialInstance);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6644,6 +6651,12 @@ procedure TProjectForm.MenuItemLevelInstanceClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowLevelInstanceDialog;
+end;
+
+procedure TProjectForm.MenuItemMaterialInstanceClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMaterialInstanceDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

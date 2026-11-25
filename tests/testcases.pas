@@ -217,6 +217,7 @@ uses
   TestToolPhysicsAsset,
   TestToolUvEditor,
   TestToolLevelInstance,
+  TestToolMaterialInstance,
   TestCastleVulkanRHI;
 
 implementation

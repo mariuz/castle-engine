@@ -162,7 +162,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify 109 UE Studios in Studio Hub (Phase 389 uv_editor) }
-  AssertEquals(110, TStudioHubManager.StudioCount);
+  AssertEquals(111, TStudioHubManager.StudioCount);
   AssertTrue(TStudioHubManager.FindStudioById('uv_editor', Entry));
   AssertEquals(389, Entry.PhaseNumber);
 
@@ -182,7 +182,7 @@ begin
     try
       ToolsArr := OuterJson.FindPath('result.tools') as TJSONArray;
       AssertTrue(ToolsArr <> nil);
-      AssertEquals(33, ToolsArr.Count);
+      AssertEquals(34, ToolsArr.Count);
     finally
       FreeAndNil(OuterJson);
     end;
@@ -197,7 +197,7 @@ begin
         PayloadObj := InnerJson as TJSONObject;
         AssertEquals(1, PayloadObj.Integers['meshCount']);
         AssertTrue(PayloadObj.Integers['totalOverlappingPairs'] >= 15);
-        AssertEquals(110, PayloadObj.Integers['studioCatalogCount']);
+        AssertEquals(111, PayloadObj.Integers['studioCatalogCount']);
       finally
         FreeAndNil(InnerJson);
       end;
