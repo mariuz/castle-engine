@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="251">
+    <Units Count="253">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1337,6 +1337,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormUvEditor"/>
       </Unit250>
+      <Unit251>
+        <Filename Value="../common-code/toollevelinstance.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolLevelInstance"/>
+      </Unit251>
+      <Unit252>
+        <Filename Value="code/formlevelinstance.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormLevelInstance"/>
+      </Unit252>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

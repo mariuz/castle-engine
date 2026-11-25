@@ -136,7 +136,7 @@ uses
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
-  CastleUvEditor;
+  CastleUvEditor, CastleLevelInstance;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -541,7 +541,7 @@ begin
     shcPerformanceQaDeploy, 380, 'viewport quad overdraw transparency alpha stacking early z fragment shader alu hotspot studio hub',
     '32x18 screen-tile translucent overdraw & fragment ALU auditor, cutout hints & 23rd MCP tool.');
 
-  { Horizon 12 (Phases 381+ — Core Unreal Engine 5.5 Sub-Editors -> 109 UE Studios & 32 MCP Tools) }
+  { Horizon 12 (Phases 381–390 — Core Unreal Engine 5.5 Sub-Editors -> 110 UE Studios & 33 MCP Tools) }
   Reg('blueprint_editor', 'Blueprint Visual Scripting Editor (EventGraph, Construction & Nativizer)', 'Blueprint',
     shcCharactersAiGas, 381, 'blueprint ublueprint kismet visual scripting eventgraph construction script exec pin variable branch forloop delay timeline breakpoint pascal codegen mcp',
     'EventGraph + Construction Script node VM, Exec/Data pins, latent Delay/Timeline, breakpoints & Pascal nativizer (24th MCP).');
@@ -569,6 +569,9 @@ begin
   Reg('uv_editor', 'Modeling Mode UV Editor & Texel-Density Studio (Unwrap, Pack & Overlap Audit)', 'UVEditor',
     shcArchitecturePcg, 389, 'modeling mode uv editor xatlas unwrap box triplanar cylindrical seam conformal shelf pack overlap texel density mcp',
     'Planar/Box/Cylindrical/Conformal UV unwrap, rectilinear Shelf island packing, overlap audit, Texel Density & 32nd MCP.');
+  Reg('level_instance_ofpa', 'Level Instances, Packed Level Actors & One-File-Per-Actor (OFPA)', 'LevelInst',
+    shcWorldEnvironment, 390, 'level instance alevelinstance apackedlevelactor packed ism one file per actor ofpa externalactors git merge world partition mcp',
+    'In-place Level Instance Edit/Commit/Discard/Break, Packed ISM batching & OFPA conflict-free per-actor Git merge (33rd MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -771,6 +774,8 @@ var
       BumpSub(shcCharactersAiGas);
     if C is TCastleUvEditorMesh then
       BumpSub(shcArchitecturePcg);
+    if C is TCastleLevelInstance then
+      BumpSub(shcWorldEnvironment);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

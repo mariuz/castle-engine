@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1161,6 +1161,14 @@ begin
   AddToolDef('cge_unwrap_pack_uvs',
     'Spawn, project/unwrap, rectilinearly shelf-pack UV islands, or audit overlapping UV triangles & world-space Texel Density.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Level Instance / OFPA operation: status, spawn_preset, edit_in_place, commit_sync, or export_ofpa (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleLevelInstance name (defaults to first Level Instance in design).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: watchtower, cyber_street, or dungeon_room (default watchtower).'));
+  AddToolDef('cge_manage_ofpa_actors',
+    'Spawn, edit/commit/sync Level Instances & Packed ISM batches, or export One-File-Per-Actor (OFPA / __ExternalActors__) manifests.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1329,6 +1337,12 @@ var
   UvComp: TCastleUvEditorMesh;
   UvPresetVal: TUvMeshPreset;
   UvProjVal: TUvProjectionMode;
+  LiAudit: TLevelInstanceAuditReport;
+  LiComp: TCastleLevelInstance;
+  LiPresetVal: TLevelInstancePreset;
+  OfpaRepo: TOfpaActorFileEntryArray;
+  OfpaArr: TJSONArray;
+  OfpaObj: TJSONObject;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3132,6 +3146,91 @@ begin
       begin
         OutPayload.Add('activeMesh', UvComp.Name);
         OutPayload.Add('summaryBadge', UvComp.UvSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_manage_ofpa_actors' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    LiPresetVal := lipMedievalWatchtower10Actors;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      if SameText(ArgsObj.Get('preset', ''), 'cyber_street') then
+        LiPresetVal := lipCyberpunkStreetBlock12Actors
+      else if SameText(ArgsObj.Get('preset', ''), 'dungeon_room') then
+        LiPresetVal := lipDungeonRoomModular8Actors;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'edit_in_place') or
+       SameText(ActionStr, 'commit_sync') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      LiComp := TLevelInstanceHelper.SpawnLevelInstancePresetInDesign(
+        DesignRoot, DesignOwner, LiPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Level Instance');
+    end else
+      LiComp := TLevelInstanceHelper.FindLevelInstanceByName(DesignRoot, DesignOwner, CompName);
+
+    if (LiComp <> nil) and SameText(ActionStr, 'edit_in_place') then
+      LiComp.BeginEditInPlace
+    else if (LiComp <> nil) and SameText(ActionStr, 'commit_sync') then
+    begin
+      if LiComp.CommitInPlaceEdits then
+        TLevelInstanceHelper.SyncSiblingInstancesInDesign(DesignRoot, LiComp);
+    end;
+
+    LiAudit := TLevelInstanceHelper.AuditLevelInstancesInDesign(DesignRoot);
+    OfpaRepo := TLevelInstanceHelper.ExportDesignToOfpaRepo(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('levelInstanceCount', LiAudit.LevelInstanceCount);
+      OutPayload.Add('totalSubActors', LiAudit.TotalSubActors);
+      OutPayload.Add('totalPackedBatches', LiAudit.TotalPackedBatches);
+      OutPayload.Add('ofpaActorFileCount', Length(OfpaRepo));
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if LiComp <> nil then
+      begin
+        OutPayload.Add('activeLevelInstance', LiComp.Name);
+        OutPayload.Add('drawCallReductionPercent', LiComp.DrawCallReductionPercent);
+        OutPayload.Add('summaryBadge', LiComp.LevelInstanceSummaryBadge);
+      end;
+      if SameText(ActionStr, 'export_ofpa') then
+      begin
+        OfpaArr := TJSONArray.Create;
+        for I := 0 to High(OfpaRepo) do
+        begin
+          OfpaObj := TJSONObject.Create;
+          OfpaObj.Add('actorName', OfpaRepo[I].ActorName);
+          OfpaObj.Add('relativePath', OfpaRepo[I].RelativeOfpaPath);
+          OfpaObj.Add('contentHash', OfpaRepo[I].ContentHashHex);
+          OfpaArr.Add(OfpaObj);
+        end;
+        OutPayload.Add('ofpaManifest', OfpaArr);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

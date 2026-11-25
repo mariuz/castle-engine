@@ -703,6 +703,7 @@ type
       MenuItemIkRetargeter: TMenuItem;
       MenuItemPhysicsAsset: TMenuItem;
       MenuItemUvEditor: TMenuItem;
+      MenuItemLevelInstance: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -826,6 +827,7 @@ type
     procedure MenuItemIkRetargeterClick(Sender: TObject);
     procedure MenuItemPhysicsAssetClick(Sender: TObject);
     procedure MenuItemUvEditorClick(Sender: TObject);
+    procedure MenuItemLevelInstanceClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3001,6 +3003,11 @@ begin
   MenuItemUvEditor.Caption := 'Modeling Mode UV Editor & Texel-Density Studio...';
   MenuItemUvEditor.OnClick := @MenuItemUvEditorClick;
   MenuItemDesign.Add(MenuItemUvEditor);
+
+  MenuItemLevelInstance := TMenuItem.Create(MenuItemDesign);
+  MenuItemLevelInstance.Caption := 'Level Instances, Packed Level Actors & OFPA Studio...';
+  MenuItemLevelInstance.OnClick := @MenuItemLevelInstanceClick;
+  MenuItemDesign.Add(MenuItemLevelInstance);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6631,6 +6638,12 @@ procedure TProjectForm.MenuItemUvEditorClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowUvEditorDialog;
+end;
+
+procedure TProjectForm.MenuItemLevelInstanceClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowLevelInstanceDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

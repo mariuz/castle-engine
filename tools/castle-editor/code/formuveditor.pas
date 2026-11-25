@@ -83,7 +83,7 @@ begin
   FOnModified := AOnModified;
   FOnRefresh := AOnRefresh;
 
-  Caption := 'Modeling Mode UV Editor & Texel-Density Studio (109 UE Studios / 32 MCP)';
+  Caption := 'Modeling Mode UV Editor & Texel-Density Studio (110 UE Studios / 33 MCP)';
   Position := poScreenCenter;
   Width := 1280;
   Height := 720;

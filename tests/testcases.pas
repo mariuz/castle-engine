@@ -216,6 +216,7 @@ uses
   TestToolIkRetargeter,
   TestToolPhysicsAsset,
   TestToolUvEditor,
+  TestToolLevelInstance,
   TestCastleVulkanRHI;
 
 implementation
