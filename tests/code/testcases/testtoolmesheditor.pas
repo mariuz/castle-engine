@@ -170,7 +170,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify 112 UE Studios in Studio Hub (Phase 392 static_skeletal_mesh_editor) }
-  AssertEquals(112, TStudioHubManager.StudioCount);
+  AssertEquals(113, TStudioHubManager.StudioCount);
   AssertTrue(TStudioHubManager.FindStudioById('static_skeletal_mesh_editor', Entry));
   AssertEquals(392, Entry.PhaseNumber);
 
@@ -190,7 +190,7 @@ begin
     try
       ToolsArr := OuterJson.FindPath('result.tools') as TJSONArray;
       AssertTrue(ToolsArr <> nil);
-      AssertEquals(35, ToolsArr.Count);
+      AssertEquals(36, ToolsArr.Count);
     finally
       FreeAndNil(OuterJson);
     end;
@@ -208,7 +208,7 @@ begin
         AssertEquals(3, PayloadObj.Integers['socketCount']);
         AssertTrue(PayloadObj.Booleans['centerOpeningClear']);
         AssertEquals(0, PayloadObj.Integers['nonOrthogonalTangents']);
-        AssertEquals(112, PayloadObj.Integers['studioCatalogCount']);
+        AssertEquals(113, PayloadObj.Integers['studioCatalogCount']);
       finally
         FreeAndNil(InnerJson);
       end;

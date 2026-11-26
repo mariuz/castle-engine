@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1189,6 +1189,15 @@ begin
   AddToolDef('cge_edit_mesh_sockets_collision',
     'Spawn Static/Skeletal Mesh Editor assets, run V-HACD / K-DOP Auto-Convex Collision decomposition, attach Socket props, or recompute MikkTSpace tangents.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Recast NavMesh operation: status, spawn_preset, build_navmesh, or find_path (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleRecastNavMesh name (defaults to first Recast volume in design).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: bridge_2story, dungeon_keep, or canyon_parkour (default bridge_2story).'));
+  P.Add('agentHeight', MakePropSchema('number', 'Optional AgentHeight in meters for build_navmesh (default 1.80).'));
+  AddToolDef('cge_build_recast_navmesh',
+    'Spawn 3D Polygonal Recast NavMesh volumes, rebuild multi-floor headroom-aware NavPolys & ANavLinkProxy off-mesh links, or solve 3D funnel A* paths.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1376,6 +1385,11 @@ var
   MeshMaxHulls: Integer;
   MeshSockStr: String;
   TanAuditRes: TMeshTangentAudit;
+  RecastAudit: TRecastSceneAudit;
+  RecastComp: TCastleRecastNavMesh;
+  RecastPresetVal: TRecastNavPreset;
+  RecastAgentH: Single;
+  RecastPathRes: TRecastPathResult;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3458,6 +3472,89 @@ begin
           not MeshComp.PointHitsAnyConvexHull(Vector3(0.0, 1.2, 0.0)));
         OutPayload.Add('nonOrthogonalTangents', TanAuditRes.NonOrthogonalTangentCount);
         OutPayload.Add('summaryBadge', MeshComp.MeshEditorSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_build_recast_navmesh' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    RecastPresetVal := rnpTwoStoryBridgeAndStairs;
+    RecastAgentH := 1.80;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      RecastAgentH := ArgsObj.Get('agentHeight', 1.80);
+      if SameText(ArgsObj.Get('preset', ''), 'dungeon_keep') then
+        RecastPresetVal := rnpMultiFloorDungeonKeep
+      else if SameText(ArgsObj.Get('preset', ''), 'canyon_parkour') then
+        RecastPresetVal := rnpSteepCanyonParkourLinks;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'build_navmesh') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      RecastComp := TRecastNavMeshHelper.SpawnRecastPresetInDesign(
+        DesignRoot, DesignOwner, RecastPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn 3D Recast NavMesh Volume');
+    end else
+      RecastComp := TRecastNavMeshHelper.FindRecastNavMeshByName(DesignRoot, DesignOwner, CompName);
+
+    if (RecastComp <> nil) and SameText(ActionStr, 'build_navmesh') then
+    begin
+      RecastComp.AgentHeight := RecastAgentH;
+      RecastComp.BuildPolygonalNavMesh;
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Rebuild 3D Recast NavMesh');
+    end else
+    if (RecastComp <> nil) and SameText(ActionStr, 'find_path') then
+    begin
+      RecastPathRes := RecastComp.FindPath3D(
+        Vector3(6.5, 0.0, -2.5), Vector3(8.2, 3.0, 2.6));
+      if not RecastPathRes.Found then ;
+    end;
+
+    RecastAudit := TRecastNavMeshHelper.AuditRecastNavMeshesInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('navVolumeCount', RecastAudit.NavVolumeCount);
+      OutPayload.Add('totalPolys', RecastAudit.TotalPolys);
+      OutPayload.Add('totalNavTriangles', RecastAudit.TotalNavTriangles);
+      OutPayload.Add('totalNavLinks', RecastAudit.TotalNavLinks);
+      OutPayload.Add('totalStackedFloorPairs', RecastAudit.TotalStackedFloorPairs);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if RecastComp <> nil then
+      begin
+        OutPayload.Add('activeNavVolume', RecastComp.Name);
+        OutPayload.Add('polyCount', Length(RecastComp.Polys));
+        OutPayload.Add('stackedFloorPairs', RecastComp.CountStackedMultiFloorPairs);
+        OutPayload.Add('pathFound', RecastComp.LastPath.Found);
+        OutPayload.Add('pathDistanceM', RecastComp.LastPath.TotalDistanceM);
+        OutPayload.Add('pathUsedLinks', RecastComp.LastPath.UsedLinkCount);
+        OutPayload.Add('summaryBadge', RecastComp.RecastSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

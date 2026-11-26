@@ -219,6 +219,7 @@ uses
   TestToolLevelInstance,
   TestToolMaterialInstance,
   TestToolMeshEditor,
+  TestToolRecastNavMesh,
   TestCastleVulkanRHI;
 
 implementation

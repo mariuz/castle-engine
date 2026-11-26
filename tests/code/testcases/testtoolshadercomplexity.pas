@@ -118,7 +118,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify all 100 UE 5.x studios (Horizons 2-11, Phases 1-380) are registered }
-  AssertEquals(112, TStudioHubManager.StudioCount);
+  AssertEquals(113, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon11UeIds) do
     AssertTrue('Missing Horizon 11 UE studio: ' + Horizon11UeIds[I],
       TStudioHubManager.FindStudioById(Horizon11UeIds[I], Entry));
@@ -141,7 +141,7 @@ begin
     ListResp := Srv.HandleJsonRpcString('{"jsonrpc":"2.0","id":1,"method":"tools/list"}', '');
     OuterJson := GetJSON(ListResp);
     ToolsArr := TJSONObject(OuterJson).Objects['result'].Arrays['tools'];
-    AssertEquals(35, ToolsArr.Count);
+    AssertEquals(36, ToolsArr.Count);
     AssertTrue(Pos('cge_audit_overdraw_shaders', ListResp) > 0);
     FreeAndNil(OuterJson);
 
@@ -153,7 +153,7 @@ begin
     InnerJson := GetJSON(InnerText);
     PayloadObj := TJSONObject(InnerJson);
     AssertTrue(PayloadObj.Booleans['ok']);
-    AssertEquals(112, PayloadObj.Integers['studioCatalogCount']);
+    AssertEquals(113, PayloadObj.Integers['studioCatalogCount']);
     AssertEquals(6, PayloadObj.Integers['peakTranslucentOverdraw']);
     AssertEquals(576, PayloadObj.Integers['peakTileAluInstructions']);
     AssertTrue(PayloadObj.Integers['hotspotTileCount'] > 15);

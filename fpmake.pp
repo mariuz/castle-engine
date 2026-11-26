@@ -616,6 +616,7 @@ begin
     P.Targets.AddUnit('castlelevelinstance.pas');
     P.Targets.AddUnit('castlematerialinstance.pas');
     P.Targets.AddUnit('castlemesheditor.pas');
+    P.Targets.AddUnit('castlerecastnavmesh.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

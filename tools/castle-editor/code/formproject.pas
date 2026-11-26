@@ -706,6 +706,7 @@ type
       MenuItemLevelInstance: TMenuItem;
       MenuItemMaterialInstance: TMenuItem;
       MenuItemMeshEditor: TMenuItem;
+      MenuItemRecastNavMesh: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -832,6 +833,7 @@ type
     procedure MenuItemLevelInstanceClick(Sender: TObject);
     procedure MenuItemMaterialInstanceClick(Sender: TObject);
     procedure MenuItemMeshEditorClick(Sender: TObject);
+    procedure MenuItemRecastNavMeshClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3022,6 +3024,11 @@ begin
   MenuItemMeshEditor.Caption := 'Static & Skeletal Mesh Asset Editor (Sockets & Auto-Convex)...';
   MenuItemMeshEditor.OnClick := @MenuItemMeshEditorClick;
   MenuItemDesign.Add(MenuItemMeshEditor);
+
+  MenuItemRecastNavMesh := TMenuItem.Create(MenuItemDesign);
+  MenuItemRecastNavMesh.Caption := '3D Polygonal Recast NavMesh Volume & NavLinkProxy Studio...';
+  MenuItemRecastNavMesh.OnClick := @MenuItemRecastNavMeshClick;
+  MenuItemDesign.Add(MenuItemRecastNavMesh);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6670,6 +6677,12 @@ procedure TProjectForm.MenuItemMeshEditorClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMeshEditorDialog;
+end;
+
+procedure TProjectForm.MenuItemRecastNavMeshClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowRecastNavMeshDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

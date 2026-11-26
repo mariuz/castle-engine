@@ -136,7 +136,8 @@ uses
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
-  CastleUvEditor, CastleLevelInstance, CastleMaterialInstance, CastleMeshEditor;
+  CastleUvEditor, CastleLevelInstance, CastleMaterialInstance, CastleMeshEditor,
+  CastleRecastNavMesh;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -580,6 +581,9 @@ begin
   Reg('static_skeletal_mesh_editor', 'Static & Skeletal Mesh Editor (Sockets, V-HACD Hulls & LODs)', 'MeshEd',
     shcArchitecturePcg, 392, 'static mesh editor skeletal mesh editor ustaticmesheditor uskeletalmesheditor socket manager vhacd kdop auto convex collision lod screen size mikk tangent mcp',
     'Bone/Mesh Socket Manager, V-HACD / K-DOP Auto-Convex Collision decomposition, 4-tier LODs & MikkTSpace tangents (35th MCP).');
+  Reg('recast_navmesh', '3D Polygonal Recast NavMesh Volume & NavLinkProxy Studio', 'Recast3D',
+    shcCharactersAiGas, 393, 'recast navmesh anavmeshboundsvolume arecastnavmesh anavlinkproxy multi floor 3d polygon slope step height agent radius headroom off mesh jump drop funnel astar mcp',
+    'Multi-floor 3D headroom-aware polygonal NavMesh, directional ANavLinkProxy jump/drop links & portal-smoothed A* (36th MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -788,6 +792,8 @@ var
       BumpSub(shcMaterialsVfxLighting);
     if C is TCastleMeshEditorAsset then
       BumpSub(shcArchitecturePcg);
+    if C is TCastleRecastNavMesh then
+      BumpSub(shcCharactersAiGas);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

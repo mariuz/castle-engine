@@ -546,6 +546,7 @@
         <DCCReference Include="..\..\src\scene\castlelevelinstance.pas"/>
         <DCCReference Include="..\..\src\scene\castlematerialinstance.pas"/>
         <DCCReference Include="..\..\src\scene\castlemesheditor.pas"/>
+        <DCCReference Include="..\..\src\scene\castlerecastnavmesh.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>
