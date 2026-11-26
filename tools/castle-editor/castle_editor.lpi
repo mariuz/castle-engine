@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="259">
+    <Units Count="261">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1377,6 +1377,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormRecastNavMesh"/>
       </Unit258>
+      <Unit259>
+        <Filename Value="../common-code/toollandscapelayers.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolLandscapeLayers"/>
+      </Unit259>
+      <Unit260>
+        <Filename Value="code/formlandscapelayers.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormLandscapeLayers"/>
+      </Unit260>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

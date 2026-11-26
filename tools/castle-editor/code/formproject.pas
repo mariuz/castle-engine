@@ -707,6 +707,7 @@ type
       MenuItemMaterialInstance: TMenuItem;
       MenuItemMeshEditor: TMenuItem;
       MenuItemRecastNavMesh: TMenuItem;
+      MenuItemLandscapeLayers: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -834,6 +835,7 @@ type
     procedure MenuItemMaterialInstanceClick(Sender: TObject);
     procedure MenuItemMeshEditorClick(Sender: TObject);
     procedure MenuItemRecastNavMeshClick(Sender: TObject);
+    procedure MenuItemLandscapeLayersClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3029,6 +3031,11 @@ begin
   MenuItemRecastNavMesh.Caption := '3D Polygonal Recast NavMesh Volume & NavLinkProxy Studio...';
   MenuItemRecastNavMesh.OnClick := @MenuItemRecastNavMeshClick;
   MenuItemDesign.Add(MenuItemRecastNavMesh);
+
+  MenuItemLandscapeLayers := TMenuItem.Create(MenuItemDesign);
+  MenuItemLandscapeLayers.Caption := 'Landscape Edit Layers & Terrain-Carving Splines Studio...';
+  MenuItemLandscapeLayers.OnClick := @MenuItemLandscapeLayersClick;
+  MenuItemDesign.Add(MenuItemLandscapeLayers);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6683,6 +6690,12 @@ procedure TProjectForm.MenuItemRecastNavMeshClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowRecastNavMeshDialog;
+end;
+
+procedure TProjectForm.MenuItemLandscapeLayersClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowLandscapeLayersDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

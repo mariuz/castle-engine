@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1198,6 +1198,17 @@ begin
   AddToolDef('cge_build_recast_navmesh',
     'Spawn 3D Polygonal Recast NavMesh volumes, rebuild multi-floor headroom-aware NavPolys & ANavLinkProxy off-mesh links, or solve 3D funnel A* paths.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Landscape Layers / Splines operation: status, spawn_preset, set_layer_visible, or set_layer_opacity (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleLandscapeLayerTerrain name (defaults to first landscape in design).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: alpine_switchback, desert_causeway, or citadel_moat (default alpine_switchback).'));
+  P.Add('layerName', MakePropSchema('string', 'Target Edit Layer name (default 02_LandscapeSplines).'));
+  P.Add('visible', MakePropSchema('boolean', 'Visibility state for set_layer_visible (default true).'));
+  P.Add('opacity', MakePropSchema('number', 'Opacity 0..1 for set_layer_opacity (default 1.0).'));
+  AddToolDef('cge_carve_landscape_layer_spline',
+    'Spawn Non-Destructive Landscape Edit Layers & Terrain-Carving Splines, mute/solo or blend layers, and audit Cut/Fill earthwork & road/river splatmaps.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1390,6 +1401,12 @@ var
   RecastPresetVal: TRecastNavPreset;
   RecastAgentH: Single;
   RecastPathRes: TRecastPathResult;
+  LandAudit: TLandscapeSceneAudit;
+  LandComp: TCastleLandscapeLayerTerrain;
+  LandPresetVal: TLandscapeLayerPreset;
+  LandLayerStr: String;
+  LandVisVal: Boolean;
+  LandOpVal: Single;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3555,6 +3572,93 @@ begin
         OutPayload.Add('pathDistanceM', RecastComp.LastPath.TotalDistanceM);
         OutPayload.Add('pathUsedLinks', RecastComp.LastPath.UsedLinkCount);
         OutPayload.Add('summaryBadge', RecastComp.RecastSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_carve_landscape_layer_spline' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    LandPresetVal := llpAlpinePassSwitchbackRoadAndRiver;
+    LandLayerStr := '02_LandscapeSplines';
+    LandVisVal := True;
+    LandOpVal := 1.0;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      LandLayerStr := Trim(ArgsObj.Get('layerName', '02_LandscapeSplines'));
+      LandVisVal := ArgsObj.Get('visible', True);
+      LandOpVal := ArgsObj.Get('opacity', 1.0);
+      if SameText(ArgsObj.Get('preset', ''), 'desert_causeway') then
+        LandPresetVal := llpDesertCanyonHighwayCauseway
+      else if SameText(ArgsObj.Get('preset', ''), 'citadel_moat') then
+        LandPresetVal := llpMedievalMoatAndCastleApproach;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'set_layer_visible') or
+       SameText(ActionStr, 'set_layer_opacity') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      LandComp := TLandscapeLayersHelper.SpawnLandscapePresetInDesign(
+        DesignRoot, DesignOwner, LandPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Landscape Edit Layers & Splines');
+    end else
+      LandComp := TLandscapeLayersHelper.FindLandscapeByName(DesignRoot, DesignOwner, CompName);
+
+    if (LandComp <> nil) and SameText(ActionStr, 'set_layer_visible') then
+    begin
+      LandComp.SetLayerVisible(LandLayerStr, LandVisVal);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Set Landscape Layer Visibility ' + LandLayerStr);
+    end else
+    if (LandComp <> nil) and SameText(ActionStr, 'set_layer_opacity') then
+    begin
+      LandComp.SetLayerOpacity(LandLayerStr, LandOpVal);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Set Landscape Layer Opacity ' + LandLayerStr);
+    end;
+
+    LandAudit := TLandscapeLayersHelper.AuditLandscapesInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('landscapeCount', LandAudit.LandscapeCount);
+      OutPayload.Add('totalEditLayers', LandAudit.TotalEditLayers);
+      OutPayload.Add('totalSplines', LandAudit.TotalSplines);
+      OutPayload.Add('totalCutVolumeM3', LandAudit.TotalCutVolumeM3);
+      OutPayload.Add('totalFillVolumeM3', LandAudit.TotalFillVolumeM3);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if LandComp <> nil then
+      begin
+        OutPayload.Add('activeLandscape', LandComp.Name);
+        OutPayload.Add('activeLayerCount', LandComp.Metrics.ActiveLayerCount);
+        OutPayload.Add('cutVolumeM3', LandComp.Metrics.CutExcavatedVolumeM3);
+        OutPayload.Add('fillVolumeM3', LandComp.Metrics.FillEmbankmentVolumeM3);
+        OutPayload.Add('roadPaintedAreaM2', LandComp.Metrics.RoadPaintedAreaM2);
+        OutPayload.Add('riverPaintedAreaM2', LandComp.Metrics.RiverPaintedAreaM2);
+        OutPayload.Add('summaryBadge', LandComp.LandscapeSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

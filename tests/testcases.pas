@@ -220,6 +220,7 @@ uses
   TestToolMaterialInstance,
   TestToolMeshEditor,
   TestToolRecastNavMesh,
+  TestToolLandscapeLayers,
   TestCastleVulkanRHI;
 
 implementation

@@ -137,7 +137,7 @@ uses
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
   CastleUvEditor, CastleLevelInstance, CastleMaterialInstance, CastleMeshEditor,
-  CastleRecastNavMesh;
+  CastleRecastNavMesh, CastleLandscapeLayers;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -584,6 +584,9 @@ begin
   Reg('recast_navmesh', '3D Polygonal Recast NavMesh Volume & NavLinkProxy Studio', 'Recast3D',
     shcCharactersAiGas, 393, 'recast navmesh anavmeshboundsvolume arecastnavmesh anavlinkproxy multi floor 3d polygon slope step height agent radius headroom off mesh jump drop funnel astar mcp',
     'Multi-floor 3D headroom-aware polygonal NavMesh, directional ANavLinkProxy jump/drop links & portal-smoothed A* (36th MCP).');
+  Reg('landscape_layers_splines', 'Landscape Edit Layers & Terrain-Carving Splines Studio', 'LandSpline',
+    shcWorldEnvironment, 394, 'landscape edit layers ulandscapesplinescomponent non destructive additive alpha blend spline corridor road riverbed cut fill embankment splatmap mcp',
+    'Non-destructive Additive/AlphaBlend Landscape Edit Layers, spline Cut/Fill embankment carving & 4-channel splatmap (37th MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -794,6 +797,8 @@ var
       BumpSub(shcArchitecturePcg);
     if C is TCastleRecastNavMesh then
       BumpSub(shcCharactersAiGas);
+    if C is TCastleLandscapeLayerTerrain then
+      BumpSub(shcWorldEnvironment);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);
