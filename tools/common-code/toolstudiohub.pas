@@ -136,7 +136,7 @@ uses
   CastleCloudShadows, CastleBallisticSolver, CastleAcousticSpace,
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
-  CastleUvEditor, CastleLevelInstance, CastleMaterialInstance;
+  CastleUvEditor, CastleLevelInstance, CastleMaterialInstance, CastleMeshEditor;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -577,6 +577,9 @@ begin
   Reg('material_instance', 'Material Instance Editor & Material Parameter Collections (MPC)', 'MatInst',
     shcMaterialsVfxLighting, 391, 'material instance umaterialinstanceconstant umaterialparametercollection mpc parent child override scalar vector texture static switch wetness snow mcp',
     'Multi-level Parent->Child Material Instance overrides, zero-recompile tuning, Static Switches & Global MPC broadcast (34th MCP).');
+  Reg('static_skeletal_mesh_editor', 'Static & Skeletal Mesh Editor (Sockets, V-HACD Hulls & LODs)', 'MeshEd',
+    shcArchitecturePcg, 392, 'static mesh editor skeletal mesh editor ustaticmesheditor uskeletalmesheditor socket manager vhacd kdop auto convex collision lod screen size mikk tangent mcp',
+    'Bone/Mesh Socket Manager, V-HACD / K-DOP Auto-Convex Collision decomposition, 4-tier LODs & MikkTSpace tangents (35th MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -783,6 +786,8 @@ var
       BumpSub(shcWorldEnvironment);
     if (C is TCastleMaterialInstance) or (C is TCastleMaterialParameterCollection) then
       BumpSub(shcMaterialsVfxLighting);
+    if C is TCastleMeshEditorAsset then
+      BumpSub(shcArchitecturePcg);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

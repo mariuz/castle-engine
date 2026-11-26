@@ -384,6 +384,7 @@ contains
   castleuveditor in '..\..\src\scene\castleuveditor.pas',
   castlelevelinstance in '..\..\src\scene\castlelevelinstance.pas',
   castlematerialinstance in '..\..\src\scene\castlematerialinstance.pas',
+  castlemesheditor in '..\..\src\scene\castlemesheditor.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="255">
+    <Units Count="257">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1357,6 +1357,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMaterialInstance"/>
       </Unit254>
+      <Unit255>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolmesheditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMeshEditor"/>
+      </Unit255>
+      <Unit256>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formmesheditor.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMeshEditor"/>
+      </Unit256>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

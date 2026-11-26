@@ -705,6 +705,7 @@ type
       MenuItemUvEditor: TMenuItem;
       MenuItemLevelInstance: TMenuItem;
       MenuItemMaterialInstance: TMenuItem;
+      MenuItemMeshEditor: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -830,6 +831,7 @@ type
     procedure MenuItemUvEditorClick(Sender: TObject);
     procedure MenuItemLevelInstanceClick(Sender: TObject);
     procedure MenuItemMaterialInstanceClick(Sender: TObject);
+    procedure MenuItemMeshEditorClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3015,6 +3017,11 @@ begin
   MenuItemMaterialInstance.Caption := 'Material Instance Editor & Material Parameter Collections (MPC)...';
   MenuItemMaterialInstance.OnClick := @MenuItemMaterialInstanceClick;
   MenuItemDesign.Add(MenuItemMaterialInstance);
+
+  MenuItemMeshEditor := TMenuItem.Create(MenuItemDesign);
+  MenuItemMeshEditor.Caption := 'Static & Skeletal Mesh Asset Editor (Sockets & Auto-Convex)...';
+  MenuItemMeshEditor.OnClick := @MenuItemMeshEditorClick;
+  MenuItemDesign.Add(MenuItemMeshEditor);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6657,6 +6664,12 @@ procedure TProjectForm.MenuItemMaterialInstanceClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMaterialInstanceDialog;
+end;
+
+procedure TProjectForm.MenuItemMeshEditorClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMeshEditorDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

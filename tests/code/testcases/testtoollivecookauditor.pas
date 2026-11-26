@@ -126,7 +126,7 @@ var
   I: Integer;
 begin
   { 1. Verify unified 96-Studio Hub across Horizons 2-11 }
-  AssertEquals(111, TStudioHubManager.StudioCount);
+  AssertEquals(112, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon9Ids) do
     AssertTrue('Missing Horizon 9 studio in Hub: ' + Horizon9Ids[I],
       TStudioHubManager.FindStudioById(Horizon9Ids[I], Entry));
@@ -168,7 +168,7 @@ begin
     AssertEquals(0, CleanCook.ChooserIssueCount);
 
     MdReport := TLiveCodingCookBroker.GenerateCookAndLiveCodingMarkdown(Vp, DesignOwner);
-    AssertTrue(Pos('111` Studios', MdReport) > 0);
+    AssertTrue(Pos('112` Studios', MdReport) > 0);
 
     { 4. Verify 17th MCP Tool: cge_audit_package_cook }
     Server.AutonomyMode := mamReadOnly;
@@ -184,7 +184,7 @@ begin
       try
         AssertTrue(TJSONObject(InnerJson).Booleans['cookReadyToShip']);
         AssertEquals(100, TJSONObject(InnerJson).Integers['cookReadinessScore']);
-        AssertEquals(111, TJSONObject(InnerJson).Integers['studioCatalogCount']);
+        AssertEquals(112, TJSONObject(InnerJson).Integers['studioCatalogCount']);
         AssertEquals(0, TJSONObject(InnerJson).Integers['brokenAssetUrlCount']);
       finally
         FreeAndNil(InnerJson);

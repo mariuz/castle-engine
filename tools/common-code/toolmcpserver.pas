@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1179,6 +1179,16 @@ begin
   AddToolDef('cge_override_material_instance',
     'Spawn Parent->Child Material Instances & MPCs, override parameters with zero shader recompiles, reset to parent, or broadcast global MPC weather uniforms.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Mesh Editor operation: status, spawn_preset, decompose_convex, attach_socket_prop, or recompute_tangents (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleMeshEditorAsset name (defaults to first mesh asset in design).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: archway, halberd, or turret (default archway).'));
+  P.Add('maxHulls', MakePropSchema('integer', 'Max convex hulls for decompose_convex (default 3).'));
+  P.Add('socketName', MakePropSchema('string', 'Socket name for attach_socket_prop (e.g. Socket_TorchBracket_L).'));
+  AddToolDef('cge_edit_mesh_sockets_collision',
+    'Spawn Static/Skeletal Mesh Editor assets, run V-HACD / K-DOP Auto-Convex Collision decomposition, attach Socket props, or recompute MikkTSpace tangents.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1360,6 +1370,12 @@ var
   MiSurf: TResolvedPbrSurface;
   MiParamStr: String;
   MiScalarVal: Single;
+  MeshAudit: TMeshEditorSceneAudit;
+  MeshComp: TCastleMeshEditorAsset;
+  MeshPresetVal: TMeshEditorPreset;
+  MeshMaxHulls: Integer;
+  MeshSockStr: String;
+  TanAuditRes: TMeshTangentAudit;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3349,6 +3365,99 @@ begin
         OutPayload.Add('mpcCollectionKey', MpcComp.CollectionKey);
         OutPayload.Add('globalWetness', MpcComp.GlobalWetness);
         OutPayload.Add('snowCoverage', MpcComp.SnowCoverage);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_edit_mesh_sockets_collision' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    MeshPresetVal := mepGothicArchwayConcave3Hulls;
+    MeshMaxHulls := 3;
+    MeshSockStr := '';
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      MeshMaxHulls := ArgsObj.Get('maxHulls', 3);
+      MeshSockStr := Trim(ArgsObj.Get('socketName', ''));
+      if SameText(ArgsObj.Get('preset', ''), 'halberd') then
+        MeshPresetVal := mepSkeletalHalberdWeapon4Sockets
+      else if SameText(ArgsObj.Get('preset', ''), 'turret') then
+        MeshPresetVal := mepSciFiDefenseTurretMultiPart;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'decompose_convex') or
+       SameText(ActionStr, 'attach_socket_prop') or SameText(ActionStr, 'recompute_tangents') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      MeshComp := TMeshEditorHelper.SpawnMeshEditorPresetInDesign(
+        DesignRoot, DesignOwner, MeshPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Mesh Editor Asset');
+    end else
+      MeshComp := TMeshEditorHelper.FindMeshEditorAssetByName(DesignRoot, DesignOwner, CompName);
+
+    if (MeshComp <> nil) and SameText(ActionStr, 'decompose_convex') then
+    begin
+      MeshComp.GenerateAutoConvexCollision(MeshMaxHulls, kdm18DopBeveled, 20);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Decompose Auto-Convex Hulls');
+    end else
+    if (MeshComp <> nil) and SameText(ActionStr, 'attach_socket_prop') then
+    begin
+      if (MeshSockStr = '') and (Length(MeshComp.Sockets) > 0) then
+        MeshSockStr := MeshComp.Sockets[0].SocketName;
+      TMeshEditorHelper.SpawnPreviewPropOnSocket(MeshComp, DesignOwner, MeshSockStr);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Attach Prop to Socket ' + MeshSockStr);
+    end else
+    if (MeshComp <> nil) and SameText(ActionStr, 'recompute_tangents') then
+    begin
+      MeshComp.RecomputeNormalsAndMikkTangents(60.0);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Recompute MikkTSpace Tangents');
+    end;
+
+    MeshAudit := TMeshEditorHelper.AuditMeshAssetsInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('meshAssetCount', MeshAudit.MeshAssetCount);
+      OutPayload.Add('skeletalMeshCount', MeshAudit.SkeletalMeshCount);
+      OutPayload.Add('totalSocketCount', MeshAudit.TotalSocketCount);
+      OutPayload.Add('totalConvexHullCount', MeshAudit.TotalConvexHullCount);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if MeshComp <> nil then
+      begin
+        TanAuditRes := MeshComp.LastTangentAudit;
+        OutPayload.Add('activeMeshAsset', MeshComp.Name);
+        OutPayload.Add('convexHullCount', Length(MeshComp.ConvexHulls));
+        OutPayload.Add('socketCount', Length(MeshComp.Sockets));
+        OutPayload.Add('centerOpeningClear',
+          not MeshComp.PointHitsAnyConvexHull(Vector3(0.0, 1.2, 0.0)));
+        OutPayload.Add('nonOrthogonalTangents', TanAuditRes.NonOrthogonalTangentCount);
+        OutPayload.Add('summaryBadge', MeshComp.MeshEditorSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

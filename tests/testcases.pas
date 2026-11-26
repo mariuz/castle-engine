@@ -218,6 +218,7 @@ uses
   TestToolUvEditor,
   TestToolLevelInstance,
   TestToolMaterialInstance,
+  TestToolMeshEditor,
   TestCastleVulkanRHI;
 
 implementation
