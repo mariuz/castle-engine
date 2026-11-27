@@ -186,11 +186,12 @@ jobs:
           echo "CASTLE_ENGINE_PATH=$(cygpath --mixed "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
       - name: Compile vkxml2pas, spv2pas & castle-engine Build Tool
         run: |
+          VERIFY_INC="$(cygpath --mixed "$RUNNER_TEMP")/verify_spirv_blobs.inc"
           fpc -Mobjfpc -Sh tools/internal/generate_vulkan_api/vkxml2pas.dpr
-          fpc -Mobjfpc -Sh -o/tmp/spv2pas tools/internal/generate_vulkan_spirv/spv2pas.dpr
-          /tmp/spv2pas src/base_rendering/vulkan/spirv /tmp/verify_spirv_blobs.inc
-          diff -u src/base_rendering/vulkan/generated-pascal/castleinternalvulkanspirv_blobs.inc /tmp/verify_spirv_blobs.inc
-          rm -f /tmp/spv2pas /tmp/verify_spirv_blobs.inc
+          fpc -Mobjfpc -Sh tools/internal/generate_vulkan_spirv/spv2pas.dpr
+          ./tools/internal/generate_vulkan_spirv/spv2pas.exe src/base_rendering/vulkan/spirv "$VERIFY_INC"
+          diff -u --strip-trailing-cr src/base_rendering/vulkan/generated-pascal/castleinternalvulkanspirv_blobs.inc "$VERIFY_INC"
+          rm -f "$VERIFY_INC" tools/internal/generate_vulkan_spirv/spv2pas.exe tools/internal/generate_vulkan_spirv/*.o tools/internal/generate_vulkan_spirv/*.ppu tools/internal/generate_vulkan_api/vkxml2pas.exe tools/internal/generate_vulkan_api/*.o tools/internal/generate_vulkan_api/*.ppu
           ./tools/build-tool/castle-engine_compile.sh
       - name: Compile Win32 WSI Examples & Verify Bundled SPIR-V Cache
         run: |
