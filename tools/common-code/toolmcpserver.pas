@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers, CastleBlueprintScs, ToolBlueprintScs, CastleVertexPaint, ToolVertexPaint;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers, CastleBlueprintScs, ToolBlueprintScs, CastleVertexPaint, ToolVertexPaint, CastleTakeRecorder, ToolTakeRecorder;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1228,6 +1228,15 @@ begin
   AddToolDef('cge_paint_mesh_vertices',
     'Spawn Vertex-Paintable 3D Meshes, apply radial falloff RGBA strokes with channel masks, run 1-ring Laplacian smoothing, and audit HeightLerp coverage.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Take Recorder / Live Link operation: status, spawn_preset, record_new_take, or reduce_keys (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleTakeRecorder name (defaults to first Take Recorder in design).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: mocap_duel, vehicle_chase, or arkit_closeup (default mocap_duel).'));
+  P.Add('posToleranceM', MakePropSchema('number', 'Position error tolerance in meters for reduce_keys (default 0.015).'));
+  AddToolDef('cge_record_take_livelink',
+    'Spawn Take Recorder & LiveLink hubs, record auto-incrementing SMPTE Slate/Takes, run Douglas-Peucker ReduceKeys, and audit LiveLink subject health.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1437,6 +1446,10 @@ var
   VpCol4: TVector4;
   VpRadius, VpStrength: Single;
   VpAffected: Integer;
+  TakeAudit: TTakeRecorderSceneAudit;
+  TakeComp: TCastleTakeRecorder;
+  TakePresetVal: TTakeRecorderPreset;
+  TakePosTol: Single;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3893,6 +3906,87 @@ begin
         OutPayload.Add('vertexCount', VpComp.VertexCount);
         OutPayload.Add('triangleCount', VpComp.TriangleCount);
         OutPayload.Add('summaryBadge', VpComp.VertexPaintSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_record_take_livelink' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    TakePresetVal := trpMocapDuelAndCineCam;
+    TakePosTol := 0.015;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      TakePosTol := ArgsObj.Get('posToleranceM', 0.015);
+      if SameText(ArgsObj.Get('preset', ''), 'vehicle_chase') then
+        TakePresetVal := trpVehicleChasePhysicsTake
+      else if SameText(ArgsObj.Get('preset', ''), 'arkit_closeup') then
+        TakePresetVal := trpFacialArkitAndVCamLiveLink;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'record_new_take') or
+       SameText(ActionStr, 'reduce_keys') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      TakeComp := TTakeRecorderHelper.SpawnTakeRecorderPresetInDesign(
+        DesignRoot, DesignOwner, TakePresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Take Recorder & LiveLink Hub');
+    end else
+      TakeComp := TTakeRecorderHelper.FindTakeRecorderByName(DesignRoot, DesignOwner, CompName);
+
+    if (TakeComp <> nil) and SameText(ActionStr, 'record_new_take') then
+    begin
+      TakeComp.SimulatePresetTakeCapture(4.0);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Record New Take');
+    end else
+    if (TakeComp <> nil) and SameText(ActionStr, 'reduce_keys') then
+    begin
+      TakeComp.ReduceAllTracks(TakePosTol, TakeComp.RotReduceToleranceDeg);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP ReduceKeys Douglas-Peucker');
+    end;
+
+    TakeAudit := TTakeRecorderHelper.AuditTakeRecordersInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('recorderCount', TakeAudit.RecorderCount);
+      OutPayload.Add('totalLiveLinkSubjects', TakeAudit.TotalLiveLinkSubjects);
+      OutPayload.Add('activeGreenSubjects', TakeAudit.ActiveGreenSubjects);
+      OutPayload.Add('totalRawKeys', TakeAudit.TotalRawKeys);
+      OutPayload.Add('totalReducedKeys', TakeAudit.TotalReducedKeys);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if TakeComp <> nil then
+      begin
+        OutPayload.Add('activeRecorder', TakeComp.Name);
+        OutPayload.Add('slateName', TakeComp.SlateName);
+        OutPayload.Add('takeNumber', TakeComp.TakeNumber);
+        OutPayload.Add('keyReductionPct', TakeComp.KeyReductionPercent);
+        OutPayload.Add('summaryBadge', TakeComp.TakeRecorderSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

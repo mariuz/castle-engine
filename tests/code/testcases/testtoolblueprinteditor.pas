@@ -185,7 +185,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify 101 UE Studios in Studio Hub (Phase 381 blueprint_editor) }
-  AssertEquals(116, TStudioHubManager.StudioCount);
+  AssertEquals(117, TStudioHubManager.StudioCount);
   AssertTrue(TStudioHubManager.FindStudioById('blueprint_editor', Entry));
   AssertEquals(381, Entry.PhaseNumber);
 
@@ -205,7 +205,7 @@ begin
     try
       ToolsArr := OuterJson.FindPath('result.tools') as TJSONArray;
       AssertTrue(ToolsArr <> nil);
-      AssertEquals(39, ToolsArr.Count);
+      AssertEquals(40, ToolsArr.Count);
     finally
       FreeAndNil(OuterJson);
     end;
@@ -221,7 +221,7 @@ begin
         AssertEquals(1, PayloadObj.Integers['blueprintCount']);
         AssertEquals(1, PayloadObj.Integers['compiledOkCount']);
         AssertEquals(4, PayloadObj.Integers['totalConstructionMeshes']);
-        AssertEquals(116, PayloadObj.Integers['studioCatalogCount']);
+        AssertEquals(117, PayloadObj.Integers['studioCatalogCount']);
       finally
         FreeAndNil(InnerJson);
       end;

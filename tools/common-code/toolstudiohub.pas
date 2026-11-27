@@ -137,7 +137,8 @@ uses
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
   CastleUvEditor, CastleLevelInstance, CastleMaterialInstance, CastleMeshEditor,
-  CastleRecastNavMesh, CastleLandscapeLayers, CastleBlueprintScs, CastleVertexPaint;
+  CastleRecastNavMesh, CastleLandscapeLayers, CastleBlueprintScs, CastleVertexPaint,
+  CastleTakeRecorder;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -593,6 +594,9 @@ begin
   Reg('mesh_vertex_paint', 'Viewport Mesh Vertex Paint Mode & Multi-Layer Blend Studio', 'VPaint',
     shcMaterialsVfxLighting, 396, 'mesh vertex paint umeshpaintmode fmeshpaintparameters rgba channel mask radial falloff heightlerp moss puddle wear snow laplacian smooth mcp',
     '3D radial falloff RGBA vertex painting, channel masks, 1-ring Laplacian smooth & 4-layer HeightLerp blend (39th MCP).');
+  Reg('take_recorder_livelink', 'Take Recorder & Live Link Real-Time Streaming Studio', 'TakeRec',
+    shcCinematicsAudioInput, 397, 'take recorder livelink utakerecorder ilivelinkclient smpte timecode slate take douglas peucker reducekeys mocap vcam camera dejitter buffer mcp',
+    'PIE gameplay-to-Sequencer clip capture, Douglas-Peucker ReduceKeys compression & LiveLink subject hub (40th MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -809,6 +813,8 @@ var
       BumpSub(shcCharactersAiGas);
     if C is TCastleVertexPaintMesh then
       BumpSub(shcMaterialsVfxLighting);
+    if C is TCastleTakeRecorder then
+      BumpSub(shcCinematicsAudioInput);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

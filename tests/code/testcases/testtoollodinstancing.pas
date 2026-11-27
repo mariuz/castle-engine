@@ -110,7 +110,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify all 100 UE 5.x studios (Horizons 2-11, Phases 1-380) are registered }
-  AssertEquals(116, TStudioHubManager.StudioCount);
+  AssertEquals(117, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon11OptIds) do
     AssertTrue('Missing UE optimization studio: ' + Horizon11OptIds[I],
       TStudioHubManager.FindStudioById(Horizon11OptIds[I], Entry));
@@ -134,7 +134,7 @@ begin
     ListResp := Srv.HandleJsonRpcString('{"jsonrpc":"2.0","id":1,"method":"tools/list"}', '');
     OuterJson := GetJSON(ListResp);
     ToolsArr := TJSONObject(OuterJson).Objects['result'].Arrays['tools'];
-    AssertEquals(39, ToolsArr.Count);
+    AssertEquals(40, ToolsArr.Count);
     AssertTrue(Pos('cge_optimize_lod_instancing', ListResp) > 0);
     FreeAndNil(OuterJson);
 
@@ -146,7 +146,7 @@ begin
     InnerJson := GetJSON(InnerText);
     PayloadObj := TJSONObject(InnerJson);
     AssertTrue(PayloadObj.Booleans['ok']);
-    AssertEquals(116, PayloadObj.Integers['studioCatalogCount']);
+    AssertEquals(117, PayloadObj.Integers['studioCatalogCount']);
     AssertEquals(19, PayloadObj.Integers['baselineDrawCalls']);
     AssertEquals(3, PayloadObj.Integers['optimizedDrawCalls']);
     AssertEquals(16, PayloadObj.Integers['savedDrawCalls']);

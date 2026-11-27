@@ -389,6 +389,7 @@ contains
   castlelandscapelayers in '..\..\src\scene\castlelandscapelayers.pas',
   castleblueprintscs in '..\..\src\scene\castleblueprintscs.pas',
   castlevertexpaint in '..\..\src\scene\castlevertexpaint.pas',
+  castletakerecorder in '..\..\src\scene\castletakerecorder.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

@@ -710,6 +710,7 @@ type
       MenuItemLandscapeLayers: TMenuItem;
       MenuItemBlueprintScs: TMenuItem;
       MenuItemVertexPaint: TMenuItem;
+      MenuItemTakeRecorder: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -840,6 +841,7 @@ type
     procedure MenuItemLandscapeLayersClick(Sender: TObject);
     procedure MenuItemBlueprintScsClick(Sender: TObject);
     procedure MenuItemVertexPaintClick(Sender: TObject);
+    procedure MenuItemTakeRecorderClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3050,6 +3052,11 @@ begin
   MenuItemVertexPaint.Caption := 'Viewport Mesh Vertex Paint Mode & Multi-Layer Blend Studio...';
   MenuItemVertexPaint.OnClick := @MenuItemVertexPaintClick;
   MenuItemDesign.Add(MenuItemVertexPaint);
+
+  MenuItemTakeRecorder := TMenuItem.Create(MenuItemDesign);
+  MenuItemTakeRecorder.Caption := 'Take Recorder & Live Link Real-Time Streaming Studio...';
+  MenuItemTakeRecorder.OnClick := @MenuItemTakeRecorderClick;
+  MenuItemDesign.Add(MenuItemTakeRecorder);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6722,6 +6729,12 @@ procedure TProjectForm.MenuItemVertexPaintClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowVertexPaintDialog;
+end;
+
+procedure TProjectForm.MenuItemTakeRecorderClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowTakeRecorderDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

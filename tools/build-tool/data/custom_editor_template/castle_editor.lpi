@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="265">
+    <Units Count="267">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1407,6 +1407,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormVertexPaint"/>
       </Unit264>
+      <Unit265>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/tooltakerecorder.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTakeRecorder"/>
+      </Unit265>
+      <Unit266>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formtakerecorder.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTakeRecorder"/>
+      </Unit266>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -223,6 +223,7 @@ uses
   TestToolLandscapeLayers,
   TestToolBlueprintScs,
   TestToolVertexPaint,
+  TestToolTakeRecorder,
   TestCastleVulkanRHI;
 
 implementation
