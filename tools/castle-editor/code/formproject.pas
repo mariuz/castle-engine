@@ -709,6 +709,7 @@ type
       MenuItemRecastNavMesh: TMenuItem;
       MenuItemLandscapeLayers: TMenuItem;
       MenuItemBlueprintScs: TMenuItem;
+      MenuItemVertexPaint: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -838,6 +839,7 @@ type
     procedure MenuItemRecastNavMeshClick(Sender: TObject);
     procedure MenuItemLandscapeLayersClick(Sender: TObject);
     procedure MenuItemBlueprintScsClick(Sender: TObject);
+    procedure MenuItemVertexPaintClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3043,6 +3045,11 @@ begin
   MenuItemBlueprintScs.Caption := 'Blueprint Components Viewport & Inherited Subobject Tree (SCS)...';
   MenuItemBlueprintScs.OnClick := @MenuItemBlueprintScsClick;
   MenuItemDesign.Add(MenuItemBlueprintScs);
+
+  MenuItemVertexPaint := TMenuItem.Create(MenuItemDesign);
+  MenuItemVertexPaint.Caption := 'Viewport Mesh Vertex Paint Mode & Multi-Layer Blend Studio...';
+  MenuItemVertexPaint.OnClick := @MenuItemVertexPaintClick;
+  MenuItemDesign.Add(MenuItemVertexPaint);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6709,6 +6716,12 @@ procedure TProjectForm.MenuItemBlueprintScsClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowBlueprintScsDialog;
+end;
+
+procedure TProjectForm.MenuItemVertexPaintClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowVertexPaintDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

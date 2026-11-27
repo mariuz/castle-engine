@@ -200,7 +200,7 @@ begin
     try
       RespObj := TJSONObject(JsonData);
       ToolsArr := RespObj.Objects['result'].Arrays['tools'];
-      AssertEquals(38, ToolsArr.Count);
+      AssertEquals(39, ToolsArr.Count);
     finally
       FreeAndNil(JsonData);
     end;

@@ -137,7 +137,7 @@ uses
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
   CastleUvEditor, CastleLevelInstance, CastleMaterialInstance, CastleMeshEditor,
-  CastleRecastNavMesh, CastleLandscapeLayers, CastleBlueprintScs;
+  CastleRecastNavMesh, CastleLandscapeLayers, CastleBlueprintScs, CastleVertexPaint;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -590,6 +590,9 @@ begin
   Reg('blueprint_scs_viewport', 'Blueprint Components Viewport & Inherited Subobject Tree (SCS)', 'BPComp',
     shcCharactersAiGas, 395, 'blueprint components viewport usimpleconstructionscript uscs_node uinheritablecomponenthandler inherited subobject tree capsule springarm camera delta override mcp',
     'Parent->Child Blueprint USCS_Node component inheritance, [Inherited] delta overrides & SpringArm->Camera assembly (38th MCP).');
+  Reg('mesh_vertex_paint', 'Viewport Mesh Vertex Paint Mode & Multi-Layer Blend Studio', 'VPaint',
+    shcMaterialsVfxLighting, 396, 'mesh vertex paint umeshpaintmode fmeshpaintparameters rgba channel mask radial falloff heightlerp moss puddle wear snow laplacian smooth mcp',
+    '3D radial falloff RGBA vertex painting, channel masks, 1-ring Laplacian smooth & 4-layer HeightLerp blend (39th MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -804,6 +807,8 @@ var
       BumpSub(shcWorldEnvironment);
     if C is TCastleBlueprintScsActor then
       BumpSub(shcCharactersAiGas);
+    if C is TCastleVertexPaintMesh then
+      BumpSub(shcMaterialsVfxLighting);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

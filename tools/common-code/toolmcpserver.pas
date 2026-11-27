@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers, CastleBlueprintScs, ToolBlueprintScs;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers, CastleBlueprintScs, ToolBlueprintScs, CastleVertexPaint, ToolVertexPaint;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1217,6 +1217,17 @@ begin
   AddToolDef('cge_assemble_blueprint_components',
     'Spawn Parent->Child Blueprint USimpleConstructionScript (USCS_Node) hierarchies, apply [Inherited] delta overrides, or revert to parent archetype.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Mesh Vertex Paint operation: status, spawn_preset, paint_stroke, smooth_colors, fill_channels, or invert_channels (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleVertexPaintMesh name (defaults to first painted mesh in design).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: cobblestone_courtyard, bastion_wall, or alpine_cliff (default cobblestone_courtyard).'));
+  P.Add('channel', MakePropSchema('string', 'Target channel mask: red, green, blue, alpha, or all (default green).'));
+  P.Add('radius', MakePropSchema('number', '3D brush radius in meters for paint_stroke / smooth_colors (default 2.5).'));
+  P.Add('strength', MakePropSchema('number', 'Brush strength 0..1 for paint_stroke / smooth_colors (default 0.90).'));
+  AddToolDef('cge_paint_mesh_vertices',
+    'Spawn Vertex-Paintable 3D Meshes, apply radial falloff RGBA strokes with channel masks, run 1-ring Laplacian smoothing, and audit HeightLerp coverage.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1418,6 +1429,14 @@ var
   BpScsAudit: TBlueprintScsSceneAudit;
   BpScsComp, BpBaseOut, BpChildOut: TCastleBlueprintScsActor;
   BpBoomLen: Single;
+  VpAudit: TVertexPaintSceneAudit;
+  VpComp: TCastleVertexPaintMesh;
+  VpPresetVal: TVertexPaintPreset;
+  VpChanStr: String;
+  VpMask: TVertexPaintChannelMask;
+  VpCol4: TVector4;
+  VpRadius, VpStrength: Single;
+  VpAffected: Integer;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3747,6 +3766,133 @@ begin
         OutPayload.Add('inheritedCount', BpScsComp.InheritedComponentCount);
         OutPayload.Add('overriddenCount', BpScsComp.OverriddenInheritedCount);
         OutPayload.Add('summaryBadge', BpScsComp.BlueprintScsSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_paint_mesh_vertices' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    VpPresetVal := vppCobblestoneWallMossPuddles;
+    VpChanStr := 'green';
+    VpRadius := 2.5;
+    VpStrength := 0.90;
+    VpAffected := 0;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      VpChanStr := LowerCase(Trim(ArgsObj.Get('channel', 'green')));
+      VpRadius := ArgsObj.Get('radius', 2.5);
+      VpStrength := ArgsObj.Get('strength', 0.90);
+      if SameText(ArgsObj.Get('preset', ''), 'bastion_wall') then
+        VpPresetVal := vppRuinedArchwaySootWear
+      else if SameText(ArgsObj.Get('preset', ''), 'alpine_cliff') then
+        VpPresetVal := vppTerrainCliffSnowLichen;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'paint_stroke') or
+       SameText(ActionStr, 'smooth_colors') or SameText(ActionStr, 'fill_channels') or
+       SameText(ActionStr, 'invert_channels') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    VpMask := [vpcGreen];
+    VpCol4 := Vector4(0, 1, 0, 0);
+    if SameText(VpChanStr, 'red') then
+    begin
+      VpMask := [vpcRed];
+      VpCol4 := Vector4(1, 0, 0, 0);
+    end else
+    if SameText(VpChanStr, 'blue') then
+    begin
+      VpMask := [vpcBlue];
+      VpCol4 := Vector4(0, 0, 1, 0);
+    end else
+    if SameText(VpChanStr, 'alpha') then
+    begin
+      VpMask := [vpcAlpha];
+      VpCol4 := Vector4(0, 0, 0, 1);
+    end else
+    if SameText(VpChanStr, 'all') then
+    begin
+      VpMask := TCastleVertexPaintMesh.AllPaintChannels;
+      VpCol4 := Vector4(1, 1, 1, 1);
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      VpComp := TVertexPaintHelper.SpawnVertexPaintPresetInDesign(
+        DesignRoot, DesignOwner, VpPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Vertex Paint Mesh');
+    end else
+      VpComp := TVertexPaintHelper.FindVertexPaintMeshByName(DesignRoot, DesignOwner, CompName);
+
+    if (VpComp <> nil) and SameText(ActionStr, 'paint_stroke') then
+    begin
+      VpAffected := VpComp.ApplyBrushStroke(
+        VpComp.Translation, VpRadius, 0.45, VpStrength, VpCol4, VpMask, False);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Paint Mesh Vertex RGBA Stroke');
+    end else
+    if (VpComp <> nil) and SameText(ActionStr, 'smooth_colors') then
+    begin
+      VpAffected := VpComp.SmoothVertexColors(
+        VpComp.Translation, VpRadius, VpStrength, VpMask, True);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Smooth Mesh Vertex Colors');
+    end else
+    if (VpComp <> nil) and SameText(ActionStr, 'fill_channels') then
+    begin
+      VpComp.FillVertices(VpCol4, VpMask);
+      VpAffected := VpComp.VertexCount;
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Fill Mesh Vertex Channels');
+    end else
+    if (VpComp <> nil) and SameText(ActionStr, 'invert_channels') then
+    begin
+      VpComp.InvertChannels(VpMask);
+      VpAffected := VpComp.VertexCount;
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Invert Mesh Vertex Channels');
+    end;
+
+    VpAudit := TVertexPaintHelper.AuditVertexPaintInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('paintedMeshCount', VpAudit.PaintedMeshCount);
+      OutPayload.Add('totalVertices', VpAudit.TotalVertices);
+      OutPayload.Add('totalPaintedVertices', VpAudit.TotalPaintedVertices);
+      OutPayload.Add('affectedVertices', VpAffected);
+      OutPayload.Add('avgMossPct', VpAudit.AvgMossPct);
+      OutPayload.Add('avgPuddlePct', VpAudit.AvgPuddlePct);
+      OutPayload.Add('avgWearPct', VpAudit.AvgWearPct);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if VpComp <> nil then
+      begin
+        OutPayload.Add('activeMesh', VpComp.Name);
+        OutPayload.Add('vertexCount', VpComp.VertexCount);
+        OutPayload.Add('triangleCount', VpComp.TriangleCount);
+        OutPayload.Add('summaryBadge', VpComp.VertexPaintSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

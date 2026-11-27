@@ -124,7 +124,7 @@ var
   I: Integer;
 begin
   { 1. Verify all 96 Horizon 2-11 studios are registered in TStudioHubManager }
-  AssertEquals(115, TStudioHubManager.StudioCount);
+  AssertEquals(116, TStudioHubManager.StudioCount);
   for I := 0 to High(Horizon8Ids) do
     AssertTrue('Missing Horizon 8 studio id: ' + Horizon8Ids[I],
       TStudioHubManager.FindStudioById(Horizon8Ids[I], Entry));

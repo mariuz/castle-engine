@@ -222,6 +222,7 @@ uses
   TestToolRecastNavMesh,
   TestToolLandscapeLayers,
   TestToolBlueprintScs,
+  TestToolVertexPaint,
   TestCastleVulkanRHI;
 
 implementation

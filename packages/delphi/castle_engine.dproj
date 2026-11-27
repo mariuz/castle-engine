@@ -549,6 +549,7 @@
         <DCCReference Include="..\..\src\scene\castlerecastnavmesh.pas"/>
         <DCCReference Include="..\..\src\scene\castlelandscapelayers.pas"/>
         <DCCReference Include="..\..\src\scene\castleblueprintscs.pas"/>
+        <DCCReference Include="..\..\src\scene\castlevertexpaint.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>

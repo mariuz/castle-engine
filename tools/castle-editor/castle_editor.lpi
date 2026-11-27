@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="263">
+    <Units Count="265">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1397,6 +1397,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormBlueprintScs"/>
       </Unit262>
+      <Unit263>
+        <Filename Value="../common-code/toolvertexpaint.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVertexPaint"/>
+      </Unit263>
+      <Unit264>
+        <Filename Value="code/formvertexpaint.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVertexPaint"/>
+      </Unit264>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
