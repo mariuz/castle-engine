@@ -422,6 +422,7 @@
         <DCCReference Include="..\..\src\base_rendering\rhi\castleinternalshaderrhi.pas"/>
         <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalrhi_vulkan.pas"/>
         <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalshadercompiler.pas"/>
+        <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalspirvreflection.pas"/>
         <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalvulkan.pas"/>
         <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalvulkanmemory.pas"/>
         <DCCReference Include="..\..\src\base_rendering\vulkan\castleinternalvulkanwsi.pas"/>

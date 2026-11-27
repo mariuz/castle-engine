@@ -439,6 +439,7 @@ type
     procedure TestPerLightShaderEffectsUniformScopingAndVisualParityRHI;
     procedure TestBroaderExampleCatalogVulkanSmokeAndOpenGLVisualParitySweepRHI;
     procedure TestUpstreamPRSliceManifestAndDocumentationCompletenessRHI;
+    procedure TestExtractedSPIRVBinariesExternalOverrideAndModularUnitsRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -29284,7 +29285,12 @@ begin
     { Test both TWindowContainer.SaveScreen (TRGBImage) and SaveScreenRgba }
     ShotRgb := Window.SaveScreen;
     AssertTrue('Window.SaveScreen must return non-nil TRGBImage', ShotRgb <> nil);
-    AssertTrue('Center lit PBR box R channel must dominate B channel in Window.SaveScreen',
+    AssertTrue(Format('Center lit PBR box R channel must dominate B channel in Window.SaveScreen [size=%dx%d, center=(%d,%d,%d), corner=(%d,%d,%d)]', [
+      ShotRgb.Width, ShotRgb.Height,
+      ShotRgb.PixelPtr(ShotRgb.Width div 2, ShotRgb.Height div 2)^.X,
+      ShotRgb.PixelPtr(ShotRgb.Width div 2, ShotRgb.Height div 2)^.Y,
+      ShotRgb.PixelPtr(ShotRgb.Width div 2, ShotRgb.Height div 2)^.Z,
+      ShotRgb.PixelPtr(4, 4)^.X, ShotRgb.PixelPtr(4, 4)^.Y, ShotRgb.PixelPtr(4, 4)^.Z]),
       ShotRgb.PixelPtr(ShotRgb.Width div 2, ShotRgb.Height div 2)^.X >
       ShotRgb.PixelPtr(ShotRgb.Width div 2, ShotRgb.Height div 2)^.Z + 50);
     AssertTrue('Corner (4,4) blue viewport background B > 80 in Window.SaveScreen',
@@ -39008,6 +39014,175 @@ begin
     FreeAndNil(SeenPaths);
     FreeAndNil(Lines);
   end;
+end;
+
+procedure TTestCastleVulkanRHI.TestExtractedSPIRVBinariesExternalOverrideAndModularUnitsRHI;
+
+  function ReadRawFileText(const AFileName: String): String;
+  var
+    Stream: TFileStream;
+  begin
+    Result := '';
+    Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+    try
+      if Stream.Size > 0 then
+      begin
+        SetLength(Result, Stream.Size);
+        Stream.ReadBuffer(Result[1], Stream.Size);
+      end;
+    finally
+      FreeAndNil(Stream);
+    end;
+  end;
+
+  function CountTextLines(const AText: String): Integer;
+  var
+    L: TStringList;
+  begin
+    L := TStringList.Create;
+    try
+      L.Text := AText;
+      Result := L.Count;
+    finally
+      FreeAndNil(L);
+    end;
+  end;
+
+const
+  ExpectedVkIncFiles: array[0..10] of String = (
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_types_conv.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_resources.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_commandlist.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_managers.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_hdr_shadows.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_lighting_post.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_raytracing_gi.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_gpu_driven.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_swapchain_lifecycle.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_device_init.inc',
+    'src/base_rendering/vulkan/castleinternalrhi_vulkan_device_frames.inc'
+  );
+  ExpectedOtherIncFiles: array[0..9] of String = (
+    'src/base_rendering/rhi/castleinternalrhi_types_classes.inc',
+    'src/base_rendering/rhi/castleinternalrhi_core_impl.inc',
+    'src/base_rendering/rhi/castleinternalrhi_rendergraph.inc',
+    'src/base_rendering/rhi/castleinternalshaderrhi_types.inc',
+    'src/base_rendering/rhi/castleinternalshaderrhi_core_upgrade.inc',
+    'src/base_rendering/rhi/castleinternalshaderrhi_lighting_post.inc',
+    'src/base_rendering/rhi/castleinternalshaderrhi_nextgen.inc',
+    'src/base_rendering/opengl/castleinternalrhi_opengl_translator.inc',
+    'src/base_rendering/opengl/castleinternalrhi_opengl_resources.inc',
+    'src/base_rendering/opengl/castleinternalrhi_opengl_commands_device.inc'
+  );
+var
+  SpvToolPath, ShaderCompPath, ReflUnitPath, VkUmbrellaPath, ShUmbrellaPath: String;
+  GlUmbrellaPath, RhiUmbrellaPath, GeneratedBlobsPath, SpvDir, IncPath: String;
+  ShaderCompText, IncText: String;
+  SR: TSearchRec;
+  SpvCount, I: Integer;
+  Stream: TFileStream;
+  RawSpv, BuiltInDefault, BuiltInFromSpv: TSPIRVBytecode;
+  ReflInfo: TSPIRVReflectionInfo;
+begin
+  { 1. Verify spv2pas tool, standalone CastleInternalSPIRVReflection unit, and generated blobs }
+  SpvToolPath := ResolveRepoExampleFile('tools/internal/generate_vulkan_spirv/spv2pas.dpr');
+  ShaderCompPath := ResolveRepoExampleFile('src/base_rendering/vulkan/castleinternalshadercompiler.pas');
+  ReflUnitPath := ResolveRepoExampleFile('src/base_rendering/vulkan/castleinternalspirvreflection.pas');
+  GeneratedBlobsPath := ResolveRepoExampleFile('src/base_rendering/vulkan/generated-pascal/castleinternalvulkanspirv_blobs.inc');
+  VkUmbrellaPath := ResolveRepoExampleFile('src/base_rendering/vulkan/castleinternalrhi_vulkan.pas');
+  ShUmbrellaPath := ResolveRepoExampleFile('src/base_rendering/rhi/castleinternalshaderrhi.pas');
+  GlUmbrellaPath := ResolveRepoExampleFile('src/base_rendering/opengl/castleinternalrhi_opengl.pas');
+  RhiUmbrellaPath := ResolveRepoExampleFile('src/base_rendering/rhi/castleinternalrhi.pas');
+
+  AssertTrue('spv2pas.dpr must exist', FileExists(SpvToolPath));
+  AssertTrue('castleinternalshadercompiler.pas must exist', FileExists(ShaderCompPath));
+  AssertTrue('castleinternalspirvreflection.pas must exist', FileExists(ReflUnitPath));
+  AssertTrue('generated castleinternalvulkanspirv_blobs.inc must exist', FileExists(GeneratedBlobsPath));
+
+  ShaderCompText := ReadRawFileText(ShaderCompPath);
+  AssertEquals('castleinternalshadercompiler.pas must contain zero hardcoded UInt32 SPIR-V hex arrays',
+    0, Pos('of UInt32 = (', ShaderCompText));
+  AssertTrue('castleinternalshadercompiler.pas must be modular (< 1500 lines)',
+    CountTextLines(ShaderCompText) < 1500);
+  AssertTrue('castleinternalspirvreflection.pas must be modular (< 1200 lines)',
+    CountTextLines(ReadRawFileText(ReflUnitPath)) < 1200);
+
+  { 2. Verify monolithic umbrella units were split into compact < 150-line headers + < 5200-line .inc modules }
+  AssertTrue('castleinternalrhi_vulkan.pas umbrella must be < 150 lines',
+    CountTextLines(ReadRawFileText(VkUmbrellaPath)) < 150);
+  AssertTrue('castleinternalshaderrhi.pas umbrella must be < 100 lines',
+    CountTextLines(ReadRawFileText(ShUmbrellaPath)) < 100);
+  AssertTrue('castleinternalrhi_opengl.pas umbrella must be < 100 lines',
+    CountTextLines(ReadRawFileText(GlUmbrellaPath)) < 100);
+  AssertTrue('castleinternalrhi.pas umbrella must be < 100 lines',
+    CountTextLines(ReadRawFileText(RhiUmbrellaPath)) < 100);
+
+  for I := Low(ExpectedVkIncFiles) to High(ExpectedVkIncFiles) do
+  begin
+    IncPath := ResolveRepoExampleFile(ExpectedVkIncFiles[I]);
+    AssertTrue('Modular Vulkan .inc file must exist: ' + ExpectedVkIncFiles[I], FileExists(IncPath));
+    IncText := ReadRawFileText(IncPath);
+    AssertTrue('Modular Vulkan .inc file must carry MainUnit header: ' + ExpectedVkIncFiles[I],
+      Pos('{%MainUnit castleinternalrhi_vulkan.pas}', IncText) > 0);
+    AssertTrue('Modular Vulkan .inc file must stay < 5200 lines: ' + ExpectedVkIncFiles[I],
+      CountTextLines(IncText) < 5200);
+  end;
+
+  for I := Low(ExpectedOtherIncFiles) to High(ExpectedOtherIncFiles) do
+  begin
+    IncPath := ResolveRepoExampleFile(ExpectedOtherIncFiles[I]);
+    AssertTrue('Modular RHI/OpenGL .inc file must exist: ' + ExpectedOtherIncFiles[I], FileExists(IncPath));
+    IncText := ReadRawFileText(IncPath);
+    AssertTrue('Modular RHI/OpenGL .inc file must stay < 3200 lines: ' + ExpectedOtherIncFiles[I],
+      CountTextLines(IncText) < 3200);
+  end;
+
+  { 3. Verify all 56 extracted binary .spv files exist on disk and pass SPIR-V binary reflection }
+  SpvDir := ExtractFilePath(ShaderCompPath) + 'spirv';
+  AssertTrue('src/base_rendering/vulkan/spirv directory must exist', DirectoryExists(SpvDir));
+  SpvCount := 0;
+  if FindFirst(InclPathDelim(SpvDir) + '*.spv', faAnyFile and (not faDirectory), SR) = 0 then
+  begin
+    try
+      repeat
+        if (SR.Name = '.') or (SR.Name = '..') then Continue;
+        Inc(SpvCount);
+        Stream := TFileStream.Create(InclPathDelim(SpvDir) + SR.Name, fmOpenRead or fmShareDenyWrite);
+        try
+          AssertTrue('Binary .spv file must be 4-byte aligned and >= 20 bytes: ' + SR.Name,
+            (Stream.Size >= 20) and ((Stream.Size mod 4) = 0));
+          SetLength(RawSpv, Stream.Size);
+          Stream.ReadBuffer(RawSpv[0], Stream.Size);
+          AssertTrue('InspectSPIRVBytecode must validate binary .spv module: ' + SR.Name,
+            InspectSPIRVBytecode(RawSpv, ReflInfo) and ReflInfo.IsValid);
+          AssertEquals('EntryPointName in binary .spv module must be main: ' + SR.Name,
+            'main', ReflInfo.EntryPointName);
+        finally
+          FreeAndNil(Stream);
+        end;
+      until FindNext(SR) <> 0;
+    finally
+      FindClose(SR);
+    end;
+  end;
+  AssertEquals('Exactly 56 extracted binary .spv modules must exist in src/base_rendering/vulkan/spirv',
+    56, SpvCount);
+
+  { 4. Verify TryGetBuiltInSPIRV & GetMinimalValidSPIRVFallback match byte-for-byte with external .spv files }
+  AssertTrue('TryGetBuiltInSPIRV(CastlePBR3DFrag) must succeed',
+    TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssFragment, '', 'CastlePBR3DFrag', BuiltInDefault));
+  Stream := TFileStream.Create(InclPathDelim(SpvDir) + 'BuiltIn3DPBRShadowFragSPIRV.spv',
+    fmOpenRead or fmShareDenyWrite);
+  try
+    SetLength(BuiltInFromSpv, Stream.Size);
+    Stream.ReadBuffer(BuiltInFromSpv[0], Stream.Size);
+  finally
+    FreeAndNil(Stream);
+  end;
+  AssertEquals('Generated include SPIR-V length must match BuiltIn3DPBRShadowFragSPIRV.spv byte-for-byte',
+    Length(BuiltInFromSpv), Length(BuiltInDefault));
+  AssertTrue('Generated include SPIR-V bytes must match BuiltIn3DPBRShadowFragSPIRV.spv byte-for-byte',
+    CompareMem(@BuiltInFromSpv[0], @BuiltInDefault[0], Length(BuiltInFromSpv)));
 end;
 
 initialization

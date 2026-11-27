@@ -102,6 +102,7 @@ You can also subscribe to `ApplicationProperties.OnRenderBackendChange` to obser
 | `CASTLE_SHADER_COMPILER` | `auto` (default), `shaderc`, `glslang`, `builtin` | Controls runtime GLSL `#version 450` -> SPIR-V compilation strategy (`libshaderc` shared library, external `glslangValidator`/`glslc` CLI, or strictly the 56 embedded built-in SPIR-V modules). |
 | `CASTLE_SHADERC_PATH` | `/path/to/libshaderc_shared.so.1` | Explicit path override for dynamically loading `libshaderc` (`shaderc_shared.dll`, `libshaderc.so.1`, `libshaderc.1.dylib`). |
 | `CASTLE_GLSLANG_PATH` | `/path/to/glslangValidator` | Explicit path override for the external `glslangValidator` or `glslc` binary. |
+| `CASTLE_VULKAN_SPIRV_DIR` | `/path/to/spirv` (`src/base_rendering/vulkan/spirv`) | Live external `.spv` directory override for all 56 built-in SPIR-V fallback modules (bypasses embedded `castleinternalvulkanspirv_blobs.inc` and disk cache). |
 | `CASTLE_VULKAN_DEVICE` | Substring or `#<index>` (e.g. `RTX`, `#0`, `llvmpipe`) | Forces selection of a matching `VkPhysicalDevice` on multi-GPU desktop/laptop systems. |
 | `CASTLE_VULKAN_VENDOR` | `nvidia`, `amd`, `intel`, `apple`, `arm`, `qualcomm`, `mesa` | Prefers physical devices matching the specified `TVulkanVendorID` (`0x10DE`, `0x1002`, `0x8086`, `0x106B`, `0x13B5`, `0x5143`, `0x10005`). |
 | `CASTLE_VULKAN_LIBRARY` | `/custom/path/to/libvulkan.so.1` or `libMoltenVK.dylib` | Overrides the dynamic Vulkan loader / ICD shared library path loaded by `CastleInternalVulkan`. |
@@ -158,12 +159,13 @@ Existing CGE custom shaders continue to work without manual rewrites thanks to `
 | `CastleInternalVulkan` | `src/base_rendering/vulkan/castleinternalvulkan.pas` | Auto-generated flat C-ABI Vulkan 1.0–1.4 + extension bindings (`tools/internal/generate_vulkan_api/vkxml2pas.dpr`). |
 | `CastleInternalVulkanMemory` | `src/base_rendering/vulkan/castleinternalvulkanmemory.pas` | Pooled `VkDeviceMemory` sub-allocator (`TCastleVulkanMemoryAllocator`), `VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT`, transient aliasing carriers, per-frame ring buffers, and 3-phase `DefragmentPools` GPU buffer relocation. |
 | `CastleInternalVulkanWSI` | `src/base_rendering/vulkan/castleinternalvulkanwsi.pas` | Win32, Xlib, Wayland, Android, Metal/MoltenVK, Switch, and Headless `VkSurfaceKHR` creation & extension discovery. |
-| `CastleInternalRHI` | `src/base_rendering/rhi/castleinternalrhi.pas` | Backend-agnostic device, buffer, texture, sampler, descriptor, graphics/compute PSO, query pool, `TRHIRenderGraph`, and `TRHIVisualRegressionSuite` abstractions. |
-| `CastleInternalShaderRHI` | `src/base_rendering/rhi/castleinternalshaderrhi.pas` | Vulkan GLSL `#version 450` generator, `TUserEffectShaderLayout`, PBR/IBL/next-gen BSDF & compute shader generators. |
-| `CastleInternalShaderCompiler` | `src/base_rendering/vulkan/castleinternalshadercompiler.pas` | Runtime `libshaderc` / `glslangValidator` compiler, 56 embedded SPIR-V 1.0/1.4 modules, pure Pascal SPIR-V reflection (`InspectSPIRVBytecode`), and `.spv` cache bundler. |
-| `CastleInternalRHI_Vulkan` | `src/base_rendering/vulkan/castleinternalrhi_vulkan.pas` | Complete Vulkan 1.1–1.4 `TRHIDevice` implementation, swapchain manager, bindless indirect multi-draw, render-graph transient aliasing, HDR/GTAO/SSR/TAA/GI/RT/Meshlet subsystems. |
+| `CastleInternalRHI` | `src/base_rendering/rhi/castleinternalrhi.pas` (`+ 3 .inc`) | Backend-agnostic device, buffer, texture, sampler, descriptor, graphics/compute PSO, query pool, `TRHIRenderGraph`, and `TRHIVisualRegressionSuite` abstractions. |
+| `CastleInternalShaderRHI` | `src/base_rendering/rhi/castleinternalshaderrhi.pas` (`+ 4 .inc`) | Vulkan GLSL `#version 450` generator, `TUserEffectShaderLayout`, PBR/IBL/next-gen BSDF & compute shader generators. |
+| `CastleInternalSPIRVReflection` | `src/base_rendering/vulkan/castleinternalspirvreflection.pas` | Pure Object Pascal SPIR-V binary header & instruction stream inspector (`InspectSPIRVBytecode`, `ValidateSPIRVDescriptorBindings`). |
+| `CastleInternalShaderCompiler` | `src/base_rendering/vulkan/castleinternalshadercompiler.pas` (`+ spirv/*.spv`) | Runtime `libshaderc` / `glslangValidator` compiler, `.spv` cache bundler, and 56 binary `.spv` fallback modules (`src/base_rendering/vulkan/spirv/*.spv` packed via `tools/internal/generate_vulkan_spirv/spv2pas.dpr` or loaded dynamically via `CASTLE_VULKAN_SPIRV_DIR`). |
+| `CastleInternalRHI_Vulkan` | `src/base_rendering/vulkan/castleinternalrhi_vulkan.pas` (`+ 11 .inc`) | Modular Vulkan 1.1–1.4 `TRHIDevice` implementation (`resources`, `commandlist`, `managers`, `hdr_shadows`, `lighting_post`, `raytracing_gi`, `gpu_driven`, `swapchain_lifecycle`, `device_init`, `device_frames`). |
 | `CastleInternalBatch2DRHI` | `src/base_rendering/rhi/castleinternalbatch2drhi.pas` | Streaming 2D quad/UI/font batch renderer (`TCastleBatch2DRenderer`). |
-| `CastleInternalRHI_OpenGL` | `src/base_rendering/opengl/castleinternalrhi_opengl.pas` | OpenGL 3.3–4.6 / GLES 3.0–3.2 `TRHIDevice` with compute, SSBO, storage-image, indirect-count multi-draw, query pool, and `TRHIRenderGraph` parity. |
+| `CastleInternalRHI_OpenGL` | `src/base_rendering/opengl/castleinternalrhi_opengl.pas` (`+ 3 .inc`) | Modular OpenGL 3.3–4.6 / GLES 3.0–3.2 `TRHIDevice` (`translator`, `resources`, `commands_device`) with compute, SSBO, storage-image, indirect-count multi-draw, query pool, and `TRHIRenderGraph` parity. |
 | `CastleInternalRenderDoc` | `src/base_rendering/rhi/castleinternalrenderdoc.pas` | In-application RenderDoc API frame capture trigger. |
 
 ### 6.2 Coordinate System & Negative Viewport (`VK_KHR_maintenance1`)
@@ -200,7 +202,7 @@ CGE uses bottom-up 2D/viewport rectangles and right-handed Y-up 3D clip coordina
 
 ### 7.2 Running the `TTestCastleVulkanRHI` Suite
 ```bash
-# Compile and run all 391 TTestCastleVulkanRHI unit & visual-parity tests via castle-engine:
+# Compile and run all 392 TTestCastleVulkanRHI unit & visual-parity tests via castle-engine:
 CASTLE_VULKAN_VALIDATION=1 ./tools/build-tool/castle-engine --project ./tests/ compile --mode=debug
 CASTLE_VULKAN_VALIDATION=1 ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI*
 ```

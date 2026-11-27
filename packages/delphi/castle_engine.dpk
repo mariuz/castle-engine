@@ -261,6 +261,7 @@ contains
   castleinternalshaderrhi in '..\..\src\base_rendering\rhi\castleinternalshaderrhi.pas',
   castleinternalrhi_vulkan in '..\..\src\base_rendering\vulkan\castleinternalrhi_vulkan.pas',
   castleinternalshadercompiler in '..\..\src\base_rendering\vulkan\castleinternalshadercompiler.pas',
+  castleinternalspirvreflection in '..\..\src\base_rendering\vulkan\castleinternalspirvreflection.pas',
   castleinternalvulkan in '..\..\src\base_rendering\vulkan\castleinternalvulkan.pas',
   castleinternalvulkanmemory in '..\..\src\base_rendering\vulkan\castleinternalvulkanmemory.pas',
   castleinternalvulkanwsi in '..\..\src\base_rendering\vulkan\castleinternalvulkanwsi.pas',

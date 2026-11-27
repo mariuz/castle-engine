@@ -43,6 +43,7 @@ Makefile text eol=auto
 # do not convert line endings (binary)
 *.gltf binary
 *.glb binary
+*.spv binary
 # Note: svg could *probably* be treated as text (it's XML, line endings
 # could be native), but it's safer to treat it as binary.
 # We edit it in mostly graphic editors like Inkscape anyway,

@@ -372,8 +372,11 @@ begin
     P.Targets.AddUnit('castleinternalshaderrhi.pas');
 
     P.SourcePath.Add('src/base_rendering/vulkan');
+    P.IncludePath.Add('src/base_rendering/vulkan');
+    P.IncludePath.Add('src/base_rendering/vulkan/generated-pascal');
     P.Targets.AddUnit('castleinternalrhi_vulkan.pas');
     P.Targets.AddUnit('castleinternalshadercompiler.pas');
+    P.Targets.AddUnit('castleinternalspirvreflection.pas');
     P.Targets.AddUnit('castleinternalvulkan.pas');
     P.Targets.AddUnit('castleinternalvulkanmemory.pas');
     P.Targets.AddUnit('castleinternalvulkanwsi.pas');

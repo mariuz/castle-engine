@@ -53,8 +53,13 @@ jobs:
         run: echo "CASTLE_ENGINE_PATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
       - name: Verify Vulkan Loader & Khronos Validation Layer Discovery
         run: vulkaninfo --summary
-      - name: Compile vkxml2pas Generator
-        run: fpc -Mobjfpc -Sh tools/internal/generate_vulkan_api/vkxml2pas.dpr
+      - name: Compile vkxml2pas & spv2pas Generators and Verify Generated SPIR-V Include
+        run: |
+          fpc -Mobjfpc -Sh tools/internal/generate_vulkan_api/vkxml2pas.dpr
+          fpc -Mobjfpc -Sh -o/tmp/spv2pas tools/internal/generate_vulkan_spirv/spv2pas.dpr
+          /tmp/spv2pas src/base_rendering/vulkan/spirv /tmp/verify_spirv_blobs.inc
+          diff -u src/base_rendering/vulkan/generated-pascal/castleinternalvulkanspirv_blobs.inc /tmp/verify_spirv_blobs.inc
+          rm -f /tmp/spv2pas /tmp/verify_spirv_blobs.inc
       - name: Compile castle-engine Build Tool
         run: ./tools/build-tool/castle-engine_compile.sh
       - name: Package Vulkan 3D Scene & Verify Bundled SPIR-V Shader Cache + CastleDataInformation.xml
@@ -125,9 +130,13 @@ jobs:
           echo "CASTLE_ENGINE_PATH=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Verify Apple Metal / MoltenVK & VK_KHR_portability_subset Discovery
         run: vulkaninfo --summary
-      - name: Compile vkxml2pas Generator & castle-engine Build Tool
+      - name: Compile vkxml2pas, spv2pas & castle-engine Build Tool
         run: |
           fpc -Mobjfpc -Sh tools/internal/generate_vulkan_api/vkxml2pas.dpr
+          fpc -Mobjfpc -Sh -o/tmp/spv2pas tools/internal/generate_vulkan_spirv/spv2pas.dpr
+          /tmp/spv2pas src/base_rendering/vulkan/spirv /tmp/verify_spirv_blobs.inc
+          diff -u src/base_rendering/vulkan/generated-pascal/castleinternalvulkanspirv_blobs.inc /tmp/verify_spirv_blobs.inc
+          rm -f /tmp/spv2pas /tmp/verify_spirv_blobs.inc
           ./tools/build-tool/castle-engine_compile.sh
       - name: Compile Cocoa WSI Examples, Package macOS .app Bundle & Verify Bundled SPIR-V Cache
         run: |
@@ -175,9 +184,13 @@ jobs:
           echo "MSYS2_ARG_CONV_EXCL=*" >> "$GITHUB_ENV"
           echo "MSYS_NO_PATHCONV=1" >> "$GITHUB_ENV"
           echo "CASTLE_ENGINE_PATH=$(cygpath --mixed "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
-      - name: Compile vkxml2pas Generator & castle-engine Build Tool
+      - name: Compile vkxml2pas, spv2pas & castle-engine Build Tool
         run: |
           fpc -Mobjfpc -Sh tools/internal/generate_vulkan_api/vkxml2pas.dpr
+          fpc -Mobjfpc -Sh -o/tmp/spv2pas tools/internal/generate_vulkan_spirv/spv2pas.dpr
+          /tmp/spv2pas src/base_rendering/vulkan/spirv /tmp/verify_spirv_blobs.inc
+          diff -u src/base_rendering/vulkan/generated-pascal/castleinternalvulkanspirv_blobs.inc /tmp/verify_spirv_blobs.inc
+          rm -f /tmp/spv2pas /tmp/verify_spirv_blobs.inc
           ./tools/build-tool/castle-engine_compile.sh
       - name: Compile Win32 WSI Examples & Verify Bundled SPIR-V Cache
         run: |
