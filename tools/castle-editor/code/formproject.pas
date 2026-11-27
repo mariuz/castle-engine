@@ -708,6 +708,7 @@ type
       MenuItemMeshEditor: TMenuItem;
       MenuItemRecastNavMesh: TMenuItem;
       MenuItemLandscapeLayers: TMenuItem;
+      MenuItemBlueprintScs: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -836,6 +837,7 @@ type
     procedure MenuItemMeshEditorClick(Sender: TObject);
     procedure MenuItemRecastNavMeshClick(Sender: TObject);
     procedure MenuItemLandscapeLayersClick(Sender: TObject);
+    procedure MenuItemBlueprintScsClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3036,6 +3038,11 @@ begin
   MenuItemLandscapeLayers.Caption := 'Landscape Edit Layers & Terrain-Carving Splines Studio...';
   MenuItemLandscapeLayers.OnClick := @MenuItemLandscapeLayersClick;
   MenuItemDesign.Add(MenuItemLandscapeLayers);
+
+  MenuItemBlueprintScs := TMenuItem.Create(MenuItemDesign);
+  MenuItemBlueprintScs.Caption := 'Blueprint Components Viewport & Inherited Subobject Tree (SCS)...';
+  MenuItemBlueprintScs.OnClick := @MenuItemBlueprintScsClick;
+  MenuItemDesign.Add(MenuItemBlueprintScs);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6696,6 +6703,12 @@ procedure TProjectForm.MenuItemLandscapeLayersClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowLandscapeLayersDialog;
+end;
+
+procedure TProjectForm.MenuItemBlueprintScsClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowBlueprintScsDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -137,7 +137,7 @@ uses
   CastleBlueprint, CastlePcgGraph, CastleAnimBlueprint, CastleBehaviorTree,
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
   CastleUvEditor, CastleLevelInstance, CastleMaterialInstance, CastleMeshEditor,
-  CastleRecastNavMesh, CastleLandscapeLayers;
+  CastleRecastNavMesh, CastleLandscapeLayers, CastleBlueprintScs;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -587,6 +587,9 @@ begin
   Reg('landscape_layers_splines', 'Landscape Edit Layers & Terrain-Carving Splines Studio', 'LandSpline',
     shcWorldEnvironment, 394, 'landscape edit layers ulandscapesplinescomponent non destructive additive alpha blend spline corridor road riverbed cut fill embankment splatmap mcp',
     'Non-destructive Additive/AlphaBlend Landscape Edit Layers, spline Cut/Fill embankment carving & 4-channel splatmap (37th MCP).');
+  Reg('blueprint_scs_viewport', 'Blueprint Components Viewport & Inherited Subobject Tree (SCS)', 'BPComp',
+    shcCharactersAiGas, 395, 'blueprint components viewport usimpleconstructionscript uscs_node uinheritablecomponenthandler inherited subobject tree capsule springarm camera delta override mcp',
+    'Parent->Child Blueprint USCS_Node component inheritance, [Inherited] delta overrides & SpringArm->Camera assembly (38th MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -799,6 +802,8 @@ var
       BumpSub(shcCharactersAiGas);
     if C is TCastleLandscapeLayerTerrain then
       BumpSub(shcWorldEnvironment);
+    if C is TCastleBlueprintScsActor then
+      BumpSub(shcCharactersAiGas);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

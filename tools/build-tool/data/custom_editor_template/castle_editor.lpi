@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     <Item5> <PackageName Value="castle_editor_automatic_package"/> </Item5> </RequiredPackages>
-    <Units Count="261">
+    <Units Count="263">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -1387,6 +1387,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormLandscapeLayers"/>
       </Unit260>
+      <Unit261>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/common-code/toolblueprintscs.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolBlueprintScs"/>
+      </Unit261>
+      <Unit262>
+        <Filename Value="${CASTLE_ENGINE_PATH}tools/castle-editor/code/formblueprintscs.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormBlueprintScs"/>
+      </Unit262>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

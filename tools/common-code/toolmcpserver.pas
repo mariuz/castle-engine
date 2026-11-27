@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers, CastleBlueprintScs, ToolBlueprintScs;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1209,6 +1209,14 @@ begin
   AddToolDef('cge_carve_landscape_layer_spline',
     'Spawn Non-Destructive Landscape Edit Layers & Terrain-Carving Splines, mute/solo or blend layers, and audit Cut/Fill earthwork & road/river splatmaps.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Blueprint SCS operation: status, spawn_showcase, override_boom, or revert_overrides (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleBlueprintScsActor name (defaults to first Blueprint SCS actor in design).'));
+  P.Add('armLength', MakePropSchema('number', 'TargetArmLength override in meters for override_boom (default 6.2).'));
+  AddToolDef('cge_assemble_blueprint_components',
+    'Spawn Parent->Child Blueprint USimpleConstructionScript (USCS_Node) hierarchies, apply [Inherited] delta overrides, or revert to parent archetype.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1407,6 +1415,9 @@ var
   LandLayerStr: String;
   LandVisVal: Boolean;
   LandOpVal: Single;
+  BpScsAudit: TBlueprintScsSceneAudit;
+  BpScsComp, BpBaseOut, BpChildOut: TCastleBlueprintScsActor;
+  BpBoomLen: Single;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3659,6 +3670,83 @@ begin
         OutPayload.Add('roadPaintedAreaM2', LandComp.Metrics.RoadPaintedAreaM2);
         OutPayload.Add('riverPaintedAreaM2', LandComp.Metrics.RiverPaintedAreaM2);
         OutPayload.Add('summaryBadge', LandComp.LandscapeSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_assemble_blueprint_components' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    BpBoomLen := 6.2;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      BpBoomLen := ArgsObj.Get('armLength', 6.2);
+    end;
+
+    if SameText(ActionStr, 'spawn_showcase') or SameText(ActionStr, 'override_boom') or
+       SameText(ActionStr, 'revert_overrides') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_showcase') then
+    begin
+      TBlueprintScsHelper.SpawnParentAndChildBlueprintShowcaseInDesign(
+        DesignRoot, DesignOwner, BpBaseOut, BpChildOut);
+      BpScsComp := BpChildOut;
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Parent+Child Blueprint SCS Showcase');
+    end else
+      BpScsComp := TBlueprintScsHelper.FindBlueprintScsByName(DesignRoot, DesignOwner, CompName);
+
+    if (BpScsComp <> nil) and SameText(ActionStr, 'override_boom') then
+    begin
+      BpScsComp.OverrideInheritedParams('CameraBoom', BpBoomLen, 22.0);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Override Inherited CameraBoom');
+    end else
+    if (BpScsComp <> nil) and SameText(ActionStr, 'revert_overrides') then
+    begin
+      BpScsComp.RevertAllInheritedOverrides;
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Revert Inherited Blueprint SCS Overrides');
+    end;
+
+    BpScsAudit := TBlueprintScsHelper.AuditBlueprintScsInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('blueprintScsCount', BpScsAudit.BlueprintScsCount);
+      OutPayload.Add('childInheritedClassCount', BpScsAudit.ChildInheritedClassCount);
+      OutPayload.Add('totalAssembledSubobjects', BpScsAudit.TotalAssembledSubobjects);
+      OutPayload.Add('totalInheritedSubobjects', BpScsAudit.TotalInheritedSubobjects);
+      OutPayload.Add('totalOverriddenSubobjects', BpScsAudit.TotalOverriddenSubobjects);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if BpScsComp <> nil then
+      begin
+        OutPayload.Add('activeBlueprintClass', BpScsComp.BlueprintClassKey);
+        OutPayload.Add('assembledCount', Length(BpScsComp.Assembled));
+        OutPayload.Add('inheritedCount', BpScsComp.InheritedComponentCount);
+        OutPayload.Add('overriddenCount', BpScsComp.OverriddenInheritedCount);
+        OutPayload.Add('summaryBadge', BpScsComp.BlueprintScsSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

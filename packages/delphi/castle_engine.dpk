@@ -387,6 +387,7 @@ contains
   castlemesheditor in '..\..\src\scene\castlemesheditor.pas',
   castlerecastnavmesh in '..\..\src\scene\castlerecastnavmesh.pas',
   castlelandscapelayers in '..\..\src\scene\castlelandscapelayers.pas',
+  castleblueprintscs in '..\..\src\scene\castleblueprintscs.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',
