@@ -28,7 +28,8 @@ uses
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
   CastleInternalVulkanWSI, CastleInternalShaderCompiler, CastleInternalRHI_Vulkan,
   CastleInternalRHI_OpenGL,
-  CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
+  CastleInternalShaderRHI, CastleInternalShaderRHI_Experimental, CastleInternalRHI_Vulkan_Experimental,
+  CastleInternalBatch2DRHI, CastleInternalRenderer,
   CastleRendererInternalShader, CastleRendererInternalLights, CastleRendererInternalTextureEnv, X3DNodes, X3DFields, X3DCameraUtils,
   CastleInternalGeometryArrays, CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleSceneCore, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
@@ -440,6 +441,7 @@ type
     procedure TestBroaderExampleCatalogVulkanSmokeAndOpenGLVisualParitySweepRHI;
     procedure TestUpstreamPRSliceManifestAndDocumentationCompletenessRHI;
     procedure TestExtractedSPIRVBinariesExternalOverrideAndModularUnitsRHI;
+    procedure TestExperimentalSubsystemsIsolatedFromCoreRHIUnitsRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -39062,14 +39064,13 @@ const
     'src/base_rendering/vulkan/castleinternalrhi_vulkan_device_init.inc',
     'src/base_rendering/vulkan/castleinternalrhi_vulkan_device_frames.inc'
   );
-  ExpectedOtherIncFiles: array[0..9] of String = (
+  ExpectedOtherIncFiles: array[0..8] of String = (
     'src/base_rendering/rhi/castleinternalrhi_types_classes.inc',
     'src/base_rendering/rhi/castleinternalrhi_core_impl.inc',
     'src/base_rendering/rhi/castleinternalrhi_rendergraph.inc',
     'src/base_rendering/rhi/castleinternalshaderrhi_types.inc',
     'src/base_rendering/rhi/castleinternalshaderrhi_core_upgrade.inc',
     'src/base_rendering/rhi/castleinternalshaderrhi_lighting_post.inc',
-    'src/base_rendering/rhi/castleinternalshaderrhi_nextgen.inc',
     'src/base_rendering/opengl/castleinternalrhi_opengl_translator.inc',
     'src/base_rendering/opengl/castleinternalrhi_opengl_resources.inc',
     'src/base_rendering/opengl/castleinternalrhi_opengl_commands_device.inc'
@@ -39183,6 +39184,144 @@ begin
     Length(BuiltInFromSpv), Length(BuiltInDefault));
   AssertTrue('Generated include SPIR-V bytes must match BuiltIn3DPBRShadowFragSPIRV.spv byte-for-byte',
     CompareMem(@BuiltInFromSpv[0], @BuiltInDefault[0], Length(BuiltInFromSpv)));
+end;
+
+procedure TTestCastleVulkanRHI.TestExperimentalSubsystemsIsolatedFromCoreRHIUnitsRHI;
+
+  function ReadRawFileText(const AFileName: String): String;
+  var
+    Stream: TFileStream;
+  begin
+    Result := '';
+    Stream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+    try
+      if Stream.Size > 0 then
+      begin
+        SetLength(Result, Stream.Size);
+        Stream.ReadBuffer(Result[1], Stream.Size);
+      end;
+    finally
+      FreeAndNil(Stream);
+    end;
+  end;
+
+  procedure AssertCoreDirectoryFreeOfExperimentalRefs(
+    const ARelDir: String; const AForbiddenTokens: array of String);
+  var
+    FullDir, FileText, LowerExt: String;
+    SR: TSearchRec;
+    K: Integer;
+  begin
+    FullDir := ExtractFileDir(ResolveRepoExampleFile(ARelDir + '/dummy'));
+    AssertTrue('Core source directory must exist: ' + ARelDir, DirectoryExists(FullDir));
+    if FindFirst(InclPathDelim(FullDir) + '*', faAnyFile and (not faDirectory), SR) = 0 then
+    begin
+      try
+        repeat
+          if (SR.Name = '.') or (SR.Name = '..') then Continue;
+          LowerExt := LowerCase(ExtractFileExt(SR.Name));
+          if (LowerExt <> '.pas') and (LowerExt <> '.inc') then Continue;
+          FileText := ReadRawFileText(InclPathDelim(FullDir) + SR.Name);
+          for K := Low(AForbiddenTokens) to High(AForbiddenTokens) do
+            AssertEquals(Format('Core engine file %s/%s must NOT reference experimental symbol %s',
+              [ARelDir, SR.Name, AForbiddenTokens[K]]),
+              0, Pos(AForbiddenTokens[K], FileText));
+        until FindNext(SR) <> 0;
+      finally
+        FindClose(SR);
+      end;
+    end;
+  end;
+
+const
+  ExpectedExpFiles: array[0..8] of String = (
+    'src/base_rendering/experimental/README.md',
+    'src/base_rendering/experimental/castleinternalshaderrhi_experimental.pas',
+    'src/base_rendering/experimental/castleinternalshaderrhi_experimental_types.inc',
+    'src/base_rendering/experimental/castleinternalshaderrhi_experimental_pbr_env.inc',
+    'src/base_rendering/experimental/castleinternalshaderrhi_experimental_nextgen.inc',
+    'src/base_rendering/experimental/castleinternalrhi_vulkan_experimental.pas',
+    'src/base_rendering/experimental/castleinternalrhi_vulkan_experimental_types.inc',
+    'src/base_rendering/experimental/castleinternalrhi_vulkan_experimental_lighting_gi.inc',
+    'src/base_rendering/experimental/castleinternalrhi_vulkan_experimental_gpu_driven.inc'
+  );
+  ForbiddenExperimentalTokens: array[0..9] of String = (
+    'CastleInternalShaderRHI_Experimental',
+    'CastleInternalRHI_Vulkan_Experimental',
+    'castleinternalshaderrhi_experimental',
+    'castleinternalrhi_vulkan_experimental',
+    'TCastleVulkanGlobalSDF',
+    'TCastleVulkanClusterDAG',
+    'TCastleVulkanReSTIR',
+    'TCastleVulkanNeuralDenoiser',
+    'TCastleVulkanGaussianSplatRenderer',
+    'TCastleVulkanXPBDSimulator'
+  );
+var
+  I: Integer;
+  ExpFilePath, DeletedCoreNextGenPath, SDFGLSL: String;
+  ShaderGen: TCastleShaderGeneratorRHI;
+  Dev: TVulkanRHIDevice;
+  Cmd: TVulkanRHICommandList;
+  ExecCount: Cardinal;
+begin
+  { 1. Verify opt-in experimental directory files exist and deleted core nextgen.inc is gone }
+  for I := Low(ExpectedExpFiles) to High(ExpectedExpFiles) do
+  begin
+    ExpFilePath := ResolveRepoExampleFile(ExpectedExpFiles[I]);
+    AssertTrue('Experimental file must exist: ' + ExpectedExpFiles[I], FileExists(ExpFilePath));
+  end;
+  DeletedCoreNextGenPath := ExtractFilePath(
+    ResolveRepoExampleFile('src/base_rendering/rhi/castleinternalshaderrhi.pas')) +
+    'castleinternalshaderrhi_nextgen.inc';
+  AssertFalse('castleinternalshaderrhi_nextgen.inc must be removed from core src/base_rendering/rhi/',
+    FileExists(DeletedCoreNextGenPath));
+
+  { 2. Verify zero core engine directories reference experimental units or speculative classes }
+  AssertCoreDirectoryFreeOfExperimentalRefs('src/base_rendering/rhi', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs('src/base_rendering/vulkan', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs('src/base_rendering/opengl', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs('src/scene', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs('src/window', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs('src/ui', ForbiddenExperimentalTokens);
+
+  { 3. Verify lazy per-device ExperimentalContext lifecycle, class helpers & callback hooks }
+  ShaderGen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    SDFGLSL := ShaderGen.GenerateGlobalSDFTraceFunctions;
+    AssertTrue('Experimental shader class helper must emit Global SDF trace GLSL',
+      Pos('EvaluateSDFBoxDistance', SDFGLSL) > 0);
+  finally
+    FreeAndNil(ShaderGen);
+  end;
+
+  Dev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($77E0)));
+  Cmd := TVulkanRHICommandList.Create(Dev, Dev.GraphicsQueueFamily);
+  try
+    AssertTrue('Fresh TVulkanRHIDevice must have nil ExperimentalContext until an experimental subsystem is accessed',
+      Dev.ExperimentalContext = nil);
+
+    AssertTrue('Dev.GlobalSDF class helper must lazily allocate ExperimentalContext',
+      Dev.GlobalSDF <> nil);
+    AssertTrue('ExperimentalContext must be non-nil after accessing Dev.GlobalSDF',
+      Dev.ExperimentalContext <> nil);
+    AssertTrue('Dev.NeuralDenoiser must be accessible via experimental class helper',
+      Dev.NeuralDenoiser <> nil);
+    AssertTrue('Dev.GaussianSplatRenderer must be accessible via experimental class helper',
+      Dev.GaussianSplatRenderer <> nil);
+
+    Cmd.BeginRecording;
+    ExecCount := Dev.ExecuteExperimentalViewportSubsystems(Cmd, 320, 240,
+      Ord(giLumenSDFAndSurfaceCache), Ord(taaTSRUpscaler), Ord(vrsContrastAdaptive)) +
+      Dev.ExecuteExperimentalSceneSubsystems(Cmd, 320, 240,
+      Ord(smsVirtualShadowMaps), Ord(tmPerPixelLinkedListOIT));
+    Cmd.EndRecording;
+    AssertEquals('Experimental viewport + scene callback hooks must execute all 5 requested experimental subsystems',
+      5, ExecCount);
+  finally
+    FreeAndNil(Cmd);
+    FreeAndNil(Dev);
+  end;
 end;
 
 initialization

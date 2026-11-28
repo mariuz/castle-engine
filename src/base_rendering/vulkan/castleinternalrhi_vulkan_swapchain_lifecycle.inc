@@ -154,6 +154,17 @@
     CopySize: VkDeviceSize;
   end;
 
+  TVulkanExecuteExperimentalViewportCallback = function(
+    const ADevice: TVulkanRHIDevice;
+    const ACommandList: TVulkanRHICommandList;
+    const AViewWidth, AViewHeight: Cardinal;
+    const AGlobalIlluminationModeOrd, ATemporalAAModeOrd, AVariableRateShadingModeOrd: Cardinal): Cardinal;
+  TVulkanExecuteExperimentalSceneCallback = function(
+    const ADevice: TVulkanRHIDevice;
+    const ACommandList: TVulkanRHICommandList;
+    const AViewWidth, AViewHeight: Cardinal;
+    const AShadowMapSystemModeOrd, ATransparencyModeOrd: Cardinal): Cardinal;
+
   TVulkanRHIDevice = class(TRHIDevice)
   private
     FInstance: VkInstance;
@@ -218,53 +229,17 @@
     FSSR: TCastleVulkanSSR;
     FVolumetricFog: TCastleVulkanVolumetricFog;
     FTAA: TCastleVulkanTAA;
-    FReflectionProbeManager: TCastleVulkanReflectionProbeManager;
-    FDecalManager: TCastleVulkanDecalManager;
-    FComputeParticles: TCastleVulkanComputeParticles;
     FWeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT;
-    FContactShadows: TCastleVulkanContactShadows;
-    FComputeSkinner: TCastleVulkanComputeSkinner;
-    FTerrainCDLOD: TCastleVulkanTerrainCDLOD;
-    FAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
-    FOceanSimulator: TCastleVulkanOceanSimulator;
-    FDDGIGrid: TCastleVulkanDDGIGrid;
     FMeshletCuller: TCastleVulkanMeshletCuller;
-    FVirtualShadowMap: TCastleVulkanVirtualShadowMap;
-    FLODSelector: TCastleVulkanLODSelector;
-    FTextureStreamer: TCastleVulkanTextureStreamer;
-    FShadowCasterCuller: TCastleVulkanShadowCasterCuller;
-    FClusterDAG: TCastleVulkanClusterDAG;
-    FGlobalSDF: TCastleVulkanGlobalSDF;
-    FSurfaceCache: TCastleVulkanSurfaceCache;
-    FReSTIR: TCastleVulkanReSTIR;
-    FTSRUpscaler: TCastleVulkanTSRUpscaler;
-    FVRSManager: TCastleVulkanVRSManager;
-    FRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
-    FSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
-    FBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
-    FSVGFDenoiser: TCastleVulkanSVGFDenoiser;
     FShaderBindingTable: TCastleVulkanShaderBindingTable;
     FAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
-    FXPBDSimulator: TCastleVulkanXPBDSimulator;
-    FMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
-    FPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
-    FNeuralDenoiser: TCastleVulkanNeuralDenoiser;
-    FProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
-    FStreamCompactor: TCastleVulkanStreamCompactor;
-    FVoxelConeTracer: TCastleVulkanVoxelConeTracer;
     FMaterialBinner: TCastleVulkanMaterialBinner;
-    FPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
-    FHostImageCopyManager: TCastleVulkanHostImageCopyManager;
-    FGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
-    FDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
     FHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
     FAutoExposureHistogram: TCastleVulkanAutoExposureHistogram;
     FFramePacer: TCastleVulkanFramePacer;
-    FIndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher;
-    FBCnCompressor: TCastleVulkanBCnCompressor;
-    FPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
     FWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
     FBindlessIndirectBatch: TCastleVulkanBindlessIndirectBatch;
+    FExperimentalContext: TObject;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -418,51 +393,14 @@
     function GetSSR: TCastleVulkanSSR;
     function GetVolumetricFog: TCastleVulkanVolumetricFog;
     function GetTAA: TCastleVulkanTAA;
-    function GetReflectionProbeManager: TCastleVulkanReflectionProbeManager;
-    function GetDecalManager: TCastleVulkanDecalManager;
-    function GetComputeParticles: TCastleVulkanComputeParticles;
     function GetWeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT;
-    function GetContactShadows: TCastleVulkanContactShadows;
-    function GetComputeSkinner: TCastleVulkanComputeSkinner;
-    function GetTerrainCDLOD: TCastleVulkanTerrainCDLOD;
-    function GetAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
-    function GetOceanSimulator: TCastleVulkanOceanSimulator;
-    function GetDDGIGrid: TCastleVulkanDDGIGrid;
     function GetMeshletCuller: TCastleVulkanMeshletCuller;
-    function GetVirtualShadowMap: TCastleVulkanVirtualShadowMap;
-    function GetLODSelector: TCastleVulkanLODSelector;
-    function GetTextureStreamer: TCastleVulkanTextureStreamer;
-    function GetShadowCasterCuller: TCastleVulkanShadowCasterCuller;
-    function GetClusterDAG: TCastleVulkanClusterDAG;
-    function GetGlobalSDF: TCastleVulkanGlobalSDF;
-    function GetSurfaceCache: TCastleVulkanSurfaceCache;
-    function GetReSTIR: TCastleVulkanReSTIR;
-    function GetTSRUpscaler: TCastleVulkanTSRUpscaler;
-    function GetVRSManager: TCastleVulkanVRSManager;
-    function GetRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
-    function GetSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
-    function GetBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
-    function GetSVGFDenoiser: TCastleVulkanSVGFDenoiser;
     function GetShaderBindingTable: TCastleVulkanShaderBindingTable;
     function GetAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
-    function GetXPBDSimulator: TCastleVulkanXPBDSimulator;
-    function GetMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
-    function GetPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
-    function GetNeuralDenoiser: TCastleVulkanNeuralDenoiser;
-    function GetProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
-    function GetStreamCompactor: TCastleVulkanStreamCompactor;
-    function GetVoxelConeTracer: TCastleVulkanVoxelConeTracer;
     function GetMaterialBinner: TCastleVulkanMaterialBinner;
-    function GetPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
-    function GetHostImageCopyManager: TCastleVulkanHostImageCopyManager;
-    function GetGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
-    function GetDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
     function GetHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
     function GetAutoExposureHistogram: TCastleVulkanAutoExposureHistogram;
     function GetFramePacer: TCastleVulkanFramePacer;
-    function GetIndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher;
-    function GetBCnCompressor: TCastleVulkanBCnCompressor;
-    function GetPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
     function GetWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
     function GetBindlessIndirectBatch: TCastleVulkanBindlessIndirectBatch;
     function GetSwapchainSurfaceCount: Cardinal;
@@ -793,52 +731,26 @@
     property SSR: TCastleVulkanSSR read GetSSR;
     property VolumetricFog: TCastleVulkanVolumetricFog read GetVolumetricFog;
     property TAA: TCastleVulkanTAA read GetTAA;
-    property ReflectionProbeManager: TCastleVulkanReflectionProbeManager read GetReflectionProbeManager;
-    property DecalManager: TCastleVulkanDecalManager read GetDecalManager;
-    property ComputeParticles: TCastleVulkanComputeParticles read GetComputeParticles;
     property WeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT read GetWeightedBlendedOIT;
-    property ContactShadows: TCastleVulkanContactShadows read GetContactShadows;
-    property ComputeSkinner: TCastleVulkanComputeSkinner read GetComputeSkinner;
-    property TerrainCDLOD: TCastleVulkanTerrainCDLOD read GetTerrainCDLOD;
-    property AtmosphereRenderer: TCastleVulkanAtmosphereRenderer read GetAtmosphereRenderer;
-    property OceanSimulator: TCastleVulkanOceanSimulator read GetOceanSimulator;
-    property DDGIGrid: TCastleVulkanDDGIGrid read GetDDGIGrid;
     property MeshletCuller: TCastleVulkanMeshletCuller read GetMeshletCuller;
-    property VirtualShadowMap: TCastleVulkanVirtualShadowMap read GetVirtualShadowMap;
-    property LODSelector: TCastleVulkanLODSelector read GetLODSelector;
-    property TextureStreamer: TCastleVulkanTextureStreamer read GetTextureStreamer;
-    property ShadowCasterCuller: TCastleVulkanShadowCasterCuller read GetShadowCasterCuller;
-    property ClusterDAG: TCastleVulkanClusterDAG read GetClusterDAG;
-    property GlobalSDF: TCastleVulkanGlobalSDF read GetGlobalSDF;
-    property SurfaceCache: TCastleVulkanSurfaceCache read GetSurfaceCache;
-    property ReSTIR: TCastleVulkanReSTIR read GetReSTIR;
-    property TSRUpscaler: TCastleVulkanTSRUpscaler read GetTSRUpscaler;
-    property VRSManager: TCastleVulkanVRSManager read GetVRSManager;
-    property RuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture read GetRuntimeVirtualTexture;
-    property SparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas read GetSparseVolumeAtlas;
-    property BreadcrumbTracker: TCastleVulkanBreadcrumbTracker read GetBreadcrumbTracker;
-    property SVGFDenoiser: TCastleVulkanSVGFDenoiser read GetSVGFDenoiser;
     property ShaderBindingTable: TCastleVulkanShaderBindingTable read GetShaderBindingTable;
     property AccelerationStructureManager: TCastleVulkanAccelerationStructureManager read GetAccelerationStructureManager;
-    property XPBDSimulator: TCastleVulkanXPBDSimulator read GetXPBDSimulator;
-    property MultiviewStereoManager: TCastleVulkanMultiviewStereoManager read GetMultiviewStereoManager;
-    property PerInstanceCustomData: TCastleVulkanPerInstanceCustomData read GetPerInstanceCustomData;
-    property NeuralDenoiser: TCastleVulkanNeuralDenoiser read GetNeuralDenoiser;
-    property ProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations read GetProgrammableSampleLocations;
-    property StreamCompactor: TCastleVulkanStreamCompactor read GetStreamCompactor;
-    property VoxelConeTracer: TCastleVulkanVoxelConeTracer read GetVoxelConeTracer;
     property MaterialBinner: TCastleVulkanMaterialBinner read GetMaterialBinner;
-    property PerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT read GetPerPixelLinkedListOIT;
-    property HostImageCopyManager: TCastleVulkanHostImageCopyManager read GetHostImageCopyManager;
-    property GaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer read GetGaussianSplatRenderer;
-    property DescriptorBufferManager: TCastleVulkanDescriptorBufferManager read GetDescriptorBufferManager;
     property HiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator read GetHiZPyramidGenerator;
     property AutoExposureHistogram: TCastleVulkanAutoExposureHistogram read GetAutoExposureHistogram;
     property FramePacer: TCastleVulkanFramePacer read GetFramePacer;
-    property IndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher read GetIndirectComputeDispatcher;
-    property BCnCompressor: TCastleVulkanBCnCompressor read GetBCnCompressor;
-    property PipelineBinaryManager: TCastleVulkanPipelineBinaryManager read GetPipelineBinaryManager;
     property WorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager read GetWorkerCommandPoolManager;
+    { Optional hook for opt-in experimental subsystems (src/base_rendering/experimental/).
+      Returns 0 with zero overhead or unit coupling when experimental units are not linked. }
+    function ExecuteExperimentalViewportSubsystems(
+      const ACommandList: TVulkanRHICommandList;
+      const AViewWidth, AViewHeight: Cardinal;
+      const AGlobalIlluminationModeOrd, ATemporalAAModeOrd, AVariableRateShadingModeOrd: Cardinal): Cardinal;
+    function ExecuteExperimentalSceneSubsystems(
+      const ACommandList: TVulkanRHICommandList;
+      const AViewWidth, AViewHeight: Cardinal;
+      const AShadowMapSystemModeOrd, ATransparencyModeOrd: Cardinal): Cardinal;
+    property ExperimentalContext: TObject read FExperimentalContext write FExperimentalContext;
     property BindlessIndirectBatch: TCastleVulkanBindlessIndirectBatch read GetBindlessIndirectBatch;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
@@ -1099,6 +1011,10 @@ function LoadPipelineCacheBlobFromStream(const AStream: TStream;
 { Converts IEEE 754 binary16 (16-bit half-float) to 32-bit Single and vice versa. }
 function HalfFloatToFloat(const AHalf: Word): Single;
 function FloatToHalfFloat(const AValue: Single): Word;
+
+procedure RegisterVulkanExperimentalSubsystemCallbacks(
+  const AViewportCallback: TVulkanExecuteExperimentalViewportCallback;
+  const ASceneCallback: TVulkanExecuteExperimentalSceneCallback);
 
 {$endif read_interface}
 
@@ -2868,27 +2784,6 @@ begin
   Result := FTAA;
 end;
 
-function TVulkanRHIDevice.GetReflectionProbeManager: TCastleVulkanReflectionProbeManager;
-begin
-  if FReflectionProbeManager = nil then
-    FReflectionProbeManager := TCastleVulkanReflectionProbeManager.Create(Self);
-  Result := FReflectionProbeManager;
-end;
-
-function TVulkanRHIDevice.GetDecalManager: TCastleVulkanDecalManager;
-begin
-  if FDecalManager = nil then
-    FDecalManager := TCastleVulkanDecalManager.Create(Self);
-  Result := FDecalManager;
-end;
-
-function TVulkanRHIDevice.GetComputeParticles: TCastleVulkanComputeParticles;
-begin
-  if FComputeParticles = nil then
-    FComputeParticles := TCastleVulkanComputeParticles.Create(Self);
-  Result := FComputeParticles;
-end;
-
 function TVulkanRHIDevice.GetWeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT;
 begin
   if FWeightedBlendedOIT = nil then
@@ -2896,151 +2791,11 @@ begin
   Result := FWeightedBlendedOIT;
 end;
 
-function TVulkanRHIDevice.GetContactShadows: TCastleVulkanContactShadows;
-begin
-  if FContactShadows = nil then
-    FContactShadows := TCastleVulkanContactShadows.Create(Self);
-  Result := FContactShadows;
-end;
-
-function TVulkanRHIDevice.GetComputeSkinner: TCastleVulkanComputeSkinner;
-begin
-  if FComputeSkinner = nil then
-    FComputeSkinner := TCastleVulkanComputeSkinner.Create(Self);
-  Result := FComputeSkinner;
-end;
-
-function TVulkanRHIDevice.GetTerrainCDLOD: TCastleVulkanTerrainCDLOD;
-begin
-  if FTerrainCDLOD = nil then
-    FTerrainCDLOD := TCastleVulkanTerrainCDLOD.Create(Self);
-  Result := FTerrainCDLOD;
-end;
-
-function TVulkanRHIDevice.GetAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
-begin
-  if FAtmosphereRenderer = nil then
-    FAtmosphereRenderer := TCastleVulkanAtmosphereRenderer.Create(Self);
-  Result := FAtmosphereRenderer;
-end;
-
-function TVulkanRHIDevice.GetOceanSimulator: TCastleVulkanOceanSimulator;
-begin
-  if FOceanSimulator = nil then
-    FOceanSimulator := TCastleVulkanOceanSimulator.Create(Self);
-  Result := FOceanSimulator;
-end;
-
-function TVulkanRHIDevice.GetDDGIGrid: TCastleVulkanDDGIGrid;
-begin
-  if FDDGIGrid = nil then
-    FDDGIGrid := TCastleVulkanDDGIGrid.Create(Self);
-  Result := FDDGIGrid;
-end;
-
 function TVulkanRHIDevice.GetMeshletCuller: TCastleVulkanMeshletCuller;
 begin
   if FMeshletCuller = nil then
     FMeshletCuller := TCastleVulkanMeshletCuller.Create(Self);
   Result := FMeshletCuller;
-end;
-
-function TVulkanRHIDevice.GetVirtualShadowMap: TCastleVulkanVirtualShadowMap;
-begin
-  if FVirtualShadowMap = nil then
-    FVirtualShadowMap := TCastleVulkanVirtualShadowMap.Create(Self);
-  Result := FVirtualShadowMap;
-end;
-
-function TVulkanRHIDevice.GetLODSelector: TCastleVulkanLODSelector;
-begin
-  if FLODSelector = nil then
-    FLODSelector := TCastleVulkanLODSelector.Create(Self);
-  Result := FLODSelector;
-end;
-
-function TVulkanRHIDevice.GetTextureStreamer: TCastleVulkanTextureStreamer;
-begin
-  if FTextureStreamer = nil then
-    FTextureStreamer := TCastleVulkanTextureStreamer.Create(Self);
-  Result := FTextureStreamer;
-end;
-
-function TVulkanRHIDevice.GetShadowCasterCuller: TCastleVulkanShadowCasterCuller;
-begin
-  if FShadowCasterCuller = nil then
-    FShadowCasterCuller := TCastleVulkanShadowCasterCuller.Create(Self);
-  Result := FShadowCasterCuller;
-end;
-
-function TVulkanRHIDevice.GetClusterDAG: TCastleVulkanClusterDAG;
-begin
-  if FClusterDAG = nil then
-    FClusterDAG := TCastleVulkanClusterDAG.Create(Self);
-  Result := FClusterDAG;
-end;
-
-function TVulkanRHIDevice.GetGlobalSDF: TCastleVulkanGlobalSDF;
-begin
-  if FGlobalSDF = nil then
-    FGlobalSDF := TCastleVulkanGlobalSDF.Create(Self);
-  Result := FGlobalSDF;
-end;
-
-function TVulkanRHIDevice.GetSurfaceCache: TCastleVulkanSurfaceCache;
-begin
-  if FSurfaceCache = nil then
-    FSurfaceCache := TCastleVulkanSurfaceCache.Create(Self);
-  Result := FSurfaceCache;
-end;
-
-function TVulkanRHIDevice.GetReSTIR: TCastleVulkanReSTIR;
-begin
-  if FReSTIR = nil then
-    FReSTIR := TCastleVulkanReSTIR.Create(Self);
-  Result := FReSTIR;
-end;
-
-function TVulkanRHIDevice.GetTSRUpscaler: TCastleVulkanTSRUpscaler;
-begin
-  if FTSRUpscaler = nil then
-    FTSRUpscaler := TCastleVulkanTSRUpscaler.Create(Self);
-  Result := FTSRUpscaler;
-end;
-
-function TVulkanRHIDevice.GetVRSManager: TCastleVulkanVRSManager;
-begin
-  if FVRSManager = nil then
-    FVRSManager := TCastleVulkanVRSManager.Create(Self);
-  Result := FVRSManager;
-end;
-
-function TVulkanRHIDevice.GetRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
-begin
-  if FRuntimeVirtualTexture = nil then
-    FRuntimeVirtualTexture := TCastleVulkanRuntimeVirtualTexture.Create(Self);
-  Result := FRuntimeVirtualTexture;
-end;
-
-function TVulkanRHIDevice.GetSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
-begin
-  if FSparseVolumeAtlas = nil then
-    FSparseVolumeAtlas := TCastleVulkanSparseVolumeAtlas.Create(Self);
-  Result := FSparseVolumeAtlas;
-end;
-
-function TVulkanRHIDevice.GetBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
-begin
-  if FBreadcrumbTracker = nil then
-    FBreadcrumbTracker := TCastleVulkanBreadcrumbTracker.Create(Self);
-  Result := FBreadcrumbTracker;
-end;
-
-function TVulkanRHIDevice.GetSVGFDenoiser: TCastleVulkanSVGFDenoiser;
-begin
-  if FSVGFDenoiser = nil then
-    FSVGFDenoiser := TCastleVulkanSVGFDenoiser.Create(Self);
-  Result := FSVGFDenoiser;
 end;
 
 function TVulkanRHIDevice.GetShaderBindingTable: TCastleVulkanShaderBindingTable;
@@ -3057,88 +2812,11 @@ begin
   Result := FAccelerationStructureManager;
 end;
 
-function TVulkanRHIDevice.GetXPBDSimulator: TCastleVulkanXPBDSimulator;
-begin
-  if FXPBDSimulator = nil then
-    FXPBDSimulator := TCastleVulkanXPBDSimulator.Create(Self);
-  Result := FXPBDSimulator;
-end;
-
-function TVulkanRHIDevice.GetMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
-begin
-  if FMultiviewStereoManager = nil then
-    FMultiviewStereoManager := TCastleVulkanMultiviewStereoManager.Create(Self);
-  Result := FMultiviewStereoManager;
-end;
-
-function TVulkanRHIDevice.GetPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
-begin
-  if FPerInstanceCustomData = nil then
-    FPerInstanceCustomData := TCastleVulkanPerInstanceCustomData.Create(Self);
-  Result := FPerInstanceCustomData;
-end;
-
-function TVulkanRHIDevice.GetNeuralDenoiser: TCastleVulkanNeuralDenoiser;
-begin
-  if FNeuralDenoiser = nil then
-    FNeuralDenoiser := TCastleVulkanNeuralDenoiser.Create(Self);
-  Result := FNeuralDenoiser;
-end;
-
-function TVulkanRHIDevice.GetProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
-begin
-  if FProgrammableSampleLocations = nil then
-    FProgrammableSampleLocations := TCastleVulkanProgrammableSampleLocations.Create(Self);
-  Result := FProgrammableSampleLocations;
-end;
-
-function TVulkanRHIDevice.GetStreamCompactor: TCastleVulkanStreamCompactor;
-begin
-  if FStreamCompactor = nil then
-    FStreamCompactor := TCastleVulkanStreamCompactor.Create(Self);
-  Result := FStreamCompactor;
-end;
-
-function TVulkanRHIDevice.GetVoxelConeTracer: TCastleVulkanVoxelConeTracer;
-begin
-  if FVoxelConeTracer = nil then
-    FVoxelConeTracer := TCastleVulkanVoxelConeTracer.Create(Self);
-  Result := FVoxelConeTracer;
-end;
-
 function TVulkanRHIDevice.GetMaterialBinner: TCastleVulkanMaterialBinner;
 begin
   if FMaterialBinner = nil then
     FMaterialBinner := TCastleVulkanMaterialBinner.Create(Self);
   Result := FMaterialBinner;
-end;
-
-function TVulkanRHIDevice.GetPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
-begin
-  if FPerPixelLinkedListOIT = nil then
-    FPerPixelLinkedListOIT := TCastleVulkanPerPixelLinkedListOIT.Create(Self);
-  Result := FPerPixelLinkedListOIT;
-end;
-
-function TVulkanRHIDevice.GetHostImageCopyManager: TCastleVulkanHostImageCopyManager;
-begin
-  if FHostImageCopyManager = nil then
-    FHostImageCopyManager := TCastleVulkanHostImageCopyManager.Create(Self);
-  Result := FHostImageCopyManager;
-end;
-
-function TVulkanRHIDevice.GetGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
-begin
-  if FGaussianSplatRenderer = nil then
-    FGaussianSplatRenderer := TCastleVulkanGaussianSplatRenderer.Create(Self);
-  Result := FGaussianSplatRenderer;
-end;
-
-function TVulkanRHIDevice.GetDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
-begin
-  if FDescriptorBufferManager = nil then
-    FDescriptorBufferManager := TCastleVulkanDescriptorBufferManager.Create(Self);
-  Result := FDescriptorBufferManager;
 end;
 
 function TVulkanRHIDevice.GetHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
@@ -3162,27 +2840,6 @@ begin
   Result := FFramePacer;
 end;
 
-function TVulkanRHIDevice.GetIndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher;
-begin
-  if FIndirectComputeDispatcher = nil then
-    FIndirectComputeDispatcher := TCastleVulkanIndirectComputeDispatcher.Create(Self);
-  Result := FIndirectComputeDispatcher;
-end;
-
-function TVulkanRHIDevice.GetBCnCompressor: TCastleVulkanBCnCompressor;
-begin
-  if FBCnCompressor = nil then
-    FBCnCompressor := TCastleVulkanBCnCompressor.Create(Self);
-  Result := FBCnCompressor;
-end;
-
-function TVulkanRHIDevice.GetPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
-begin
-  if FPipelineBinaryManager = nil then
-    FPipelineBinaryManager := TCastleVulkanPipelineBinaryManager.Create(Self);
-  Result := FPipelineBinaryManager;
-end;
-
 function TVulkanRHIDevice.GetWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
 begin
   if FWorkerCommandPoolManager = nil then
@@ -3197,6 +2854,42 @@ begin
   Result := FBindlessIndirectBatch;
 end;
 
+var
+  GOnExecuteExperimentalViewportSubsystems: TVulkanExecuteExperimentalViewportCallback = nil;
+  GOnExecuteExperimentalSceneSubsystems: TVulkanExecuteExperimentalSceneCallback = nil;
+
+procedure RegisterVulkanExperimentalSubsystemCallbacks(
+  const AViewportCallback: TVulkanExecuteExperimentalViewportCallback;
+  const ASceneCallback: TVulkanExecuteExperimentalSceneCallback);
+begin
+  GOnExecuteExperimentalViewportSubsystems := AViewportCallback;
+  GOnExecuteExperimentalSceneSubsystems := ASceneCallback;
+end;
+
+function TVulkanRHIDevice.ExecuteExperimentalViewportSubsystems(
+  const ACommandList: TVulkanRHICommandList;
+  const AViewWidth, AViewHeight: Cardinal;
+  const AGlobalIlluminationModeOrd, ATemporalAAModeOrd, AVariableRateShadingModeOrd: Cardinal): Cardinal;
+begin
+  if Assigned(GOnExecuteExperimentalViewportSubsystems) then
+    Result := GOnExecuteExperimentalViewportSubsystems(Self, ACommandList,
+      AViewWidth, AViewHeight, AGlobalIlluminationModeOrd, ATemporalAAModeOrd, AVariableRateShadingModeOrd)
+  else
+    Result := 0;
+end;
+
+function TVulkanRHIDevice.ExecuteExperimentalSceneSubsystems(
+  const ACommandList: TVulkanRHICommandList;
+  const AViewWidth, AViewHeight: Cardinal;
+  const AShadowMapSystemModeOrd, ATransparencyModeOrd: Cardinal): Cardinal;
+begin
+  if Assigned(GOnExecuteExperimentalSceneSubsystems) then
+    Result := GOnExecuteExperimentalSceneSubsystems(Self, ACommandList,
+      AViewWidth, AViewHeight, AShadowMapSystemModeOrd, ATransparencyModeOrd)
+  else
+    Result := 0;
+end;
+
 function TVulkanRHIDevice.GetVendorName: String;
 begin
   Result := GetVulkanVendorName(FVendorKind);
@@ -3208,53 +2901,17 @@ var
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FExperimentalContext);
   FreeAndNil(FBindlessIndirectBatch);
   FreeAndNil(FWorkerCommandPoolManager);
-  FreeAndNil(FPipelineBinaryManager);
-  FreeAndNil(FBCnCompressor);
-  FreeAndNil(FIndirectComputeDispatcher);
   FreeAndNil(FFramePacer);
   FreeAndNil(FAutoExposureHistogram);
   FreeAndNil(FHiZPyramidGenerator);
-  FreeAndNil(FDescriptorBufferManager);
-  FreeAndNil(FGaussianSplatRenderer);
-  FreeAndNil(FHostImageCopyManager);
-  FreeAndNil(FPerPixelLinkedListOIT);
   FreeAndNil(FMaterialBinner);
-  FreeAndNil(FVoxelConeTracer);
-  FreeAndNil(FStreamCompactor);
-  FreeAndNil(FProgrammableSampleLocations);
-  FreeAndNil(FNeuralDenoiser);
-  FreeAndNil(FPerInstanceCustomData);
-  FreeAndNil(FMultiviewStereoManager);
-  FreeAndNil(FXPBDSimulator);
   FreeAndNil(FAccelerationStructureManager);
   FreeAndNil(FShaderBindingTable);
-  FreeAndNil(FSVGFDenoiser);
-  FreeAndNil(FBreadcrumbTracker);
-  FreeAndNil(FSparseVolumeAtlas);
-  FreeAndNil(FRuntimeVirtualTexture);
-  FreeAndNil(FVRSManager);
-  FreeAndNil(FTSRUpscaler);
-  FreeAndNil(FReSTIR);
-  FreeAndNil(FSurfaceCache);
-  FreeAndNil(FGlobalSDF);
-  FreeAndNil(FClusterDAG);
-  FreeAndNil(FShadowCasterCuller);
-  FreeAndNil(FTextureStreamer);
-  FreeAndNil(FLODSelector);
-  FreeAndNil(FVirtualShadowMap);
   FreeAndNil(FMeshletCuller);
-  FreeAndNil(FDDGIGrid);
-  FreeAndNil(FOceanSimulator);
-  FreeAndNil(FAtmosphereRenderer);
-  FreeAndNil(FTerrainCDLOD);
-  FreeAndNil(FComputeSkinner);
-  FreeAndNil(FContactShadows);
   FreeAndNil(FWeightedBlendedOIT);
-  FreeAndNil(FComputeParticles);
-  FreeAndNil(FDecalManager);
-  FreeAndNil(FReflectionProbeManager);
   FreeAndNil(FTAA);
   FreeAndNil(FVolumetricFog);
   FreeAndNil(FSSR);

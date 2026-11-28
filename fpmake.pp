@@ -381,6 +381,11 @@ begin
     P.Targets.AddUnit('castleinternalvulkanmemory.pas');
     P.Targets.AddUnit('castleinternalvulkanwsi.pas');
 
+    P.SourcePath.Add('src/base_rendering/experimental');
+    P.IncludePath.Add('src/base_rendering/experimental');
+    P.Targets.AddUnit('castleinternalrhi_vulkan_experimental.pas');
+    P.Targets.AddUnit('castleinternalshaderrhi_experimental.pas');
+
     P.SourcePath.Add('src/services');
     P.Targets.AddUnit('castleactivityrecognition.pas');
     P.Targets.AddUnit('castleads.pas');

@@ -99,7 +99,7 @@ flowchart TD
 
 ### PR #8 — `tests-ci-and-documentation` (`10` files)
 - **Files**: `tests/code/testcases/testcastlevulkanrhi.pas`, `tests/testcases.pas`, `tests/CastleEngineManifest.xml`, `tests/castle_tester_standalone.lpi`, `.github/workflows/vulkan-rhi.yml`, `doc/vulkan_renderer.md`, `doc/vulkan_release_notes.md`, `doc/vulkan_upstream_pr_guide.md`, `tools/internal/vulkan_upstream_slices/*`.
-- **What Reviewers Should Check**: `391` unit & OpenGL-vs-Vulkan visual regression tests (`0` `Heaptrc` leaks, `0` Khronos validation errors) and 3-OS GitHub Actions workflow (`Ubuntu Lavapipe`, `macOS MoltenVK`, `Windows x64`).
+- **What Reviewers Should Check**: `393` unit & OpenGL-vs-Vulkan visual regression tests (`0` `Heaptrc` leaks, `0` Khronos validation errors) and 3-OS GitHub Actions workflow (`Ubuntu Lavapipe`, `macOS MoltenVK`, `Windows x64`).
 
 ---
 

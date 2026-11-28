@@ -265,6 +265,8 @@ contains
   castleinternalvulkan in '..\..\src\base_rendering\vulkan\castleinternalvulkan.pas',
   castleinternalvulkanmemory in '..\..\src\base_rendering\vulkan\castleinternalvulkanmemory.pas',
   castleinternalvulkanwsi in '..\..\src\base_rendering\vulkan\castleinternalvulkanwsi.pas',
+  castleinternalshaderrhi_experimental in '..\..\src\base_rendering\experimental\castleinternalshaderrhi_experimental.pas',
+  castleinternalrhi_vulkan_experimental in '..\..\src\base_rendering\experimental\castleinternalrhi_vulkan_experimental.pas',
   castleinternalogg in '..\..\src\audio\ogg_vorbis\castleinternalogg.pas',
   castleinternalvorbiscodec in '..\..\src\audio\ogg_vorbis\castleinternalvorbiscodec.pas',
   castleinternalvorbisdecoder in '..\..\src\audio\ogg_vorbis\castleinternalvorbisdecoder.pas',

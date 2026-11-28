@@ -160,10 +160,11 @@ Existing CGE custom shaders continue to work without manual rewrites thanks to `
 | `CastleInternalVulkanMemory` | `src/base_rendering/vulkan/castleinternalvulkanmemory.pas` | Pooled `VkDeviceMemory` sub-allocator (`TCastleVulkanMemoryAllocator`), `VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT`, transient aliasing carriers, per-frame ring buffers, and 3-phase `DefragmentPools` GPU buffer relocation. |
 | `CastleInternalVulkanWSI` | `src/base_rendering/vulkan/castleinternalvulkanwsi.pas` | Win32, Xlib, Wayland, Android, Metal/MoltenVK, Switch, and Headless `VkSurfaceKHR` creation & extension discovery. |
 | `CastleInternalRHI` | `src/base_rendering/rhi/castleinternalrhi.pas` (`+ 3 .inc`) | Backend-agnostic device, buffer, texture, sampler, descriptor, graphics/compute PSO, query pool, `TRHIRenderGraph`, and `TRHIVisualRegressionSuite` abstractions. |
-| `CastleInternalShaderRHI` | `src/base_rendering/rhi/castleinternalshaderrhi.pas` (`+ 4 .inc`) | Vulkan GLSL `#version 450` generator, `TUserEffectShaderLayout`, PBR/IBL/next-gen BSDF & compute shader generators. |
+| `CastleInternalShaderRHI` | `src/base_rendering/rhi/castleinternalshaderrhi.pas` (`+ 3 .inc`) | Core Vulkan GLSL `#version 450` generator, `TUserEffectShaderLayout`, Cook-Torrance PBR/IBL, Clustered Forward+, HDR/GTAO/SSR/TAA/WBOIT, hardware ray-tracing & mesh-shader generators. |
 | `CastleInternalSPIRVReflection` | `src/base_rendering/vulkan/castleinternalspirvreflection.pas` | Pure Object Pascal SPIR-V binary header & instruction stream inspector (`InspectSPIRVBytecode`, `ValidateSPIRVDescriptorBindings`). |
 | `CastleInternalShaderCompiler` | `src/base_rendering/vulkan/castleinternalshadercompiler.pas` (`+ spirv/*.spv`) | Runtime `libshaderc` / `glslangValidator` compiler, `.spv` cache bundler, and 56 binary `.spv` fallback modules (`src/base_rendering/vulkan/spirv/*.spv` packed via `tools/internal/generate_vulkan_spirv/spv2pas.dpr` or loaded dynamically via `CASTLE_VULKAN_SPIRV_DIR`). |
 | `CastleInternalRHI_Vulkan` | `src/base_rendering/vulkan/castleinternalrhi_vulkan.pas` (`+ 11 .inc`) | Modular Vulkan 1.1–1.4 `TRHIDevice` implementation (`resources`, `commandlist`, `managers`, `hdr_shadows`, `lighting_post`, `raytracing_gi`, `gpu_driven`, `swapchain_lifecycle`, `device_init`, `device_frames`). |
+| `CastleInternalShaderRHI_Experimental` & `CastleInternalRHI_Vulkan_Experimental` | `src/base_rendering/experimental/` (`2 .pas + 6 .inc`) | Strictly opt-in UE5/RTX research & experimental subsystems (Lumen SDF/SurfaceCache, Nanite Cluster DAG, VSM, ReSTIR, TSR, VRS, SVGF, Neural Denoiser, XPBD, 3DGS, and 196 research shader/BSDF functions; zero core engine units depend on them). |
 | `CastleInternalBatch2DRHI` | `src/base_rendering/rhi/castleinternalbatch2drhi.pas` | Streaming 2D quad/UI/font batch renderer (`TCastleBatch2DRenderer`). |
 | `CastleInternalRHI_OpenGL` | `src/base_rendering/opengl/castleinternalrhi_opengl.pas` (`+ 3 .inc`) | Modular OpenGL 3.3–4.6 / GLES 3.0–3.2 `TRHIDevice` (`translator`, `resources`, `commands_device`) with compute, SSBO, storage-image, indirect-count multi-draw, query pool, and `TRHIRenderGraph` parity. |
 | `CastleInternalRenderDoc` | `src/base_rendering/rhi/castleinternalrenderdoc.pas` | In-application RenderDoc API frame capture trigger. |
@@ -202,7 +203,7 @@ CGE uses bottom-up 2D/viewport rectangles and right-handed Y-up 3D clip coordina
 
 ### 7.2 Running the `TTestCastleVulkanRHI` Suite
 ```bash
-# Compile and run all 392 TTestCastleVulkanRHI unit & visual-parity tests via castle-engine:
+# Compile and run all 393 TTestCastleVulkanRHI unit & visual-parity tests via castle-engine:
 CASTLE_VULKAN_VALIDATION=1 ./tools/build-tool/castle-engine --project ./tests/ compile --mode=debug
 CASTLE_VULKAN_VALIDATION=1 ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI*
 ```

@@ -387,11 +387,9 @@ if [ "$DO_VERIFY" -eq 1 ]; then
     TMP_MAN="$(mktemp)"
     trap 'rm -f "$TMP_DIFF" "$TMP_MAN"' EXIT
 
-    # Combine committed changes since BASE_COMMIT plus any staged/unstaged/untracked manifest files
+    # Combine working-tree diff since BASE_COMMIT plus any untracked files
     {
-      git diff --name-only "${BASE_COMMIT}..HEAD"
-      git diff --name-only
-      git diff --cached --name-only
+      git diff --name-only "${BASE_COMMIT}"
       git ls-files --others --exclude-standard
     } | awk 'NF > 0' | LC_ALL=C sort -u > "$TMP_DIFF"
 

@@ -3817,67 +3817,18 @@ begin
       Inc(Result);
     end;
 
-    { 4. Global Illumination Mode (DDGI / VXGI / Lumen Global SDF + Surface Cache / ReSTIR GI) }
-    case FGlobalIlluminationMode of
-      giDDGIProbes:
-        begin
-          VkDev.DDGIGrid.EnsureProbeAtlases;
-          VkDev.DDGIGrid.DispatchDDGIUpdate(VkCmd);
-          Inc(Result);
-        end;
-      giVoxelConeTracing:
-        begin
-          VkDev.VoxelConeTracer.DispatchVoxelConeTrace(VkCmd, ViewW, ViewH);
-          Inc(Result);
-        end;
-      giLumenSDFAndSurfaceCache:
-        begin
-          VkDev.GlobalSDF.DispatchGlobalSDFBuild(VkCmd, 32);
-          VkDev.SurfaceCache.EnsureAtlasTextures;
-          Inc(Result);
-        end;
-      giReSTIRGI:
-        begin
-          VkDev.ReSTIR.EnsureReservoirBuffers(ViewW, ViewH);
-          VkDev.ReSTIR.DispatchSpatioTemporalResampling(VkCmd, ViewW, ViewH);
-          Inc(Result);
-        end;
-      else ;
+    { 4. Temporal Anti-Aliasing (Standard Halton TAA in core RHI) }
+    if FTemporalAntiAliasingMode = taaStandardTAA then
+    begin
+      VkDev.HDRPostProcessor.EnsureHDRTargets(ViewW, ViewH);
+      VkDev.TAA.EnsureTAATargets(ViewW, ViewH);
+      VkDev.TAA.DispatchTAAResolve(VkCmd, VkDev.HDRPostProcessor.HDRSceneTexture, VkDev.FrameIndex);
+      Inc(Result);
     end;
 
-    { 5. Temporal Anti-Aliasing (TAA) or Temporal Super Resolution (TSR) }
-    case FTemporalAntiAliasingMode of
-      taaStandardTAA:
-        begin
-          VkDev.HDRPostProcessor.EnsureHDRTargets(ViewW, ViewH);
-          VkDev.TAA.EnsureTAATargets(ViewW, ViewH);
-          VkDev.TAA.DispatchTAAResolve(VkCmd, VkDev.HDRPostProcessor.HDRSceneTexture, VkDev.FrameIndex);
-          Inc(Result);
-        end;
-      taaTSRUpscaler:
-        begin
-          VkDev.TSRUpscaler.EnsureUpscaleTargets(ViewW, ViewH);
-          VkDev.TSRUpscaler.DispatchTSRUpscale(VkCmd, ViewW, ViewH);
-          Inc(Result);
-        end;
-      else ;
-    end;
-
-    { 6. Variable Rate Shading (Contrast-Adaptive Tile VRS or Foveated Stereo Multiview) }
-    case FVariableRateShadingMode of
-      vrsContrastAdaptive:
-        begin
-          VkDev.VRSManager.EnsureShadingRateImage(ViewW, ViewH);
-          VkDev.VRSManager.DispatchVRSImageGeneration(VkCmd, ViewW, ViewH);
-          Inc(Result);
-        end;
-      vrsFoveatedStereo:
-        begin
-          VkDev.MultiviewStereoManager.EnsureStereoTargets(ViewW div 2, ViewH);
-          Inc(Result);
-        end;
-      else ;
-    end;
+    { 5 & 6. Opt-In Experimental Subsystems (DDGI/VXGI/Lumen/ReSTIR GI, TSR, VRS/Foveated Stereo) }
+    Inc(Result, VkDev.ExecuteExperimentalViewportSubsystems(VkCmd, ViewW, ViewH,
+      Ord(FGlobalIlluminationMode), Ord(FTemporalAntiAliasingMode), Ord(FVariableRateShadingMode)));
 
     { 7. GPU 64-Bin Luminance Histogram Auto-Exposure }
     if FAutoExposureEnabled then
@@ -3917,7 +3868,7 @@ var
   VkDev: TVulkanRHIDevice;
   VkCmd: TVulkanRHICommandList;
   OwnedCmd: Boolean;
-  ViewW, ViewH, TileX, TileY: Cardinal;
+  ViewW, ViewH: Cardinal;
   CamPos: TVector3;
 begin
   Result := 0;
@@ -3957,29 +3908,16 @@ begin
       Inc(Result);
     end;
 
-    { 2. Virtual Shadow Maps (VSM) Page Table & Physical Tile Pool }
-    if ARenderOptions.ShadowMapSystemMode = smsVirtualShadowMaps then
+    { 2. Order-Independent Transparency (Core Weighted Blended OIT) }
+    if ARenderOptions.TransparencyMode = tmWeightedBlendedOIT then
     begin
-      VkDev.VirtualShadowMap.EnsureResources;
-      VkDev.VirtualShadowMap.RequestAndAllocateVirtualPage(0, 0, TileX, TileY);
-      VkDev.VirtualShadowMap.UploadPageTable;
+      VkDev.WeightedBlendedOIT.EnsureOITTargets(ViewW, ViewH);
       Inc(Result);
     end;
 
-    { 3. Order-Independent Transparency (WBOIT / PPLL OIT) }
-    case ARenderOptions.TransparencyMode of
-      tmWeightedBlendedOIT:
-        begin
-          VkDev.WeightedBlendedOIT.EnsureOITTargets(ViewW, ViewH);
-          Inc(Result);
-        end;
-      tmPerPixelLinkedListOIT:
-        begin
-          VkDev.PerPixelLinkedListOIT.DispatchPPLLResolve(VkCmd, ViewW, ViewH);
-          Inc(Result);
-        end;
-      else ;
-    end;
+    { 3. Opt-In Experimental Scene Subsystems (Virtual Shadow Maps, Per-Pixel Linked List OIT) }
+    Inc(Result, VkDev.ExecuteExperimentalSceneSubsystems(VkCmd, ViewW, ViewH,
+      Ord(ARenderOptions.ShadowMapSystemMode), Ord(ARenderOptions.TransparencyMode)));
   finally
     if OwnedCmd then
     begin

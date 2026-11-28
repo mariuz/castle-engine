@@ -32,7 +32,8 @@ uses
   CastleTransform, CastleUIControls, CastleControls, CastleComponentSerialize,
   CastleCameras, CastleWindow, CastleParameters, CastleRenderContext, X3DNodes,
   CastleInternalRHI, CastleInternalShaderRHI, CastleInternalShaderCompiler,
-  CastleInternalVulkan, CastleInternalVulkanWSI, CastleInternalRHI_Vulkan;
+  CastleInternalVulkan, CastleInternalVulkanWSI, CastleInternalRHI_Vulkan,
+  CastleInternalShaderRHI_Experimental, CastleInternalRHI_Vulkan_Experimental;
 
 type
   TVulkanDemoController = class(TCastleUserInterface)

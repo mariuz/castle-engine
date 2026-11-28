@@ -35,7 +35,6 @@ implementation
 {$define read_implementation}
 {$I castleinternalshaderrhi_core_upgrade.inc}
 {$I castleinternalshaderrhi_lighting_post.inc}
-{$I castleinternalshaderrhi_nextgen.inc}
 {$undef read_implementation}
 
 end.

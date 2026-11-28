@@ -1,4 +1,4 @@
-{%MainUnit castleinternalshaderrhi.pas}
+{%MainUnit castleinternalshaderrhi_experimental.pas}
 {
   Copyright 2026-2026 Michalis Kamburelis and Castle Game Engine developers.
 
@@ -15,7 +15,8 @@
 }
 
 {$ifdef read_implementation}
-function TCastleShaderGeneratorRHI.GenerateVisibilityBufferFunctions: String;
+
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateVisibilityBufferFunctions: String;
 begin
   Result :=
     '// --- 64-Bit Visibility Buffer & Perspective-Correct Barycentrics (Phase 27.1) ---' + NL +
@@ -46,7 +47,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.PackVisibilityBufferPayload(
+class function TCastleShaderGeneratorRHIExperimentalHelper.PackVisibilityBufferPayload(
   const ADepth01: Single;
   const AInstanceID, APrimitiveID: Cardinal): QWord;
 var
@@ -57,7 +58,7 @@ begin
   Result := (QWord(Depth32) shl 32) or QWord(Low32);
 end;
 
-class procedure TCastleShaderGeneratorRHI.UnpackVisibilityBufferPayload(
+class procedure TCastleShaderGeneratorRHIExperimentalHelper.UnpackVisibilityBufferPayload(
   const APayload: QWord;
   out AOutDepth01: Single;
   out AOutInstanceID, AOutPrimitiveID: Cardinal);
@@ -71,7 +72,7 @@ begin
   AOutPrimitiveID := Low32 and $FFF;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluatePerspectiveBarycentrics2D(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluatePerspectiveBarycentrics2D(
   const APixelNDC, AV0NDC, AV1NDC, AV2NDC: TVector2;
   const AInvW0, AInvW1, AInvW2: Single): TVector3;
 var
@@ -97,7 +98,7 @@ begin
   Result := Vector3(P0 / SumP, P1 / SumP, P2 / SumP);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateClusterDAGCutComputeShader(
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateClusterDAGCutComputeShader(
   const AWorkgroupSizeX: Cardinal): String;
 begin
   Result :=
@@ -155,7 +156,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateClusterProjectedErrorPixels(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateClusterProjectedErrorPixels(
   const ASphereCenter, ACameraPos: TVector3;
   const ASphereRadius, AWorldError, ACotHalfFovY, AViewportHeight: Single): Single;
 var
@@ -166,14 +167,14 @@ begin
   Result := (Max(0.0, AWorldError) * ProjScale) / Dist;
 end;
 
-class function TCastleShaderGeneratorRHI.IsClusterDAGCutNode(
+class function TCastleShaderGeneratorRHIExperimentalHelper.IsClusterDAGCutNode(
   const ASelfProjectedErrorPx, AParentProjectedErrorPx, APixelErrorThreshold: Single): Boolean;
 begin
   Result := (ASelfProjectedErrorPx <= APixelErrorThreshold) and
             (AParentProjectedErrorPx > APixelErrorThreshold);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSoftwareMicroRasterComputeShader(
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSoftwareMicroRasterComputeShader(
   const AWorkgroupSizeX: Cardinal): String;
 begin
   Result :=
@@ -197,13 +198,13 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateEdgeFunction2D(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateEdgeFunction2D(
   const AA, AB, AP: TVector2): Single;
 begin
   Result := (AB.X - AA.X) * (AP.Y - AA.Y) - (AB.Y - AA.Y) * (AP.X - AA.X);
 end;
 
-class function TCastleShaderGeneratorRHI.IsMicroTriangleCandidateForSoftwareRaster(
+class function TCastleShaderGeneratorRHIExperimentalHelper.IsMicroTriangleCandidateForSoftwareRaster(
   const AV0Screen, AV1Screen, AV2Screen: TVector2;
   const AMaxBoxPixels: Single): Boolean;
 var
@@ -219,7 +220,7 @@ begin
   Result := ((MaxX - MinX) <= AMaxBoxPixels) and ((MaxY - MinY) <= AMaxBoxPixels);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateGlobalSDFTraceFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateGlobalSDFTraceFunctions: String;
 begin
   Result :=
     '// Phase 28.1: Lumen-Style Global Signed Distance Field (SDF) Sphere Tracing & Cone Visibility' + NL +
@@ -244,7 +245,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSDFBoxDistance(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSDFBoxDistance(
   const ASamplePos, ABoxCenter, ABoxHalfExtents: TVector3): Single;
 var
   QX, QY, QZ, OutX, OutY, OutZ, InsideDist: Single;
@@ -259,7 +260,7 @@ begin
   Result := Sqrt(OutX * OutX + OutY * OutY + OutZ * OutZ) + InsideDist;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSDFSmoothUnion(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSDFSmoothUnion(
   const AD1, AD2, AK: Single): Single;
 var
   H, SafeK: Single;
@@ -269,7 +270,7 @@ begin
   Result := AD2 * (1.0 - H) + AD1 * H - SafeK * H * (1.0 - H);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSDFSoftShadowCone(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSDFSoftShadowCone(
   const ACurrentVisibility, ASDFDistance, ARayDistance, AConeTanHalfAngle: Single): Single;
 var
   ConeRadius, StepVis: Single;
@@ -279,7 +280,7 @@ begin
   Result := Min(EnsureRange(ACurrentVisibility, 0.0, 1.0), StepVis);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSurfaceCacheCardFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSurfaceCacheCardFunctions: String;
 begin
   Result :=
     '// Phase 28.2: Lumen-Style 6-Axis Surface Cache Card Projection' + NL +
@@ -301,7 +302,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.SelectDominantSurfaceCardAxis(
+class function TCastleShaderGeneratorRHIExperimentalHelper.SelectDominantSurfaceCardAxis(
   const AWorldNormal: TVector3): Cardinal;
 var
   AX, AY, AZ: Single;
@@ -320,7 +321,7 @@ begin
   if AWorldNormal.Z >= 0.0 then Result := 4 else Result := 5;
 end;
 
-class function TCastleShaderGeneratorRHI.ComputeSurfaceCacheAtlasUV(
+class function TCastleShaderGeneratorRHIExperimentalHelper.ComputeSurfaceCacheAtlasUV(
   const ALocalHitPos, ABoxHalfExtents: TVector3;
   const ACardAxis: Cardinal;
   const ACardAtlasOffsetUV, ACardAtlasScaleUV: TVector2): TVector2;
@@ -343,7 +344,7 @@ begin
     ACardAtlasOffsetUV.Y + FaceUV.Y * ACardAtlasScaleUV.Y);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateScreenRadianceCacheFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateScreenRadianceCacheFunctions: String;
 begin
   Result :=
     '// Phase 28.3: Screen-Space Radiance Cache Probe Interpolation & Importance Sampling' + NL +
@@ -364,7 +365,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateScreenProbeBilateralWeight(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateScreenProbeBilateralWeight(
   const APixelWorldPos, APixelNormal, AProbeWorldPos, AProbeNormal: TVector3;
   const APlaneDistSensitivity: Single): Single;
 var
@@ -377,7 +378,7 @@ begin
   Result := NormalWeight * DepthWeight;
 end;
 
-class function TCastleShaderGeneratorRHI.CosineWeightedHemisphereSample(
+class function TCastleShaderGeneratorRHIExperimentalHelper.CosineWeightedHemisphereSample(
   const AXi: TVector2;
   out AOutPdf: Single): TVector3;
 var
@@ -391,7 +392,7 @@ begin
   Result := Vector3(Cos(Phi) * SinTheta, Sin(Phi) * SinTheta, CosTheta);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateReSTIRReservoirFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateReSTIRReservoirFunctions: String;
 begin
   Result :=
     '// Phase 29: ReSTIR DI/GI Spatio-Temporal Reservoir Resampling (UE5 MegaLights Architecture)' + NL +
@@ -454,7 +455,7 @@ begin
     '}' + NL;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateReSTIRSpatialTemporalComputeShader(
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateReSTIRSpatialTemporalComputeShader(
   const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
 begin
   Result :=
@@ -475,13 +476,13 @@ begin
     '}' + NL;
 end;
 
-class procedure TCastleShaderGeneratorRHI.InitReSTIRReservoir(out AReservoir: TCastleReSTIRReservoir);
+class procedure TCastleShaderGeneratorRHIExperimentalHelper.InitReSTIRReservoir(out AReservoir: TCastleReSTIRReservoir);
 begin
   FillChar(AReservoir, SizeOf(TCastleReSTIRReservoir), 0);
   AReservoir.SelectedLightID := -1;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateLuminanceTargetPDF(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateLuminanceTargetPDF(
   const AUnshadowedContribution: TVector3): Single;
 begin
   Result := Max(0.0,
@@ -490,7 +491,7 @@ begin
     Max(0.0, AUnshadowedContribution.Z) * 0.0722);
 end;
 
-class function TCastleShaderGeneratorRHI.UpdateReservoirSample(
+class function TCastleShaderGeneratorRHIExperimentalHelper.UpdateReservoirSample(
   var AReservoir: TCastleReSTIRReservoir;
   const ACandidateLightID: Integer;
   const ATargetPDF, ASourcePDF, ARandom01: Single): Boolean;
@@ -509,7 +510,7 @@ begin
     Result := False;
 end;
 
-class procedure TCastleShaderGeneratorRHI.FinalizeReservoirWeight(
+class procedure TCastleShaderGeneratorRHIExperimentalHelper.FinalizeReservoirWeight(
   var AReservoir: TCastleReSTIRReservoir;
   const AMaxHistoryM: Cardinal);
 var
@@ -523,7 +524,7 @@ begin
     AReservoir.ContributionWeightW := 0.0;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateReSTIRNeighborSimilarity(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateReSTIRNeighborSimilarity(
   const ACenterDepth: Single;
   const ACenterNormal: TVector3;
   const ANeighborDepth: Single;
@@ -538,7 +539,7 @@ begin
   Result := (RelDepth <= AMaxRelativeDepthDiff) and (NDot >= AMinNormalCos);
 end;
 
-class function TCastleShaderGeneratorRHI.CombineReservoirs(
+class function TCastleShaderGeneratorRHIExperimentalHelper.CombineReservoirs(
   var ADst: TCastleReSTIRReservoir;
   const ANeighbor: TCastleReSTIRReservoir;
   const ANeighborTargetPDFAtCenter: Single;
@@ -564,7 +565,7 @@ begin
   FinalizeReservoirWeight(ADst, Max(Cardinal(1), AMaxHistoryM * 2));
 end;
 
-function TCastleShaderGeneratorRHI.GenerateTSRUpscaleComputeShader(
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateTSRUpscaleComputeShader(
   const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
 begin
   Result :=
@@ -604,7 +605,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateLanczos2Weight(const AX: Single): Single;
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateLanczos2Weight(const AX: Single): Single;
 var
   AXAbs, PX: Double;
 begin
@@ -617,7 +618,7 @@ begin
   Result := (Sin(PX) * Sin(0.5 * PX)) / (0.5 * PX * PX);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateBlackmanHarrisWeight(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateBlackmanHarrisWeight(
   const AX: Single;
   const ARadius: Single): Single;
 var
@@ -632,7 +633,7 @@ begin
   Result := Max(0.0, 0.35875 - 0.48829 * Cos(P) + 0.14128 * Cos(2.0 * P) - 0.01168 * Cos(3.0 * P));
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateTSRDisocclusionConfidence(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateTSRDisocclusionConfidence(
   const ACurrentLinearDepth, AReprojectedLinearDepth: Single;
   const AMaxRelativeDepthError: Single): Single;
 var
@@ -642,7 +643,7 @@ begin
   Result := EnsureRange(1.0 - RelErr / Max(1e-4, AMaxRelativeDepthError), 0.0, 1.0);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateTSRThinGeometryBlend(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateTSRThinGeometryBlend(
   const ABaseCurrentFrameBlend, ADepthCrossLaplacian, ALumaContrast: Single): Single;
 var
   BaseBlend, ThinFactor: Single;
@@ -652,7 +653,7 @@ begin
   Result := BaseBlend + (0.85 - BaseBlend) * ThinFactor;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSubstrateLayeredMaterialFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSubstrateLayeredMaterialFunctions: String;
 begin
   Result :=
     '// Phase 31.1: UE5 Substrate / Strata Energy-Conserving Layered Material Slabs' + NL +
@@ -674,7 +675,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateDirectionalSlabAlbedo(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateDirectionalSlabAlbedo(
   const AF0, ANdotV, ARoughness: Single): Single;
 var
   Mu, R, F90: Single;
@@ -685,7 +686,7 @@ begin
   Result := EnsureRange(AF0 + (F90 - AF0) * Math.Power(1.0 - Mu, 5.0), 0.0, 1.0);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateLayeredSlabComposition(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateLayeredSlabComposition(
   const ATopLobeRadiance, ABottomLobeRadiance, AExtinctionSigmaT: TVector3;
   const ATopF0, ATopRoughness, ANdotV, ANdotL, ASlabThickness: Single): TVector3;
 var
@@ -706,7 +707,7 @@ begin
     Max(0.0, ATopLobeRadiance.Z) + EnergyTransmit * MediumT.Z * Max(0.0, ABottomLobeRadiance.Z));
 end;
 
-function TCastleShaderGeneratorRHI.GenerateHairMarschnerBSDF: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateHairMarschnerBSDF: String;
 begin
   Result :=
     '// Phase 31.2: Marschner / Chiang Dual-Specular Hair & Fur Fiber BSDF' + NL +
@@ -734,7 +735,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateMarschnerLongitudinalM(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateMarschnerLongitudinalM(
   const ASinThetaI, ASinThetaO, ACuticleShiftRad, ALongitudinalRoughnessBeta: Single): Single;
 var
   ThetaI, ThetaO, ThetaH, Beta: Double;
@@ -746,7 +747,7 @@ begin
   Result := (0.3989422804014327 / Beta) * Exp(-0.5 * (ThetaH * ThetaH) / (Beta * Beta));
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateHairDualSpecularBSDF(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateHairDualSpecularBSDF(
   const AHairAbsorptionSigmaA: TVector3;
   const ASinThetaI, ASinThetaO, ACosPhiD, ACuticleTiltRad, APrimaryRoughnessBeta: Single): TVector3;
 var
@@ -775,7 +776,7 @@ begin
     SpecR + TransTT.Z * (MTT * NTT) + TransTRT.Z * (MTRT * NTRT));
 end;
 
-function TCastleShaderGeneratorRHI.GenerateStochasticGlintFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateStochasticGlintFunctions: String;
 begin
   Result :=
     '// Phase 31.3: Stochastic Discrete Microfacet Glints & Sparkles' + NL +
@@ -791,7 +792,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateStochasticGlintNDF(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateStochasticGlintNDF(
   const ANdotH, AMacroRoughness, AFlakeAlignment01, AGlintDensity, AGlintSharpness: Single): Single;
 var
   A, A2, NH, Denom, DMacro, GlintSpike: Single;
@@ -805,38 +806,7 @@ begin
   Result := DMacro * (1.0 + GlintSpike);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateMeshShaderStageFunctions(
-  const AMaxVertices, AMaxPrimitives, AWorkgroupSizeX: Cardinal): String;
-begin
-  Result :=
-    '#version 450' + NL +
-    '#extension GL_EXT_mesh_shader : require' + NL +
-    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [Max(1, AWorkgroupSizeX)]) + NL +
-    Format('layout(triangles, max_vertices = %d, max_primitives = %d) out;',
-      [Max(3, AMaxVertices), Max(1, AMaxPrimitives)]) + NL +
-    NL +
-    'void EmitMeshletOutputCounts(uint vertexCount, uint primitiveCount) {' + NL +
-    '  SetMeshOutputsEXT(vertexCount, primitiveCount);' + NL +
-    '}' + NL +
-    NL +
-    'void main() {' + NL +
-    '  EmitMeshletOutputCounts(0u, 0u);' + NL +
-    '}' + NL;
-end;
-
-class function TCastleShaderGeneratorRHI.ComputeMeshletTaskGroupCount(
-  const ATotalMeshletCount: Cardinal;
-  const AMeshletsPerTaskGroup: Cardinal): Cardinal;
-var
-  GroupSize: Cardinal;
-begin
-  if ATotalMeshletCount = 0 then
-    Exit(0);
-  GroupSize := Max(Cardinal(1), AMeshletsPerTaskGroup);
-  Result := (ATotalMeshletCount + GroupSize - 1) div GroupSize;
-end;
-
-function TCastleShaderGeneratorRHI.GenerateVRSContrastComputeShader(
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateVRSContrastComputeShader(
   const ATileSize: Cardinal): String;
 begin
   Result :=
@@ -860,7 +830,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.SelectOptimalShadingRateTile(
+class function TCastleShaderGeneratorRHIExperimentalHelper.SelectOptimalShadingRateTile(
   const ALumaContrastX, ALumaContrastY, AVelocityPixels: Single;
   const AHighContrastThreshold: Single;
   const ALowContrastThreshold: Single): Cardinal;
@@ -881,7 +851,7 @@ begin
   Result := 5; // 2x2 default mid-contrast rate
 end;
 
-function TCastleShaderGeneratorRHI.GenerateRVTLookupFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateRVTLookupFunctions: String;
 begin
   Result :=
     '// Phase 32.3: Runtime Virtual Texturing (RVT) Page Table & Physical Tile Cache Lookup' + NL +
@@ -894,7 +864,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.TranslateRVTPageToPhysicalUV(
+class function TCastleShaderGeneratorRHIExperimentalHelper.TranslateRVTPageToPhysicalUV(
   const AInPageUV: TVector2;
   const APhysicalTileX, APhysicalTileY, APhysicalTilesPerRow: Cardinal;
   const ABorderTexelFraction: Single): TVector2;
@@ -910,7 +880,7 @@ begin
     (Single(APhysicalTileY) + PaddedV) * InvTiles);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSingleLayerWaterFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSingleLayerWaterFunctions: String;
 begin
   Result :=
     '// Phase 33.1: Physically Based Single-Layer Water (Beer-Lambert Absorption, Snell Refraction & Caustics)' + NL +
@@ -938,7 +908,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateWaterBeerLambertAbsorption(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateWaterBeerLambertAbsorption(
   const AAbsorptionCoeffRGB: TVector3;
   const AOpticalDepthMeters: Single): TVector3;
 var
@@ -951,7 +921,7 @@ begin
     Exp(-Max(0.0, AAbsorptionCoeffRGB.Z) * D));
 end;
 
-class function TCastleShaderGeneratorRHI.ComputeWaterRefractionUVOffset(
+class function TCastleShaderGeneratorRHIExperimentalHelper.ComputeWaterRefractionUVOffset(
   const AViewSpaceNormal: TVector3;
   const AWaterDepthMeters, AIORRatio, ARefractionStrength: Single): TVector2;
 var
@@ -963,7 +933,7 @@ begin
   Result := Vector2(AViewSpaceNormal.X * Scale, AViewSpaceNormal.Y * Scale);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateWaterCausticsPattern(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateWaterCausticsPattern(
   const AWorldXZ: TVector2;
   const ATimeSeconds, AWaterDepthMeters: Single): Single;
 var
@@ -980,7 +950,7 @@ begin
   Result := Focus * DepthEnvelope;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSparseVolumeBlackbodyFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSparseVolumeBlackbodyFunctions: String;
 begin
   Result :=
     '// Phase 33.2: Sparse Brick-Atlas Heterogeneous Volumes & Planckian Blackbody Emission' + NL +
@@ -994,7 +964,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateBlackbodyEmissionRGB(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateBlackbodyEmissionRGB(
   const ATemperatureKelvin: Single;
   const AIntensity: Single): TVector3;
 var
@@ -1010,7 +980,7 @@ begin
   Result := Vector3(R * SafeIntensity, G * SafeIntensity, B * SafeIntensity);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSVGFVarianceMomentsFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSVGFVarianceMomentsFunctions: String;
 begin
   Result :=
     '// Phase 34.1: Spatio-Temporal Variance-Guided Filtering (SVGF) Luminance Moments & Variance' + NL +
@@ -1024,7 +994,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateLuminanceMoments(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateLuminanceMoments(
   const ARadianceRGB: TVector3): TVector2;
 var
   Luma: Single;
@@ -1035,13 +1005,13 @@ begin
   Result := Vector2(Luma, Luma * Luma);
 end;
 
-class function TCastleShaderGeneratorRHI.ComputeTemporalVariance(
+class function TCastleShaderGeneratorRHIExperimentalHelper.ComputeTemporalVariance(
   const AMoments: TVector2): Single;
 begin
   Result := Max(0.0, AMoments.Y - Sqr(AMoments.X));
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSVGFAttrousWaveletFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSVGFAttrousWaveletFunctions: String;
 begin
   Result :=
     '// Phase 34.2 & 34.3: SVGF Edge-Stopping A-Trous Wavelet Filter & Specular Hit-Distance Contact Hardening' + NL +
@@ -1065,7 +1035,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSVGFEdgeStoppingWeight(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSVGFEdgeStoppingWeight(
   const ACenterNormal, ASampleNormal: TVector3;
   const ACenterDepth, ASampleDepth, ADepthGradientDotOffset: Single;
   const ACenterLuma, ASampleLuma, AVariance: Single;
@@ -1084,7 +1054,7 @@ begin
   Result := EnsureRange(WNormal * WDepth * WLuma, 0.0, 1.0);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateHitDistanceBlurFactor(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateHitDistanceBlurFactor(
   const ARayHitDistance, ACameraDistance, ARoughness: Single): Single;
 var
   DHit, DCam, ContactRatio: Single;
@@ -1095,52 +1065,7 @@ begin
   Result := EnsureRange(ContactRatio * EnsureRange(ARoughness, 0.0, 1.0), 0.0, 1.0);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateRayTracingPipelineStages: String;
-begin
-  Result :=
-    '#version 460' + NL +
-    '#extension GL_EXT_ray_tracing : require' + NL +
-    NL +
-    '// Phase 35.1: Hardware Ray Tracing Pipeline (VK_KHR_ray_tracing_pipeline)' + NL +
-    'struct CastleRayPayload {' + NL +
-    '  vec3 radiance;' + NL +
-    '  float hitT;' + NL +
-    '};' + NL +
-    NL +
-    'vec3 InterpolateRayHitNormal(vec3 n0, vec3 n1, vec3 n2, vec2 hitBaryUV) {' + NL +
-    '  float w0 = 1.0 - hitBaryUV.x - hitBaryUV.y;' + NL +
-    '  return normalize(n0 * w0 + n1 * hitBaryUV.x + n2 * hitBaryUV.y);' + NL +
-    '}' + NL +
-    NL +
-    '// traceRayEXT(topLevelAS, rayFlags, cullMask, sbtRecordOffset, sbtRecordStride, missIndex, origin, tMin, dir, tMax, payloadLocation);' + NL;
-end;
-
-class function TCastleShaderGeneratorRHI.InterpolateRayHitNormal(
-  const AN0, AN1, AN2: TVector3;
-  const AHitBarycentricsUV: TVector2): TVector3;
-var
-  W0: Single;
-begin
-  W0 := 1.0 - AHitBarycentricsUV.X - AHitBarycentricsUV.Y;
-  Result := (AN0 * W0) + (AN1 * AHitBarycentricsUV.X) + (AN2 * AHitBarycentricsUV.Y);
-  if Result.LengthSqr > 1e-12 then
-    Result := Result.Normalize
-  else
-    Result := Vector3(0, 0, 1);
-end;
-
-class function TCastleShaderGeneratorRHI.AlignUpSBTSize(
-  const AValue, AAlignment: Cardinal): Cardinal;
-var
-  SafeAlign: Cardinal;
-begin
-  SafeAlign := Max(Cardinal(1), AAlignment);
-  if AValue = 0 then
-    Exit(0);
-  Result := ((AValue + SafeAlign - 1) div SafeAlign) * SafeAlign;
-end;
-
-function TCastleShaderGeneratorRHI.GenerateXPBDClothComputeShader(
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateXPBDClothComputeShader(
   const AWorkgroupSizeX: Cardinal): String;
 begin
   Result :=
@@ -1184,7 +1109,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateXPBDDistanceConstraintDelta(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateXPBDDistanceConstraintDelta(
   const AP1, AP2: TVector3;
   const AInvMass1, AInvMass2, ARestLength, AComplianceAlpha, ASubstepDt: Single): TVector3;
 var
@@ -1205,7 +1130,7 @@ begin
   Result := Diff * ((Max(0.0, AInvMass1) * DLambda) / Dist);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateAerodynamicWindForce(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateAerodynamicWindForce(
   const AWindVelocity, AElementVelocity, AElementNormal: TVector3;
   const AElementArea, ADragCoeff: Single;
   const AAirDensity: Single): TVector3;
@@ -1220,7 +1145,7 @@ begin
   Result := AElementNormal * Pressure;
 end;
 
-class function TCastleShaderGeneratorRHI.ResolveSphereCollisionConstraint(
+class function TCastleShaderGeneratorRHIExperimentalHelper.ResolveSphereCollisionConstraint(
   const AParticlePos, ASphereCenter: TVector3;
   const ASphereRadius: Single;
   const ACollisionMargin: Single): TVector3;
@@ -1240,7 +1165,7 @@ begin
   Result := ASphereCenter + (Dir * MinRadius);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateMultiviewStereoPreamble: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateMultiviewStereoPreamble: String;
 begin
   Result :=
     '#extension GL_EXT_multiview : enable' + NL +
@@ -1259,7 +1184,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.ComputeAsymmetricEyeProjectionXScaleOffset(
+class function TCastleShaderGeneratorRHIExperimentalHelper.ComputeAsymmetricEyeProjectionXScaleOffset(
   const ATanLeft, ATanRight: Single): TVector2;
 var
   Span: Single;
@@ -1268,7 +1193,7 @@ begin
   Result := Vector2(2.0 / Span, (ATanRight + ATanLeft) / Span);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateFoveatedShadingRate(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateFoveatedShadingRate(
   const AUV, AGazeCenterUV: TVector2;
   const AInnerFoveaRadius: Single;
   const AMiddleParafoveaRadius: Single): Cardinal;
@@ -1284,7 +1209,7 @@ begin
     Result := $A; // 4x4 peripheral shading rate
 end;
 
-function TCastleShaderGeneratorRHI.GenerateHDR10PQEncodingFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateHDR10PQEncodingFunctions: String;
 begin
   Result :=
     '// Phase 37.3: ITU-R BT.2020 Wide Color Gamut & SMPTE ST.2084 (PQ) 10,000-Nit HDR10 Encoding' + NL +
@@ -1308,7 +1233,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateLinearRec709ToRec2020(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateLinearRec709ToRec2020(
   const ALinearRec709: TVector3): TVector3;
 var
   R, G, B: Single;
@@ -1322,7 +1247,7 @@ begin
     0.0163916 * R + 0.0880132 * G + 0.8955950 * B);
 end;
 
-class function TCastleShaderGeneratorRHI.EncodeST2084PQ(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EncodeST2084PQ(
   const ALinearNits: TVector3): TVector3;
 const
   M1 = 0.1593017578125; // 2610 / 16384
@@ -1349,7 +1274,7 @@ begin
     EncodeChannel(ALinearNits.Z));
 end;
 
-function TCastleShaderGeneratorRHI.GenerateDualQuaternionSkinningFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateDualQuaternionSkinningFunctions: String;
 begin
   Result :=
     '// Phase 38.1: Volume-Preserving Dual-Quaternion Skinning (DQS)' + NL +
@@ -1372,7 +1297,7 @@ begin
     '}' + NL;
 end;
 
-class procedure TCastleShaderGeneratorRHI.BlendDualQuaternionAntipodal(
+class procedure TCastleShaderGeneratorRHIExperimentalHelper.BlendDualQuaternionAntipodal(
   const ADQReal0, ADQDual0, ADQReal1, ADQDual1: TVector4;
   const AW0, AW1: Single;
   out AOutReal, AOutDual: TVector4);
@@ -1391,7 +1316,7 @@ begin
   AOutDual := RawDual * InvNorm;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateDualQuaternionTransform(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateDualQuaternionTransform(
   const ADQReal, ADQDual: TVector4;
   const APosition: TVector3): TVector3;
 var
@@ -1405,7 +1330,7 @@ begin
   Result := Rotated + Trans;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateDisplacedMicroMeshFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateDisplacedMicroMeshFunctions: String;
 begin
   Result :=
     '// Phase 38.2: MegaGeometry Displaced Micro-Mesh Barycentric Tessellation & Crack-Free Edge Snapping' + NL +
@@ -1427,7 +1352,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateMicroMeshDisplacedPosition(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateMicroMeshDisplacedPosition(
   const AP0, AP1, AP2, AN0, AN1, AN2: TVector3;
   const ABaryUV: TVector2;
   const AHeightSample, ADisplacementScale: Single;
@@ -1447,7 +1372,7 @@ begin
   Result := BasePos + (BaseNorm * Disp);
 end;
 
-class function TCastleShaderGeneratorRHI.SnapMicroMeshBarycentricToGrid(
+class function TCastleShaderGeneratorRHIExperimentalHelper.SnapMicroMeshBarycentricToGrid(
   const ABaryUV: TVector2;
   const ASubdivisionSegments: Cardinal): TVector2;
 var
@@ -1459,7 +1384,7 @@ begin
   Result := Vector2(U, V);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateOpticalFlowBlockMatchingShader: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateOpticalFlowBlockMatchingShader: String;
 begin
   Result :=
     '// Phase 39.1: Optical Flow SAD Block Matching & Parabolic Sub-Pixel Motion Estimation' + NL +
@@ -1478,7 +1403,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateOpticalFlowPatchSAD(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateOpticalFlowPatchSAD(
   const APatchCurr, APatchPrev: TVector4): Single;
 begin
   Result :=
@@ -1488,7 +1413,7 @@ begin
     Abs(APatchCurr.W - APatchPrev.W);
 end;
 
-class function TCastleShaderGeneratorRHI.EstimateParabolicSubpixelOffset(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EstimateParabolicSubpixelOffset(
   const ASADLeft, ASADCenter, ASADRight, ASADDown, ASADUp: Single): TVector2;
 var
   DenomX, DenomY, DX, DY: Single;
@@ -1500,7 +1425,7 @@ begin
   Result := Vector2(DX, DY);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSpatioTemporalBlueNoiseFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSpatioTemporalBlueNoiseFunctions: String;
 begin
   Result :=
     '// Phase 39.2: Martin Roberts R2 Quasi-Random Sequence & Golden-Ratio Spatio-Temporal Blue-Noise' + NL +
@@ -1515,7 +1440,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateR2Sequence2D(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateR2Sequence2D(
   const ASampleIndex: Cardinal): TVector2;
 const
   Alpha1 = 0.7548776662466927;
@@ -1529,7 +1454,7 @@ begin
     Single(Frac(0.5 + N * Alpha2)));
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateTemporalBlueNoiseJitter(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateTemporalBlueNoiseJitter(
   const ABaseBlueNoise: Single;
   const AFrameIndex: Cardinal): Single;
 const
@@ -1541,7 +1466,7 @@ begin
   Result := Single(Frac(Raw));
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSERCoherenceHintFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSERCoherenceHintFunctions: String;
 begin
   Result :=
     '#extension GL_NV_shader_invocation_reorder : enable' + NL +
@@ -1557,7 +1482,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.PackSERCoherenceHintKey(
+class function TCastleShaderGeneratorRHIExperimentalHelper.PackSERCoherenceHintKey(
   const AIsHit: Boolean;
   const AMaterialShadingModelID: Cardinal;
   const ARayDirection: TVector3): Cardinal;
@@ -1579,7 +1504,7 @@ begin
   Result := HitBit or MatBits or Octant;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateDualSourceGlassTransmissionFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateDualSourceGlassTransmissionFunctions: String;
 begin
   Result :=
     '// Phase 40.2: Dual-Source Color Blending for Single-Pass Colored Glass Transmission' + NL +
@@ -1595,7 +1520,7 @@ begin
     '}' + NL;
 end;
 
-class procedure TCastleShaderGeneratorRHI.EvaluateDualSourceGlassOutputs(
+class procedure TCastleShaderGeneratorRHIExperimentalHelper.EvaluateDualSourceGlassOutputs(
   const ASpecularLightingRGB, AGlassTintRGB: TVector3;
   const AFresnelF, AGlassOpacity: Single;
   out AOutSpecularAdd, AOutTransmittanceMul: TVector3);
@@ -1621,7 +1546,7 @@ begin
   AOutTransmittanceMul := FilterColor * OneMinusF;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateDynamicRenderingLocalReadPreamble: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateDynamicRenderingLocalReadPreamble: String;
 begin
   Result :=
     '// Phase 41.1: Vulkan 1.4 Dynamic Rendering Local Read (VK_KHR_dynamic_rendering_local_read)' + NL +
@@ -1645,7 +1570,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateTileLocalDeferredLighting(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateTileLocalDeferredLighting(
   const AAlbedo, ANormalWS: TVector3;
   const ARoughness: Single;
   const ALightDirWS, AViewDirWS, ALightColor: TVector3): TVector3;
@@ -1683,7 +1608,7 @@ begin
     (Max(0.0, AAlbedo.Z) * InvPi + SpecTerm) * Max(0.0, ALightColor.Z) * NdotL);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSubgroupWaveIntrinsicsFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSubgroupWaveIntrinsicsFunctions: String;
 begin
   Result :=
     '#extension GL_KHR_shader_subgroup_basic : enable' + NL +
@@ -1701,7 +1626,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSubgroupBallotBitCount(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSubgroupBallotBitCount(
   const ABallotMask: UInt64): Cardinal;
 var
   Mask: UInt64;
@@ -1715,7 +1640,7 @@ begin
   end;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSubgroupExclusivePrefixSum4(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSubgroupExclusivePrefixSum4(
   const AValues: TVector4Cardinal): TVector4Cardinal;
 begin
   Result.X := 0;
@@ -1724,7 +1649,7 @@ begin
   Result.W := AValues.X + AValues.Y + AValues.Z;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateBufferDeviceAddressPreamble: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateBufferDeviceAddressPreamble: String;
 begin
   Result :=
     '#extension GL_EXT_buffer_reference2 : require' + NL +
@@ -1740,7 +1665,7 @@ begin
     '};' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.AlignBufferDeviceAddress(
+class function TCastleShaderGeneratorRHIExperimentalHelper.AlignBufferDeviceAddress(
   const AAddress: UInt64;
   const AAlignment: Cardinal): UInt64;
 var
@@ -1753,7 +1678,7 @@ begin
   Result := (AAddress + Mask) and (not Mask);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateVoxelConeTracingFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateVoxelConeTracingFunctions: String;
 begin
   Result :=
     '// Phase 42.2: Dominant-Axis Voxelization & 3D Mipmapped Voxel Cone Tracing (VXGI)' + NL +
@@ -1772,7 +1697,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.SelectDominantVoxelProjectionAxis(
+class function TCastleShaderGeneratorRHIExperimentalHelper.SelectDominantVoxelProjectionAxis(
   const AFaceNormal: TVector3): Cardinal;
 var
   AX, AY, AZ: Single;
@@ -1789,7 +1714,7 @@ begin
     Result := 2;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateVoxelConeStepAperture(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateVoxelConeStepAperture(
   const ADistanceAlongCone, AConeHalfAngleTan, ABaseVoxelSize: Single): TVector2;
 var
   SafeVoxel, Diameter, MipLevel: Single;
@@ -1800,7 +1725,7 @@ begin
   Result := Vector2(Diameter, MipLevel);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSpecularNormalVarianceAAFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSpecularNormalVarianceAAFunctions: String;
 begin
   Result :=
     '// Phase 43.1: Normal-Variance Specular Anti-Aliasing (Kaplanyan & Antonov 2016)' + NL +
@@ -1815,7 +1740,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSpecularAARoughness(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSpecularAARoughness(
   const ABaseRoughness: Single;
   const ADNdU, ADNdV: TVector3;
   const AVarianceStrength: Single;
@@ -1831,7 +1756,7 @@ begin
   Result := Sqrt(Sqrt(FilteredAlpha2));
 end;
 
-function TCastleShaderGeneratorRHI.GenerateRectilinearShadowWarpFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateRectilinearShadowWarpFunctions: String;
 begin
   Result :=
     '// Phase 43.2: Rectilinear Shadow Map UV Warping' + NL +
@@ -1843,7 +1768,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateRectilinearShadowWarpUV(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateRectilinearShadowWarpUV(
   const AShadowUV: TVector2;
   const AWarpStrength: Single): TVector2;
 var
@@ -1857,7 +1782,7 @@ begin
   Result := Vector2(WarpedX * 0.5 + 0.5, WarpedY * 0.5 + 0.5);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateMSDFTextFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateMSDFTextFunctions: String;
 begin
   Result :=
     '// Phase 44.1: Multi-Channel Signed Distance Field (MSDF) Median-of-Three Text & Vector Rendering' + NL +
@@ -1872,13 +1797,13 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateMSDFMedianOfThree(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateMSDFMedianOfThree(
   const AR, AG, AB: Single): Single;
 begin
   Result := Max(Min(AR, AG), Min(Max(AR, AG), AB));
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateMSDFScreenPxOpacity(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateMSDFScreenPxOpacity(
   const AMSDFSampleRGB: TVector3;
   const AScreenPxRange: Single): Single;
 var
@@ -1889,7 +1814,7 @@ begin
   Result := EnsureRange(ScreenPxDist + 0.5, 0.0, 1.0);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateProceduralGrassBladeFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateProceduralGrassBladeFunctions: String;
 begin
   Result :=
     '// Phase 44.2: Procedural Quadratic Bezier Grass Blade Position & Tangent' + NL +
@@ -1903,7 +1828,7 @@ begin
     '}' + NL;
 end;
 
-class procedure TCastleShaderGeneratorRHI.EvaluateQuadraticBezierGrassBlade(
+class procedure TCastleShaderGeneratorRHIExperimentalHelper.EvaluateQuadraticBezierGrassBlade(
   const AP0, AP1, AP2: TVector3;
   const AT: Single;
   out AOutPosition, AOutTangent: TVector3);
@@ -1921,7 +1846,7 @@ begin
     AOutTangent := Vector3(0.0, 1.0, 0.0);
 end;
 
-function TCastleShaderGeneratorRHI.GeneratePushDescriptorPreamble(
+function TCastleShaderGeneratorRHIExperimentalHelper.GeneratePushDescriptorPreamble(
   const ASetIndex: Cardinal): String;
 begin
   Result :=
@@ -1934,7 +1859,7 @@ begin
     Format('layout(set = %d, binding = 2) uniform sampler2D castle_PushNormalRoughnessTex;', [ASetIndex]) + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.ComputeHostImageCopyByteSize(
+class function TCastleShaderGeneratorRHIExperimentalHelper.ComputeHostImageCopyByteSize(
   const AWidth, AHeight, ADepth, ABytesPerTexel: Cardinal;
   const ARowAlignmentBytes: Cardinal): UInt64;
 var
@@ -1950,7 +1875,7 @@ begin
   Result := AlignedRowPitch * H * D;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSphericalGaussianFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSphericalGaussianFunctions: String;
 begin
   Result :=
     '// Phase 45.2: Spherical Gaussian (SG) Fast Specular & Diffuse Lobe Approximation' + NL +
@@ -1964,7 +1889,7 @@ begin
     '}' + NL;
 end;
 
-class procedure TCastleShaderGeneratorRHI.EvaluateSphericalGaussianProduct(
+class procedure TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSphericalGaussianProduct(
   const AAxis1: TVector3; const ASharpness1: Single;
   const AAxis2: TVector3; const ASharpness2: Single;
   out AProductAxis: TVector3;
@@ -1985,7 +1910,7 @@ begin
   ALogAmplitudeScale := UmLen - (S1 + S2);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSphericalGaussianIntegral(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSphericalGaussianIntegral(
   const AAmplitude: TVector3;
   const ASharpness: Single): TVector3;
 var
@@ -2002,7 +1927,7 @@ begin
   Result := AAmplitude * Factor;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateGaussianSplattingFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateGaussianSplattingFunctions: String;
 begin
   Result :=
     '// Phase 46.1 & 46.2: 3D Gaussian Splatting (3DGS) 2D Conic Opacity & L1 Spherical Harmonics' + NL +
@@ -2026,7 +1951,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateGaussianSplatOpacity(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateGaussianSplatOpacity(
   const ACov2D: TVector3;
   const APixelOffset: TVector2;
   const ABaseOpacity: Single): Single;
@@ -2050,7 +1975,7 @@ begin
   Result := EnsureRange(EnsureRange(ABaseOpacity, 0.0, 1.0) * Exp(Power), 0.0, 0.99);
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSphericalHarmonicsL1RGB(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSphericalHarmonicsL1RGB(
   const ASH0, ASH1X, ASH1Y, ASH1Z: TVector3;
   const AViewDir: TVector3): TVector3;
 const
@@ -2073,7 +1998,7 @@ begin
   Result.Z := Max(0.0, Result.Z);
 end;
 
-function TCastleShaderGeneratorRHI.GeneratePCSSSoftShadowFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GeneratePCSSSoftShadowFunctions: String;
 begin
   Result :=
     '// Phase 47.1: Percentage-Closer Soft Shadows (PCSS) Contact-Hardening Penumbra' + NL +
@@ -2083,7 +2008,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluatePCSSPenumbraWidth(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluatePCSSPenumbraWidth(
   const AReceiverDepth, AAvgBlockerDepth, ALightSize: Single): Single;
 begin
   if (AAvgBlockerDepth <= 1e-6) or (AReceiverDepth <= AAvgBlockerDepth) then
@@ -2091,7 +2016,7 @@ begin
   Result := Max(0.0, (AReceiverDepth - AAvgBlockerDepth) * Max(0.0, ALightSize) / AAvgBlockerDepth);
 end;
 
-class function TCastleShaderGeneratorRHI.ComputeDescriptorBufferAlignedOffset(
+class function TCastleShaderGeneratorRHIExperimentalHelper.ComputeDescriptorBufferAlignedOffset(
   const ASetIndex: Cardinal;
   const ASetByteSize: UInt64;
   const AOffsetAlignment: UInt64): UInt64;
@@ -2103,7 +2028,7 @@ begin
   Result := UInt64(ASetIndex) * AlignedStride;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateCarPaintFlakeFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateCarPaintFlakeFunctions: String;
 begin
   Result :=
     '// Phase 48.1: Multi-Layer Metallic Flake & Clear-Coat Car-Paint BRDF' + NL +
@@ -2118,7 +2043,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateCarPaintMultiLayerBRDF(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateCarPaintMultiLayerBRDF(
   const ABaseColorNormal, ABaseColorGrazing, AFlakeColor: TVector3;
   const ANdotV, ANdotH, AFlakeNdotH, AFlakeExponent: Single): TVector3;
 var
@@ -2135,7 +2060,7 @@ begin
     Vector3(CoatSpec, CoatSpec, CoatSpec);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateScreenSpaceCurvatureFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateScreenSpaceCurvatureFunctions: String;
 begin
   Result :=
     '// Phase 48.2: Screen-Space Normal Curvature & Ridge/Valley Cavity Shading' + NL +
@@ -2145,7 +2070,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateScreenSpaceCurvatureCavity(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateScreenSpaceCurvatureCavity(
   const ADNormalDx, ADNormalDy: TVector3;
   const ACurvatureScale: Single): Single;
 var
@@ -2155,39 +2080,7 @@ begin
   Result := EnsureRange(1.0 + Curv, 0.0, 2.0);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateCameraEV100ExposureFunctions: String;
-begin
-  Result :=
-    '// Phase 49.1: Physically Based Camera Exposure (EV100)' + NL +
-    'float EvaluateEV100FromCameraSettings(float apertureFStops, float shutterSeconds, float iso) {' + NL +
-    '  float n2 = max(0.5, apertureFStops) * max(0.5, apertureFStops);' + NL +
-    '  float t = max(1e-6, shutterSeconds);' + NL +
-    '  float s = max(1.0, iso);' + NL +
-    '  return log2((n2 / t) * (100.0 / s));' + NL +
-    '}' + NL +
-    'float EvaluateExposureMultiplierFromEV100(float ev100) {' + NL +
-    '  return 1.0 / (1.2 * exp2(ev100));' + NL +
-    '}' + NL;
-end;
-
-class function TCastleShaderGeneratorRHI.EvaluateEV100FromCameraSettings(
-  const AApertureFStops, AShutterSeconds, AISO: Single): Single;
-var
-  N, T, S: Single;
-begin
-  N := Max(0.5, AApertureFStops);
-  T := Max(1e-6, AShutterSeconds);
-  S := Max(1.0, AISO);
-  Result := Log2(((N * N) / T) * (100.0 / S));
-end;
-
-class function TCastleShaderGeneratorRHI.EvaluateExposureMultiplierFromEV100(
-  const AEV100: Single): Single;
-begin
-  Result := 1.0 / (1.2 * Power(2.0, AEV100));
-end;
-
-function TCastleShaderGeneratorRHI.GenerateAgXGamutCompressionFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateAgXGamutCompressionFunctions: String;
 begin
   Result :=
     '// Phase 49.2: AgX Filmic Log Encoding & Highlight Chroma Gamut Compression' + NL +
@@ -2200,7 +2093,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateChromaGamutCompression(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateChromaGamutCompression(
   const ALinearRGB: TVector3;
   const ACompressionStrength: Single): TVector3;
 var
@@ -2213,7 +2106,7 @@ begin
   Result := ALinearRGB * (1.0 - Desat) + Vector3(Luma, Luma, Luma) * Desat;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateCapsuleOcclusionFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateCapsuleOcclusionFunctions: String;
 begin
   Result :=
     '// Phase 50.1: Analytical Capsule Soft Shadow & Ambient Occlusion' + NL +
@@ -2234,7 +2127,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateCapsuleSoftShadowOcclusion(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateCapsuleSoftShadowOcclusion(
   const AShadingPos, ALightDir, ACapsuleA, ACapsuleB: TVector3;
   const ACapsuleRadius, AConeTang: Single): Single;
 var
@@ -2258,7 +2151,7 @@ begin
   Result := U * U * (3.0 - 2.0 * U);
 end;
 
-function TCastleShaderGeneratorRHI.GenerateEpipolarLightShaftFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateEpipolarLightShaftFunctions: String;
 begin
   Result :=
     '// Phase 50.2: Epipolar Volumetric Light Shafts (Crepuscular God Rays)' + NL +
@@ -2267,7 +2160,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateEpipolarSliceRayStep(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateEpipolarSliceRayStep(
   const ALightScreenUV, ASliceEndpointUV: TVector2;
   const ASliceFraction: Single): TVector2;
 var
@@ -2277,7 +2170,7 @@ begin
   Result := ALightScreenUV * (1.0 - T) + ASliceEndpointUV * T;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateCooperativeMatrixPreamble: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateCooperativeMatrixPreamble: String;
 begin
   Result :=
     '// Phase 51.1: Cooperative Matrix / Hardware Tensor Core Intrinsics (VK_KHR_cooperative_matrix)' + NL +
@@ -2296,7 +2189,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateQuantizedFP8ToFloat(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateQuantizedFP8ToFloat(
   const AFP8Byte: Byte): Single;
 var
   SignBit, ExpBits, MantBits: Byte;
@@ -2322,7 +2215,7 @@ begin
     Result := -Result;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateAnisotropicKuwaharaFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateAnisotropicKuwaharaFunctions: String;
 begin
   Result :=
     '// Phase 51.2: Anisotropic Kuwahara Structure-Tensor Filter' + NL +
@@ -2336,7 +2229,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateStructureTensorEigenOrientation(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateStructureTensorEigenOrientation(
   const AJxx, AJyy, AJxy: Single;
   out AAnisotropy: Single): Single;
 var
@@ -2352,7 +2245,7 @@ begin
     AAnisotropy := 0.0;
 end;
 
-function TCastleShaderGeneratorRHI.GeneratePhysicalEyeRefractionFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GeneratePhysicalEyeRefractionFunctions: String;
 begin
   Result :=
     '// Phase 52.1: Physically Based Eye Cornea Snell Refraction & Iris Parallax' + NL +
@@ -2365,7 +2258,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateEyeIrisRefractionUVOffset(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateEyeIrisRefractionUVOffset(
   const AViewDirTS, ACorneaNormalTS: TVector3;
   const ACorneaIOR, AAnteriorChamberDepth: Single): TVector2;
 var
@@ -2387,7 +2280,7 @@ begin
     Refracted.Y * (AAnteriorChamberDepth / CosZ));
 end;
 
-function TCastleShaderGeneratorRHI.GenerateSixPointLightmapFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateSixPointLightmapFunctions: String;
 begin
   Result :=
     '// Phase 52.2: Six-Point Directional Lightmap Basis (6-Axis Smoke/Cloud Lighting)' + NL +
@@ -2401,7 +2294,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSixPointDirectionalBasis(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSixPointDirectionalBasis(
   const ALightDirTS, AMapPosXNegXPosY, AMapNegYPosZNegZ: TVector3): Single;
 var
   D: TVector3;
@@ -2414,7 +2307,7 @@ begin
   Result := Sqr(D.X) * WX + Sqr(D.Y) * WY + Sqr(D.Z) * WZ;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateParallaxOcclusionMappingFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateParallaxOcclusionMappingFunctions: String;
 begin
   Result :=
     '// Phase 53.1: Secant-Refined Parallax Occlusion Mapping (POM)' + NL +
@@ -2428,7 +2321,7 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateSecantRefinedPOMIntersection(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateSecantRefinedPOMIntersection(
   const APrevLayerDepth, ACurrLayerDepth, APrevHeight, ACurrHeight: Single): Single;
 var
   AfterDepth, BeforeDepth, Denom, Weight: Single;
@@ -2443,7 +2336,7 @@ begin
   Result := ACurrLayerDepth * (1.0 - Weight) + APrevLayerDepth * Weight;
 end;
 
-function TCastleShaderGeneratorRHI.GenerateChromaticDispersionFlareFunctions: String;
+function TCastleShaderGeneratorRHIExperimentalHelper.GenerateChromaticDispersionFlareFunctions: String;
 begin
   Result :=
     '// Phase 53.2: Spectral Cauchy Chromatic Dispersion & Lens Flare' + NL +
@@ -2453,117 +2346,13 @@ begin
     '}' + NL;
 end;
 
-class function TCastleShaderGeneratorRHI.EvaluateCauchyRefractiveIndexRGB(
+class function TCastleShaderGeneratorRHIExperimentalHelper.EvaluateCauchyRefractiveIndexRGB(
   const ACoeffA, ACoeffBMicronsSq: Single): TVector3;
 begin
   Result := Vector3(
     ACoeffA + ACoeffBMicronsSq / (0.65 * 0.65),
     ACoeffA + ACoeffBMicronsSq / (0.55 * 0.55),
     ACoeffA + ACoeffBMicronsSq / (0.45 * 0.45));
-end;
-
-class function TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
-  const AShapeModelView: TMatrix4;
-  const ANormalMatrix: TMatrix3;
-  const AHasSkinJoints, ADualQuaternionSkinning, ASpecularAntiAliasing: Boolean;
-  const AShadowMapSystemModeOrd: Cardinal;
-  const ABindlessMaterialIndex: Cardinal): TCastlePushConstantsBlock;
-var
-  SkinMode, SpecAA: Single;
-begin
-  Result.ModelViewMatrix := AShapeModelView;
-  { GLSL mat3(v0, v1, v2) constructs a matrix from three COLUMN vectors }
-  Result.NormalMatrixRow0 := Vector4(ANormalMatrix.Columns[0], 0.0);
-  Result.NormalMatrixRow1 := Vector4(ANormalMatrix.Columns[1], 0.0);
-  Result.NormalMatrixRow2 := Vector4(ANormalMatrix.Columns[2], 0.0);
-  if not AHasSkinJoints then
-    SkinMode := 0.0
-  else if ADualQuaternionSkinning then
-    SkinMode := 2.0
-  else
-    SkinMode := 1.0;
-  if ASpecularAntiAliasing then
-    SpecAA := 1.0
-  else
-    SpecAA := 0.0;
-  Result.ObjectParams := Vector4(
-    Single(ABindlessMaterialIndex),
-    SkinMode,
-    SpecAA,
-    Single(AShadowMapSystemModeOrd));
-end;
-
-class procedure TCastleShaderGeneratorRHI.UnpackShapeRHIPushConstantsObjectParams(
-  const APushConstants: TCastlePushConstantsBlock;
-  out ABindlessMaterialIndex, ASkinningMode: Cardinal;
-  out ASpecularAntiAliasing: Boolean;
-  out AShadowMapSystemModeOrd: Cardinal);
-begin
-  ABindlessMaterialIndex := Cardinal(Max(0, Round(APushConstants.ObjectParams.X)));
-  ASkinningMode := Cardinal(Max(0, Round(APushConstants.ObjectParams.Y)));
-  ASpecularAntiAliasing := APushConstants.ObjectParams.Z > 0.5;
-  AShadowMapSystemModeOrd := Cardinal(Max(0, Round(APushConstants.ObjectParams.W)));
-end;
-
-function TCastleShaderGeneratorRHI.GenerateHDRCompositeVertexShader: String;
-begin
-  Result :=
-    '#version 450' + NL +
-    '/* Phase 111: Procedural Fullscreen Triangle Vertex Shader (HDRCompositeVS) */' + NL +
-    'layout(location = 0) out vec2 v_TexCoord;' + NL +
-    'void main()' + NL +
-    '{' + NL +
-    '  vec2 uv = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));' + NL +
-    '  gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);' + NL +
-    '  v_TexCoord = vec2(uv.x, 1.0 - uv.y);' + NL +
-    '}' + NL;
-end;
-
-function TCastleShaderGeneratorRHI.GeneratePostProcessModulateComputeShader(
-  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
-begin
-  Result :=
-    '#version 450' + NL +
-    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;',
-      [Max(Cardinal(1), AWorkgroupSizeX), Max(Cardinal(1), AWorkgroupSizeY)]) + NL +
-    'layout(set = 0, binding = 0) uniform sampler2D u_HDRSceneTexture;' + NL +
-    'layout(set = 0, binding = 1) uniform sampler2D u_GTAOTexture;' + NL +
-    'layout(set = 0, binding = 2) uniform sampler2D u_SSRTexture;' + NL +
-    'layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D u_OutModulatedHDR;' + NL +
-    'layout(push_constant) uniform PostProcessModulatePC {' + NL +
-    '  float AOStrength;' + NL +
-    '  float SSRStrength;' + NL +
-    '  uint DstWidth;' + NL +
-    '  uint DstHeight;' + NL +
-    '} pc;' + NL +
-    'void main()' + NL +
-    '{' + NL +
-    '  uvec2 gid = gl_GlobalInvocationID.xy;' + NL +
-    '  if (gid.x >= pc.DstWidth || gid.y >= pc.DstHeight) return;' + NL +
-    '  vec2 uv = (vec2(gid) + vec2(0.5)) / max(vec2(pc.DstWidth, pc.DstHeight), vec2(1.0));' + NL +
-    '  vec3 hdr = textureLod(u_HDRSceneTexture, uv, 0.0).rgb;' + NL +
-    '  float ao = clamp(textureLod(u_GTAOTexture, uv, 0.0).r, 0.0, 1.0);' + NL +
-    '  vec3 ssr = textureLod(u_SSRTexture, uv, 0.0).rgb;' + NL +
-    '  vec3 lit = max(hdr * mix(1.0, ao, pc.AOStrength) + ssr * pc.SSRStrength, vec3(0.0));' + NL +
-    '  imageStore(u_OutModulatedHDR, ivec2(gid), vec4(lit, 1.0));' + NL +
-    '}' + NL;
-end;
-
-class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;
-const
-  FNV_OFFSET_BASIS: UInt64 = QWord($CBF29CE484222325);
-  FNV_PRIME: UInt64 = $100000001B3;
-var
-  I: Integer;
-begin
-  {$Q-}{$R-}
-  Result := FNV_OFFSET_BASIS;
-  for I := 1 to Length(FinalGLSL) do
-  begin
-    Result := Result xor Ord(FinalGLSL[I]);
-    Result := Result * FNV_PRIME;
-  end;
-  {$Q+}{$R+}
 end;
 
 {$endif read_implementation}
