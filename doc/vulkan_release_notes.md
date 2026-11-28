@@ -46,7 +46,7 @@ Castle Game Engine now includes a production-ready **Vulkan 1.3+ (Vulkan 1.1–1
 
 ## Quality, Validation & Visual Parity Metrics
 
-- **393 Dedicated Vulkan & RHI Unit Tests** (`TTestCastleVulkanRHI`, within the 970-test `castle_tester_standalone` suite) passing with **`0 unfreed memory blocks : 0`** (`Heaptrc`) and **`0` `VK_LAYER_KHRONOS_validation` errors** (`CASTLE_VULKAN_VALIDATION=1`).
+- **394 Dedicated Vulkan & RHI Unit Tests** (`292` core production `TTestCastleVulkanRHI` tests across 8 modular `.inc` files + `102` isolated `TTestCastleVulkanRHIExperimental` tests, within the 971-test `castle_tester_standalone` suite) passing with **`0 unfreed memory blocks : 0`** (`Heaptrc`) and **`0` `VK_LAYER_KHRONOS_validation` errors** (`CASTLE_VULKAN_VALIDATION=1`).
 - **3-OS Automated GitHub Actions Gate** (`.github/workflows/vulkan-rhi.yml`): Continuous compilation, `.spv` cache packaging, live Vulkan execution, and example catalog sweeps across **Ubuntu Linux (Mesa Lavapipe Vulkan 1.4)**, **macOS Apple Silicon (MoltenVK + `VK_KHR_portability_subset`)**, and **Windows x64**.
 - **Side-by-Side `rbOpenGL` vs `rbVulkan` Perceptual RMSE Parity**: Automated pixel-comparison suites (`TRHIVisualRegressionSuite`) verify visual parity across 2D UI, Unlit, Phong, glTF 2.0 Metallic-Roughness PBR, custom `Effect` & per-light `TEffectNode` shaders, flagship CGE demos (`explore_impressive_castle`, `platformer`, `terrain`), and broader catalog examples (`examples/animations`, `examples/shaders`, `examples/viewport_and_scenes`, `examples/physics`).
 

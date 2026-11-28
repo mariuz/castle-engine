@@ -5,7 +5,7 @@ This directory houses **opt-in research, Unreal Engine 5-inspired, and NVIDIA RT
 Keeping these prototypes isolated in `src/base_rendering/experimental/` guarantees that:
 1. **Zero Core Engine Coupling**: None of CGE's core rendering units (`src/base_rendering/rhi/`, `src/base_rendering/vulkan/`, `src/base_rendering/opengl/`, `src/scene/`, `src/window/`, `src/ui/`, `castle-editor`) import or link any unit from `src/base_rendering/experimental/`.
 2. **Smaller Core Units & Faster Compilation**: Production applications and upstream PR reviewers of `CastleInternalShaderRHI` and `CastleInternalRHI_Vulkan` only compile and review the active GPU pipelines actually used to render X3D / glTF 2.0 scenes and 2D UI.
-3. **100% Preserved Research & Test Coverage**: Every mathematical reference implementation, GLSL `#version 450` generator, and GPU buffer/texture manager scaffold remains available via Pascal `class helper` extensions and continues to be verified by `TTestCastleVulkanRHI`.
+3. **100% Preserved Research & Test Coverage**: Every mathematical reference implementation, GLSL `#version 450` generator, and GPU buffer/texture manager scaffold remains available via Pascal `class helper` extensions, is isolated in optional upstream `Slice 9` (`experimental-ue5-rtx-research`), and continues to be verified across `102` dedicated tests in `TTestCastleVulkanRHIExperimental` (`tests/code/testcases/testcastlevulkanrhi_experimental.pas`).
 
 ---
 

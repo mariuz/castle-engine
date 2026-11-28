@@ -22,8 +22,8 @@
             <Filename Value="castle-tester"/>
           </Target>
           <SearchPaths>
-            <IncludeFiles Value="code/;code/testcases/;code/tester-castle/;../tools/common-code/;../src/common_includes/"/>
-            <OtherUnitFiles Value="code/;code/testcases/;code/tester-castle/;../tools/common-code/"/>
+            <IncludeFiles Value="code/;code/testcases/;code/tester-castle/;../tools/common-code/;../src/common_includes/;../src/base_rendering/experimental/"/>
+            <OtherUnitFiles Value="code/;code/testcases/;code/tester-castle/;../tools/common-code/;../src/base_rendering/experimental/"/>
             <UnitOutputDirectory Value="castle-engine-output/standalone/lazarus-lib/$(TargetCPU)-$(TargetOS)"/>
             <Libraries Value="" />
           </SearchPaths>
@@ -68,7 +68,7 @@
         <PackageName Value="castle_engine_base"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="111">
+    <Units Count="112">
       <Unit0>
         <Filename Value="castle_tester_standalone.dpr"/>
         <IsPartOfProject Value="True"/>
@@ -619,6 +619,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="TestCastleInternalOpenTypeFont"/>
       </Unit110>
+      <Unit111>
+        <Filename Value="code/testcases/testcastlevulkanrhi_experimental.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="TestCastleVulkanRHI_Experimental"/>
+      </Unit111>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
@@ -627,8 +632,8 @@
       <Filename Value="castle-tester"/>
     </Target>
     <SearchPaths>
-      <IncludeFiles Value="code/;code/testcases/;code/tester-castle/;../tools/common-code/;../src/common_includes/"/>
-      <OtherUnitFiles Value="code/;code/testcases/;code/tester-castle/;../tools/common-code/"/>
+      <IncludeFiles Value="code/;code/testcases/;code/tester-castle/;../tools/common-code/;../src/common_includes/;../src/base_rendering/experimental/"/>
+      <OtherUnitFiles Value="code/;code/testcases/;code/tester-castle/;../tools/common-code/;../src/base_rendering/experimental/"/>
       <UnitOutputDirectory Value="castle-engine-output/standalone/lazarus-lib/$(TargetCPU)-$(TargetOS)"/>
       <Libraries Value="" />
     </SearchPaths>

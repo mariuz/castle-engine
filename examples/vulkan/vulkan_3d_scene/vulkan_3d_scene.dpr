@@ -32,8 +32,10 @@ uses
   CastleTransform, CastleUIControls, CastleControls, CastleComponentSerialize,
   CastleCameras, CastleWindow, CastleParameters, CastleRenderContext, X3DNodes,
   CastleInternalRHI, CastleInternalShaderRHI, CastleInternalShaderCompiler,
-  CastleInternalVulkan, CastleInternalVulkanWSI, CastleInternalRHI_Vulkan,
-  CastleInternalShaderRHI_Experimental, CastleInternalRHI_Vulkan_Experimental;
+  CastleInternalVulkan, CastleInternalVulkanWSI, CastleInternalRHI_Vulkan
+  {$ifdef CASTLE_EXPERIMENTAL_VULKAN}
+  , CastleInternalShaderRHI_Experimental, CastleInternalRHI_Vulkan_Experimental
+  {$endif};
 
 type
   TVulkanDemoController = class(TCastleUserInterface)
@@ -53,7 +55,7 @@ begin
     GoldenBox.Rotation := Vector4(0.2, 1.0, 0.15, Angle);
   if (StatusLabel <> nil) and (Viewport <> nil) then
     StatusLabel.Caption := Format(
-      'Backend: Vulkan 1.3 RHI | FPS: %s | GI: Lumen SDF+SurfaceCache | TSR + VRS | EV100: %.1f',
+      'Backend: Vulkan 1.3 RHI | FPS: %s | GTAO + SSR + TAA + AgX | EV100: %.1f',
       [Container.Fps.ToString, Viewport.EvaluateCurrentCameraEV100]);
 end;
 
@@ -167,7 +169,11 @@ begin
     Scene.RenderOptions.DualQuaternionSkinning := True;
     Scene.RenderOptions.GpuDrivenMeshletCulling := True;
     Scene.RenderOptions.TransparencyMode := tmWeightedBlendedOIT;
+    {$ifdef CASTLE_EXPERIMENTAL_VULKAN}
     Scene.RenderOptions.ShadowMapSystemMode := smsVirtualShadowMaps;
+    {$else}
+    Scene.RenderOptions.ShadowMapSystemMode := smsStandardShadowMaps;
+    {$endif}
     Viewport.Items.Add(Scene);
     Viewport.PrepareResources(Scene);
 
@@ -176,9 +182,15 @@ begin
     Viewport.ScreenSpaceAmbientOcclusion := True;
     Viewport.ScreenSpaceReflections := True;
     Viewport.VolumetricFogEnabled := True;
+    {$ifdef CASTLE_EXPERIMENTAL_VULKAN}
     Viewport.GlobalIlluminationMode := giLumenSDFAndSurfaceCache;
     Viewport.TemporalAntiAliasingMode := taaTSRUpscaler;
     Viewport.VariableRateShadingMode := vrsContrastAdaptive;
+    {$else}
+    Viewport.GlobalIlluminationMode := giNone;
+    Viewport.TemporalAntiAliasingMode := taaStandardTAA;
+    Viewport.VariableRateShadingMode := vrsNone;
+    {$endif}
     Viewport.NextGenToneMappingMode := ntmAgXGamutCompressed;
     Viewport.AutoExposureEnabled := True;
     Viewport.TargetFrameRateHz := 60.0;
@@ -227,9 +239,15 @@ begin
       Controller.StatusLabel := DesignOwner.FindComponent('LabelVulkanStatus') as TCastleLabel;
       if Controller.Viewport <> nil then
       begin
+        {$ifdef CASTLE_EXPERIMENTAL_VULKAN}
         Controller.Viewport.GlobalIlluminationMode := giLumenSDFAndSurfaceCache;
         Controller.Viewport.TemporalAntiAliasingMode := taaTSRUpscaler;
         Controller.Viewport.VariableRateShadingMode := vrsContrastAdaptive;
+        {$else}
+        Controller.Viewport.ScreenSpaceAmbientOcclusion := True;
+        Controller.Viewport.ScreenSpaceReflections := True;
+        Controller.Viewport.TemporalAntiAliasingMode := taaStandardTAA;
+        {$endif}
         Controller.Viewport.NextGenToneMappingMode := ntmAgXGamutCompressed;
         Controller.Viewport.VolumetricFogEnabled := True;
         Controller.Viewport.AutoExposureEnabled := True;

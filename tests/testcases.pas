@@ -105,7 +105,11 @@ uses
   TestCastleInternalUrlUtils,
   TestCastleTransformManipulate,
   TestCastleSteam,
-  TestCastleVulkanRHI;
+  TestCastleVulkanRHI
+  {$ifndef CASTLE_WITHOUT_EXPERIMENTAL}
+  , TestCastleVulkanRHI_Experimental
+  {$endif}
+  ;
 
 implementation
 

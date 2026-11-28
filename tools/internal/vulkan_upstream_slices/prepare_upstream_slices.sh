@@ -4,7 +4,8 @@
 #
 # Deterministic, non-destructive verifier, summary reporter, and patch-series
 # exporter for splitting the Castle Game Engine Vulkan 1.3+ RHI branch into
-# 8 dependency-ordered, acyclic upstream PR slices against
+# 8 dependency-ordered, acyclic core upstream PR slices (plus optional Slice 9
+# isolating experimental UE5/RTX research subsystems) against
 # castle-engine/castle-engine.
 #
 # Safety guarantees:
@@ -32,14 +33,17 @@ Usage: prepare_upstream_slices.sh [options]
 Options:
   --verify                 Verify slice_manifest.tsv integrity, file existence,
                            zero duplicates, line-ending hygiene, acyclic Pascal
-                           uses-clause slice ordering, and (when base commit is
-                           present in git history) 100% git diff partition coverage.
-  --summary                Print per-slice file breakdown table (Slices 1..8 + 0).
+                           uses-clause slice ordering across Slices 1..9, and
+                           (when base commit is present in git history) 100%
+                           git diff partition coverage.
+  --summary                Print per-slice file breakdown table (Slices 1..8
+                           Core + Optional Slice 9 Experimental + Slice 0 Meta).
   --base=<commit-or-ref>   Explicit base commit/ref for git diff verification
                            and patch export (default: auto-detect upstream/master
                            merge-base or e97e84b7aa51f628a7978c5420cefb53a3da05ab).
-  --export-patches=<dir>   Export clean per-slice .patch files (Slices 1..8, with
-                           Slice 3 split into core vs 03b-examples-auto-dproj)
+  --export-patches=<dir>   Export clean per-slice .patch files (Slices 1..8 Core,
+                           with Slice 3 split into core vs 03b-examples-auto-dproj,
+                           plus optional 09-experimental-ue5-rtx-research.patch)
                            into <dir> without modifying the working tree.
   -h, --help               Show this help message.
 EOF
@@ -139,11 +143,11 @@ if [ "$DO_VERIFY" -eq 1 ]; then
       cat = $3
       path = $4
 
-      if (sid !~ /^[0-8]$/) {
+      if (sid !~ /^[0-9]$/) {
         printf("ERROR: Line %d: invalid slice_id \"%s\" for %s\n", NR, sid, path) > "/dev/stderr"
         errors++
       }
-      if (cat != "core" && cat != "auto-dproj" && cat != "branch-meta") {
+      if (cat != "core" && cat != "auto-dproj" && cat != "experimental" && cat != "branch-meta") {
         printf("ERROR: Line %d: invalid category \"%s\" for %s\n", NR, cat, path) > "/dev/stderr"
         errors++
       }
@@ -155,6 +159,14 @@ if [ "$DO_VERIFY" -eq 1 ]; then
         printf("ERROR: Line %d: non-zero slice %s entry %s cannot be branch-meta\n", NR, sid, path) > "/dev/stderr"
         errors++
       }
+      if (sid == "9" && cat != "experimental") {
+        printf("ERROR: Line %d: slice 9 entry %s must have category experimental\n", NR, path) > "/dev/stderr"
+        errors++
+      }
+      if (sid != "9" && cat == "experimental") {
+        printf("ERROR: Line %d: slice %s entry %s cannot use category experimental (reserved for Slice 9)\n", NR, sid, path) > "/dev/stderr"
+        errors++
+      }
       if (path in seen) {
         printf("ERROR: Duplicate path \"%s\" on line %d (first seen on line %d)\n", path, NR, seen[path]) > "/dev/stderr"
         errors++
@@ -164,14 +176,14 @@ if [ "$DO_VERIFY" -eq 1 ]; then
       total++
     }
     END {
-      for (s = 1; s <= 8; s++) {
+      for (s = 1; s <= 9; s++) {
         if (slice_counts[s] + 0 == 0) {
           printf("ERROR: Slice %d has 0 assigned files\n", s) > "/dev/stderr"
           errors++
         }
       }
       if (errors > 0) exit 1
-      printf("[vulkan-slices] Manifest syntax OK (%d unique tracked entries across Slices 0..8).\n", total)
+      printf("[vulkan-slices] Manifest syntax OK (%d unique tracked entries across Slices 0..9).\n", total)
     }
   ' "$MANIFEST_FILE"
 
@@ -204,17 +216,17 @@ if [ "$DO_VERIFY" -eq 1 ]; then
     fi
   done
 
-  # Verify strict acyclic Pascal uses-clause ordering across Slices 1..8:
-  # No .pas unit in Slice S (1..8) may list in its uses clause any unit whose .pas
-  # file is assigned to a strictly later Slice T > S!
+  # Verify strict acyclic Pascal uses-clause ordering across Slices 1..9:
+  # No .pas / .dpr file in Slice S (1..9) may list in its unguarded uses clause
+  # any unit whose .pas file is assigned to a strictly later Slice T > S!
   # Uses O(N) line-by-line streaming so BSD one-true-awk (macOS), mawk, and GNU gawk
   # all process multi-megabyte .pas files in < 50 ms without quadratic string copies.
-  echo "[vulkan-slices] Verifying acyclic Pascal uses-clause DAG across Slices 1..8..."
+  echo "[vulkan-slices] Verifying acyclic Pascal uses-clause DAG across Slices 1..9..."
   awk -F '\t' '
     function basename_no_ext(p,    n, arr, base) {
       n = split(p, arr, "/")
       base = tolower(arr[n])
-      sub(/\.pas$/, "", base)
+      sub(/\.(pas|dpr)$/, "", base)
       return base
     }
     function dirname_of(p,    idx) {
@@ -238,10 +250,25 @@ if [ "$DO_VERIFY" -eq 1 ]; then
         }
       }
     }
-    function scan_stream(root_pas, fpath, dir, s_from, depth,    line, inc_tag, inc_cand, probe, pos_open, pos_close, pre, post, semi_pos) {
+    function scan_stream(root_pas, fpath, dir, s_from, depth,    line, llow, inc_tag, inc_cand, probe, pos_open, pos_close, pre, post, semi_pos) {
       if (depth > 4) return
       while ((getline line < fpath) > 0) {
         sub(/\r$/, "", line)
+
+        # Skip explicitly conditional Slice-9 opt-in guards in example .dpr / testcases.pas
+        if (cstate == 0 && s_from < 9) {
+          llow = tolower(line)
+          if (exp_ifdef_depth > 0) {
+            if (llow ~ /\{\$if(n?def)?[[:space:]]/) exp_ifdef_depth++
+            else if (llow ~ /\{\$endif/) exp_ifdef_depth--
+            continue
+          }
+          if (llow ~ /\{\$ifdef[[:space:]]+castle_experimental_vulkan[[:space:]]*\}/ ||
+              (root_pas == "tests/testcases.pas" && llow ~ /\{\$ifndef[[:space:]]+castle_without_experimental[[:space:]]*\}/)) {
+            exp_ifdef_depth = 1
+            continue
+          }
+        }
 
         # Expand local {$I foo.inc} / {$INCLUDE foo.inc} directives when outside block comments
         if (cstate == 0 && match(line, /\{\$[iI]([nN][cC][lL][uU][dD][eE])?[[:space:]]+[^}[:space:]]+[[:space:]]*\}/)) {
@@ -358,10 +385,13 @@ if [ "$DO_VERIFY" -eq 1 ]; then
     {
       sid = $1 + 0
       path = $4
-      if (sid >= 1 && path ~ /\.pas$/ && (path ~ /^src\// || path ~ /^tools\// || path ~ /^tests\//)) {
-        u = basename_no_ext(path)
-        unit_slice[u] = sid
-        unit_path[u] = path
+      if (sid >= 1 && (path ~ /\.pas$/ || path ~ /\.dpr$/) &&
+          (path ~ /^src\// || path ~ /^tools\// || path ~ /^examples\// || path ~ /^tests\//)) {
+        if (path ~ /\.pas$/) {
+          u = basename_no_ext(path)
+          unit_slice[u] = sid
+          unit_path[u] = path
+        }
         pas_files[++pas_count] = path
         pas_slice[pas_count] = sid
       }
@@ -373,10 +403,11 @@ if [ "$DO_VERIFY" -eq 1 ]; then
         cstate = 0
         in_uses = 0
         uses_buf = ""
+        exp_ifdef_depth = 0
         scan_stream(pas_files[idx], pas_files[idx], dirname_of(pas_files[idx]), pas_slice[idx], 0)
       }
       if (violations > 0) exit 1
-      printf("[vulkan-slices] Pascal uses-clause DAG OK (%d .pas units checked, 0 forward cross-slice dependencies).\n", pas_count)
+      printf("[vulkan-slices] Pascal uses-clause DAG OK (%d .pas/.dpr targets checked, 0 forward cross-slice dependencies).\n", pas_count)
     }
   ' "$MANIFEST_FILE"
 
@@ -434,11 +465,13 @@ if [ "$DO_SUMMARY" -eq 1 ]; then
       if (cat == "auto-dproj") auto_dproj[sid]++
       else core[sid]++
       grand_total++
-      if (sid >= 1) upstream_total++
-      if (sid >= 1 && cat != "auto-dproj") upstream_core++
+      if (sid >= 1 && sid <= 8) {
+        upstream_total++
+        if (cat != "auto-dproj") upstream_core++
+      }
     }
     END {
-      printf(" %-7s %-44s %8s %10s %8s\n", "Slice", "PR Slug", "Core", "AutoDproj", "Total")
+      printf(" %-7s %-44s %8s %10s %8s\n", "Slice", "PR Slug", "Core/Exp", "AutoDproj", "Total")
       printf(" ------------------------------------------------------------------------------\n")
       for (s = 1; s <= 8; s++) {
         printf(" PR #%-3d %-44s %8d %10d %8d\n",
@@ -446,7 +479,11 @@ if [ "$DO_SUMMARY" -eq 1 ]; then
       }
       printf(" ------------------------------------------------------------------------------\n")
       printf(" %-7s %-44s %8d %10d %8d\n",
-        "1..8", "Total Upstream PR Scope", upstream_core + 0, auto_dproj[3] + 0, upstream_total + 0)
+        "1..8", "Core Production Upstream PR Scope", upstream_core + 0, auto_dproj[3] + 0, upstream_total + 0)
+      if (total[9] + 0 > 0) {
+        printf(" %-7s %-44s %8d %10d %8d\n",
+          "Opt(9)", slug[9] " (optional)", core[9] + 0, 0, total[9] + 0)
+      }
       if (total[0] + 0 > 0) {
         printf(" %-7s %-44s %8d %10d %8d\n",
           "Meta(0)", slug[0] " (branch-only)", core[0] + 0, 0, total[0] + 0)
@@ -470,15 +507,18 @@ if [ -n "$EXPORT_DIR" ]; then
   SERIES_FILE="${EXPORT_DIR}/SERIES.txt"
   : > "$SERIES_FILE"
 
-  for s in 1 2 3 4 5 6 7 8; do
+  for s in 1 2 3 4 5 6 7 8 9; do
     SLUG="$(awk -F '\t' -v target="$s" '{ sub(/\r$/, "") } $1 == target { print $2; exit }' "$MANIFEST_FILE")"
+    if [ -z "$SLUG" ]; then
+      continue
+    fi
     PATCH_NAME="$(printf '%02d-%s.patch' "$s" "$SLUG")"
     PATCH_PATH="${EXPORT_DIR}/${PATCH_NAME}"
 
     MAP_FILES="$(mktemp)"
     awk -F '\t' -v target="$s" '{ sub(/\r$/, "") } $1 == target && $3 != "auto-dproj" { print $4 }' "$MANIFEST_FILE" > "$MAP_FILES"
 
-    # Export committed + working-tree diff against BASE_COMMIT for core files in slice s
+    # Export committed + working-tree diff against BASE_COMMIT for core/experimental files in slice s
     git diff --binary "${BASE_COMMIT}" -- $(cat "$MAP_FILES") > "$PATCH_PATH"
     rm -f "$MAP_FILES"
     echo "$PATCH_NAME" >> "$SERIES_FILE"

@@ -1,8 +1,9 @@
 # Castle Game Engine — Vulkan 1.3+ Renderer Upstream PR Slice Manifest
 # Format: slice_id<TAB>slice_slug<TAB>category<TAB>path
 #   slice_id = 0 : Branch-internal engineering roadmap/handover docs (excluded from upstream PRs)
-#   slice_id = 1..8 : Dependency-ordered upstream review & PR slices (strictly acyclic Pascal uses DAG)
-#   category = core | auto-dproj | branch-meta
+#   slice_id = 1..8 : Dependency-ordered core upstream review & PR slices (strictly acyclic Pascal uses DAG)
+#   slice_id = 9 : Optional standalone UE5/RTX experimental research slice (0 core PRs 1..8 depend on it)
+#   category = core | auto-dproj | experimental | branch-meta
 0	branch-handover-meta	branch-meta	AGENTS.md
 0	branch-handover-meta	branch-meta	PLAN.md
 1	vulkan-bindings-generator	core	.gitattributes
@@ -75,15 +76,6 @@
 2	rhi-core-and-vulkan-backend	core	src/base/castlerenderoptions.pas
 2	rhi-core-and-vulkan-backend	core	src/base/castlerenderoptions_globals.inc
 2	rhi-core-and-vulkan-backend	core	src/base/castlerenderoptions_renderoptions.inc
-2	rhi-core-and-vulkan-backend	core	src/base_rendering/experimental/README.md
-2	rhi-core-and-vulkan-backend	core	src/base_rendering/experimental/castleinternalrhi_vulkan_experimental.pas
-2	rhi-core-and-vulkan-backend	core	src/base_rendering/experimental/castleinternalrhi_vulkan_experimental_gpu_driven.inc
-2	rhi-core-and-vulkan-backend	core	src/base_rendering/experimental/castleinternalrhi_vulkan_experimental_lighting_gi.inc
-2	rhi-core-and-vulkan-backend	core	src/base_rendering/experimental/castleinternalrhi_vulkan_experimental_types.inc
-2	rhi-core-and-vulkan-backend	core	src/base_rendering/experimental/castleinternalshaderrhi_experimental.pas
-2	rhi-core-and-vulkan-backend	core	src/base_rendering/experimental/castleinternalshaderrhi_experimental_nextgen.inc
-2	rhi-core-and-vulkan-backend	core	src/base_rendering/experimental/castleinternalshaderrhi_experimental_pbr_env.inc
-2	rhi-core-and-vulkan-backend	core	src/base_rendering/experimental/castleinternalshaderrhi_experimental_types.inc
 2	rhi-core-and-vulkan-backend	core	src/base_rendering/rhi/castleinternalrhi.pas
 2	rhi-core-and-vulkan-backend	core	src/base_rendering/rhi/castleinternalrhi_core_impl.inc
 2	rhi-core-and-vulkan-backend	core	src/base_rendering/rhi/castleinternalrhi_rendergraph.inc
@@ -407,6 +399,24 @@
 8	tests-ci-and-documentation	core	tests/CastleEngineManifest.xml
 8	tests-ci-and-documentation	core	tests/castle_tester_standalone.lpi
 8	tests-ci-and-documentation	core	tests/code/testcases/testcastlevulkanrhi.pas
+8	tests-ci-and-documentation	core	tests/code/testcases/testcastlevulkanrhi_part1_core_2d.inc
+8	tests-ci-and-documentation	core	tests/code/testcases/testcastlevulkanrhi_part2_pbr_post_wsi.inc
+8	tests-ci-and-documentation	core	tests/code/testcases/testcastlevulkanrhi_part3_scene_x3d_a.inc
+8	tests-ci-and-documentation	core	tests/code/testcases/testcastlevulkanrhi_part4_scene_x3d_b.inc
+8	tests-ci-and-documentation	core	tests/code/testcases/testcastlevulkanrhi_part5_scene_x3d_c.inc
+8	tests-ci-and-documentation	core	tests/code/testcases/testcastlevulkanrhi_part6_live_gpu_a.inc
+8	tests-ci-and-documentation	core	tests/code/testcases/testcastlevulkanrhi_part7_live_gpu_b.inc
+8	tests-ci-and-documentation	core	tests/code/testcases/testcastlevulkanrhi_part8_vendors_slices.inc
 8	tests-ci-and-documentation	core	tests/testcases.pas
 8	tests-ci-and-documentation	core	tools/internal/vulkan_upstream_slices/prepare_upstream_slices.sh
 8	tests-ci-and-documentation	core	tools/internal/vulkan_upstream_slices/slice_manifest.tsv
+9	experimental-ue5-rtx-research	experimental	src/base_rendering/experimental/README.md
+9	experimental-ue5-rtx-research	experimental	src/base_rendering/experimental/castleinternalrhi_vulkan_experimental.pas
+9	experimental-ue5-rtx-research	experimental	src/base_rendering/experimental/castleinternalrhi_vulkan_experimental_gpu_driven.inc
+9	experimental-ue5-rtx-research	experimental	src/base_rendering/experimental/castleinternalrhi_vulkan_experimental_lighting_gi.inc
+9	experimental-ue5-rtx-research	experimental	src/base_rendering/experimental/castleinternalrhi_vulkan_experimental_types.inc
+9	experimental-ue5-rtx-research	experimental	src/base_rendering/experimental/castleinternalshaderrhi_experimental.pas
+9	experimental-ue5-rtx-research	experimental	src/base_rendering/experimental/castleinternalshaderrhi_experimental_nextgen.inc
+9	experimental-ue5-rtx-research	experimental	src/base_rendering/experimental/castleinternalshaderrhi_experimental_pbr_env.inc
+9	experimental-ue5-rtx-research	experimental	src/base_rendering/experimental/castleinternalshaderrhi_experimental_types.inc
+9	experimental-ue5-rtx-research	experimental	tests/code/testcases/testcastlevulkanrhi_experimental.pas

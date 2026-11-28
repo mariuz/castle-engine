@@ -203,9 +203,13 @@ CGE uses bottom-up 2D/viewport rectangles and right-handed Y-up 3D clip coordina
 
 ### 7.2 Running the `TTestCastleVulkanRHI` Suite
 ```bash
-# Compile and run all 393 TTestCastleVulkanRHI unit & visual-parity tests via castle-engine:
+# Compile and run all 394 Vulkan RHI tests (292 core TTestCastleVulkanRHI + 102 TTestCastleVulkanRHIExperimental):
 CASTLE_VULKAN_VALIDATION=1 ./tools/build-tool/castle-engine --project ./tests/ compile --mode=debug
 CASTLE_VULKAN_VALIDATION=1 ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI*
+
+# Or compile & run strictly the 292 core production RHI tests without experimental units:
+CASTLE_VULKAN_VALIDATION=1 ./tools/build-tool/castle-engine --project ./tests/ compile --mode=debug --compiler-option=-dCASTLE_WITHOUT_EXPERIMENTAL
+CASTLE_VULKAN_VALIDATION=1 ./tools/build-tool/castle-engine --project ./tests/ run -- --console --filter=TTestCastleVulkanRHI.*
 ```
 
 ### 7.3 Troubleshooting Common Issues
