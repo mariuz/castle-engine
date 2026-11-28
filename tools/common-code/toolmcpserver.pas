@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers, CastleBlueprintScs, ToolBlueprintScs, CastleVertexPaint, ToolVertexPaint, CastleTakeRecorder, ToolTakeRecorder, CastleInterchange, ToolInterchange;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers, CastleBlueprintScs, ToolBlueprintScs, CastleVertexPaint, ToolVertexPaint, CastleTakeRecorder, ToolTakeRecorder, CastleInterchange, ToolInterchange, CastleLightmassBaker, ToolLightmassBaker;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1247,6 +1247,15 @@ begin
   AddToolDef('cge_run_interchange_import',
     'Spawn UInterchangeManager asset import pipelines, extract UCX_/SOCKET_ nodes, lock Material Instance slot overrides, and run non-destructive 1-click Reimport.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'GPU Lightmass operation: status, spawn_preset, bake_lightmaps, or invalidate_lighting (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleLightmassBaker name (defaults to first Lightmass baker in design).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: cornell_room, sunbeam_cloister, or torch_crypt (default cornell_room).'));
+  P.Add('bounces', MakePropSchema('integer', 'Indirect diffuse radiosity bounces 0..5 for bake_lightmaps (default 2).'));
+  AddToolDef('cge_bake_static_lightmaps',
+    'Spawn GPU Lightmass static lightmap & AO bakers, bake multi-bounce UV2 radiosity atlases with 2px gutter seam dilation, or invalidate unbuilt lighting.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1464,6 +1473,10 @@ var
   IchgComp: TCastleInterchangePipeline;
   IchgPresetVal: TInterchangePipelinePreset;
   IchgSlotStr, IchgMiUrl: String;
+  LmAudit: TLightmassSceneAudit;
+  LmComp: TCastleLightmassBaker;
+  LmPresetVal: TLightmassBakePreset;
+  LmBounces: Integer;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -4083,6 +4096,88 @@ begin
         OutPayload.Add('extractedSockets', IchgComp.ExtractedSocketCount);
         OutPayload.Add('lockedOverrides', IchgComp.LockedSlotOverrideCount);
         OutPayload.Add('summaryBadge', IchgComp.InterchangeSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_bake_static_lightmaps' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    LmPresetVal := lbpCornellColorBleedRoom;
+    LmBounces := 2;
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      LmBounces := ArgsObj.Get('bounces', 2);
+      if SameText(ArgsObj.Get('preset', ''), 'sunbeam_cloister') then
+        LmPresetVal := lbpArchwaySunbeamCloister
+      else if SameText(ArgsObj.Get('preset', ''), 'torch_crypt') then
+        LmPresetVal := lbpSubterraneanTorchCrypt;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'bake_lightmaps') or
+       SameText(ActionStr, 'invalidate_lighting') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      LmComp := TLightmassBakerHelper.SpawnLightmassPresetInDesign(
+        DesignRoot, DesignOwner, LmPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn GPU Lightmass Baker');
+    end else
+      LmComp := TLightmassBakerHelper.FindLightmassBakerByName(DesignRoot, DesignOwner, CompName);
+
+    if (LmComp <> nil) and SameText(ActionStr, 'invalidate_lighting') then
+    begin
+      LmComp.InvalidateLighting;
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Invalidate Static Lighting');
+    end else
+    if (LmComp <> nil) and SameText(ActionStr, 'bake_lightmaps') then
+    begin
+      LmComp.IndirectBounces := LmBounces;
+      LmComp.BakeStaticLightmaps;
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Bake GPU Lightmass UV2 Lightmaps');
+    end;
+
+    LmAudit := TLightmassBakerHelper.AuditLightmassInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('bakerCount', LmAudit.BakerCount);
+      OutPayload.Add('unbuiltVolumeCount', LmAudit.UnbuiltVolumeCount);
+      OutPayload.Add('totalInteriorTexels', LmAudit.TotalInteriorTexels);
+      OutPayload.Add('totalDilatedTexels', LmAudit.TotalDilatedTexels);
+      OutPayload.Add('avgSkyAo01', LmAudit.AvgSkyAo01);
+      OutPayload.Add('avgIndirectLum', LmAudit.AvgIndirectLum);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if LmComp <> nil then
+      begin
+        OutPayload.Add('activeBaker', LmComp.Name);
+        OutPayload.Add('chartCount', LmComp.ChartCount);
+        OutPayload.Add('undilatedSeamLeaks', LmComp.UndilatedAdjacentGutterCount);
+        OutPayload.Add('summaryBadge', LmComp.LightmassSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

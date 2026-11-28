@@ -622,6 +622,7 @@ begin
     P.Targets.AddUnit('castlevertexpaint.pas');
     P.Targets.AddUnit('castletakerecorder.pas');
     P.Targets.AddUnit('castleinterchange.pas');
+    P.Targets.AddUnit('castlelightmassbaker.pas');
     P.Targets.AddUnit('castlegameplayability.pas');
     P.Targets.AddUnit('castlegameplaycue.pas');
     P.Targets.AddUnit('castlegameplaydebugger.pas');

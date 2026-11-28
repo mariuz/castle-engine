@@ -391,6 +391,7 @@ contains
   castlevertexpaint in '..\..\src\scene\castlevertexpaint.pas',
   castletakerecorder in '..\..\src\scene\castletakerecorder.pas',
   castleinterchange in '..\..\src\scene\castleinterchange.pas',
+  castlelightmassbaker in '..\..\src\scene\castlelightmassbaker.pas',
   castlegameplayability in '..\..\src\scene\castlegameplayability.pas',
   castlegameplaycue in '..\..\src\scene\castlegameplaycue.pas',
   castlegameplaydebugger in '..\..\src\scene\castlegameplaydebugger.pas',

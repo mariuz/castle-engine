@@ -225,6 +225,7 @@ uses
   TestToolVertexPaint,
   TestToolTakeRecorder,
   TestToolInterchange,
+  TestToolLightmassBaker,
   TestCastleVulkanRHI;
 
 implementation

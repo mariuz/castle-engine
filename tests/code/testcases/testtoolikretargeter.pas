@@ -153,7 +153,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify 107 UE Studios in Studio Hub (Phase 387 ik_retargeter) }
-  AssertEquals(118, TStudioHubManager.StudioCount);
+  AssertEquals(119, TStudioHubManager.StudioCount);
   AssertTrue(TStudioHubManager.FindStudioById('ik_retargeter', Entry));
   AssertEquals(387, Entry.PhaseNumber);
 
@@ -173,7 +173,7 @@ begin
     try
       ToolsArr := OuterJson.FindPath('result.tools') as TJSONArray;
       AssertTrue(ToolsArr <> nil);
-      AssertEquals(41, ToolsArr.Count);
+      AssertEquals(42, ToolsArr.Count);
     finally
       FreeAndNil(OuterJson);
     end;
@@ -189,7 +189,7 @@ begin
         AssertEquals(1, PayloadObj.Integers['retargeterCount']);
         AssertEquals(7, PayloadObj.Integers['totalMappedChains']);
         AssertEquals(4, PayloadObj.Integers['ikEnabledChainCount']);
-        AssertEquals(118, PayloadObj.Integers['studioCatalogCount']);
+        AssertEquals(119, PayloadObj.Integers['studioCatalogCount']);
       finally
         FreeAndNil(InnerJson);
       end;

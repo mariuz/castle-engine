@@ -24,7 +24,7 @@ See https://castle-engine.io/features for the complete list of engine features.
 Unreal Engine 5.x Editor Modernization & Blueprint Visual Scripting
 -------------------------------------------------------------------
 
-This branch modernizes `castle-editor` and the Castle Game Engine runtime toward **Unreal Engine 5.5 parity** across **398+ Phases** (Horizons 1–12 Complete; Horizons 13–14 Active), **118 Specialized Editor Studios** (`Ctrl+Shift+P` Studio Hub), and an embedded **41-Tool Model Context Protocol (MCP) JSON-RPC 2.0 Server** (`http://127.0.0.1:8765/mcp`):
+This branch modernizes `castle-editor` and the Castle Game Engine runtime toward **Unreal Engine 5.5 parity** across **399+ Phases** (Horizons 1–12 Complete; Horizons 13–14 Active), **119 Specialized Editor Studios** (`Ctrl+Shift+P` Studio Hub), and an embedded **42-Tool Model Context Protocol (MCP) JSON-RPC 2.0 Server** (`http://127.0.0.1:8765/mcp`):
 
 ![Castle Game Engine — Blueprint Visual Scripting Editor (EventGraph, Construction Script & Nativizer)](docs/images/blueprint_editor.png)
 
@@ -61,6 +61,8 @@ This branch modernizes `castle-editor` and the Castle Game Engine runtime toward
 ![Castle Game Engine — Take Recorder & Live Link Real-Time Streaming Studio (SMPTE Slate/Take, Douglas-Peucker ReduceKeys & LiveLink Subject Hub)](docs/images/take_recorder_livelink_editor.png)
 
 ![Castle Game Engine — Interchange Asset Import Pipeline & Reimport Studio (Z-Up/cm Conversion, UCX_/SOCKET_ Extraction & Override-Preserving Reimport)](docs/images/interchange_pipeline_editor.png)
+
+![Castle Game Engine — Static Lightmap & Ambient Occlusion Atlas Baker (GPU Lightmass Cornell Color Bleeding & 2px Dilated UV2 Atlas)](docs/images/lightmass_baker_editor.png)
 
 * **Blueprint Visual Scripting Editor (`TCastleBlueprint`)**: Interactive 2D **EventGraph** (`EventBeginPlay`, `EventTick`, `EventActorBeginOverlap`, `CustomEvent`) and live in-editor **Construction Script**, white `Exec` wires + color-coded typed `Data` pins, member variables (`Get`/`Set`), flow control (`Branch`, `Sequence`, `ForLoop`, `DoOnce`, `FlipFlop`, `Gate`), latent `Delay` & `Timeline` (`0..1` Hermite curve) schedulers, node **Breakpoints (`F9`)** with live Wire Watch & execution-trace highlighting, and **Blueprint Nativization** to FreePascal `TCastleBehavior` units.
 * **Animation Blueprint (`TCastleAnimBlueprint`), Behavior Tree (`TCastleBehaviorTree`), Skeletal IK Retargeter (`TCastleIkRetargeter`) & Physics Asset Editor (`TCastlePhysicsAsset`)**: Visual `AnimGraph` pose evaluation DAG (`State Machine`, `Layered Blend Per Bone`, `Cached Pose`, `Two-Bone IK`, looping `AnimNotify` & `AnimNotifyState` tracks), `UBehaviorTree` AI editor (`Selector`, `Sequence`, `SimpleParallel`, `ExecutionIndex` priority badges, Blackboard-driven `Decorators` with `Self`/`LowerPriority`/`Both` **Observer Aborts**, and periodic branch `Services`), 7-chain cross-skeleton `UIKRetargeter` (`T-Pose <-> A-Pose` reference delta compensation & pelvis stride scaling), and `PhAT` ragdoll body/joint-cone authoring (`Capsule`/`Sphere`/`Box` mass fitting, elliptical `Swing1`/`Swing2` & `Twist` cones, collision disable matrix, and limb poke testing).

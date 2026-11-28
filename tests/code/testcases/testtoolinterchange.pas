@@ -168,7 +168,7 @@ var
   FoundTool: Boolean;
   I: Integer;
 begin
-  AssertEquals(118, TStudioHubManager.StudioCount);
+  AssertEquals(119, TStudioHubManager.StudioCount);
   AssertTrue(TStudioHubManager.FindStudioById('interchange_pipeline', Entry));
   AssertEquals(398, Entry.PhaseNumber);
 
@@ -190,7 +190,7 @@ begin
     try
       ToolsArr := ParsedResp.FindPath('result.tools') as TJSONArray;
       AssertTrue(ToolsArr <> nil);
-      AssertEquals(41, ToolsArr.Count);
+      AssertEquals(42, ToolsArr.Count);
       FoundTool := False;
       for I := 0 to ToolsArr.Count - 1 do
         if TJSONObject(ToolsArr.Items[I]).Get('name', '') = 'cge_run_interchange_import' then
@@ -209,7 +209,7 @@ begin
       try
         AssertEquals(1, TJSONObject(InnerData).Get('pipelineCount', 0));
         AssertEquals(4, TJSONObject(InnerData).Get('extractedColliders', 0));
-        AssertEquals(118, TJSONObject(InnerData).Get('studioCatalogCount', 0));
+        AssertEquals(119, TJSONObject(InnerData).Get('studioCatalogCount', 0));
       finally
         FreeAndNil(InnerData);
       end;
@@ -237,7 +237,7 @@ begin
     end;
 
     MdReport := TStudioHubManager.BuildExecutiveMarkdownReport(RootUi, OwnerComp);
-    AssertTrue(Pos('`118` across `6` domains', MdReport) > 0);
+    AssertTrue(Pos('`119` across `6` domains', MdReport) > 0);
   finally
     FreeAndNil(Mcp);
     FreeAndNil(OwnerComp);

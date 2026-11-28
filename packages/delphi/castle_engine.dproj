@@ -552,6 +552,7 @@
         <DCCReference Include="..\..\src\scene\castlevertexpaint.pas"/>
         <DCCReference Include="..\..\src\scene\castletakerecorder.pas"/>
         <DCCReference Include="..\..\src\scene\castleinterchange.pas"/>
+        <DCCReference Include="..\..\src\scene\castlelightmassbaker.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplayability.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaycue.pas"/>
         <DCCReference Include="..\..\src\scene\castlegameplaydebugger.pas"/>

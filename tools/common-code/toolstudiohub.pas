@@ -138,7 +138,7 @@ uses
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
   CastleUvEditor, CastleLevelInstance, CastleMaterialInstance, CastleMeshEditor,
   CastleRecastNavMesh, CastleLandscapeLayers, CastleBlueprintScs, CastleVertexPaint,
-  CastleTakeRecorder, CastleInterchange;
+  CastleTakeRecorder, CastleInterchange, CastleLightmassBaker;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -600,6 +600,9 @@ begin
   Reg('interchange_pipeline', 'Interchange Asset Import Pipeline & Reimport Rules Studio', 'Interchg',
     shcArchitecturePcg, 398, 'interchange asset import pipeline uinterchangemanager uinterchangepipelinestack fbx gltf zup yup cm ucx ubx usp socket srgb linear orm normal reimport override mcp',
     'DCC Z-Up/cm conversion, UCX_/SOCKET_ extraction, sRGB/Linear ORM rules & override-preserving 1-click Reimport (41st MCP).');
+  Reg('lightmass_baker', 'Static Lightmap & Ambient Occlusion Atlas Baker (GPU Lightmass)', 'Lightmass',
+    shcMaterialsVfxLighting, 399, 'gpu lightmass static lightmap ambient occlusion ao baker uv2 chart packing seam dilation radiosity color bleeding indirect bounces unbuilt lighting mcp',
+    'Hemisphere ray-cast Sky AO + multi-bounce diffuse radiosity UV2 lightmap baking with 2px gutter seam dilation (42nd MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -820,6 +823,8 @@ var
       BumpSub(shcCinematicsAudioInput);
     if C is TCastleInterchangePipeline then
       BumpSub(shcArchitecturePcg);
+    if C is TCastleLightmassBaker then
+      BumpSub(shcMaterialsVfxLighting);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

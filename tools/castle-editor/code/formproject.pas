@@ -712,6 +712,7 @@ type
       MenuItemVertexPaint: TMenuItem;
       MenuItemTakeRecorder: TMenuItem;
       MenuItemInterchange: TMenuItem;
+      MenuItemLightmassBaker: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -844,6 +845,7 @@ type
     procedure MenuItemVertexPaintClick(Sender: TObject);
     procedure MenuItemTakeRecorderClick(Sender: TObject);
     procedure MenuItemInterchangeClick(Sender: TObject);
+    procedure MenuItemLightmassBakerClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3064,6 +3066,11 @@ begin
   MenuItemInterchange.Caption := 'Interchange Asset Import Pipeline & Reimport Rules Studio...';
   MenuItemInterchange.OnClick := @MenuItemInterchangeClick;
   MenuItemDesign.Add(MenuItemInterchange);
+
+  MenuItemLightmassBaker := TMenuItem.Create(MenuItemDesign);
+  MenuItemLightmassBaker.Caption := 'Static Lightmap & Ambient Occlusion Atlas Baker (GPU Lightmass)...';
+  MenuItemLightmassBaker.OnClick := @MenuItemLightmassBakerClick;
+  MenuItemDesign.Add(MenuItemLightmassBaker);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6748,6 +6755,12 @@ procedure TProjectForm.MenuItemInterchangeClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowInterchangeDialog;
+end;
+
+procedure TProjectForm.MenuItemLightmassBakerClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowLightmassBakerDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
