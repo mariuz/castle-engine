@@ -39206,14 +39206,14 @@ procedure TTestCastleVulkanRHI.TestExperimentalSubsystemsIsolatedFromCoreRHIUnit
   end;
 
   procedure AssertCoreDirectoryFreeOfExperimentalRefs(
-    const ARelDir: String; const AForbiddenTokens: array of String);
+    const ARepoRootDir, ARelDir: String; const AForbiddenTokens: array of String);
   var
     FullDir, FileText, LowerExt: String;
     SR: TSearchRec;
     K: Integer;
   begin
-    FullDir := ExtractFileDir(ResolveRepoExampleFile(ARelDir + '/dummy'));
-    AssertTrue('Core source directory must exist: ' + ARelDir, DirectoryExists(FullDir));
+    FullDir := ARepoRootDir + StringReplace(ARelDir, '/', PathDelim, [rfReplaceAll]);
+    AssertTrue('Core source directory must exist: ' + FullDir, DirectoryExists(FullDir));
     if FindFirst(InclPathDelim(FullDir) + '*', faAnyFile and (not faDirectory), SR) = 0 then
     begin
       try
@@ -39259,12 +39259,16 @@ const
   );
 var
   I: Integer;
-  ExpFilePath, DeletedCoreNextGenPath, SDFGLSL: String;
+  RepoRootDir, ExpFilePath, DeletedCoreNextGenPath, SDFGLSL: String;
   ShaderGen: TCastleShaderGeneratorRHI;
   Dev: TVulkanRHIDevice;
   Cmd: TVulkanRHICommandList;
   ExecCount: Cardinal;
 begin
+  RepoRootDir := ExpandFileName(InclPathDelim(ExtractFilePath(
+    ResolveRepoExampleFile('tools/internal/vulkan_upstream_slices/slice_manifest.tsv'))) + '../../..');
+  RepoRootDir := InclPathDelim(RepoRootDir);
+
   { 1. Verify opt-in experimental directory files exist and deleted core nextgen.inc is gone }
   for I := Low(ExpectedExpFiles) to High(ExpectedExpFiles) do
   begin
@@ -39278,12 +39282,12 @@ begin
     FileExists(DeletedCoreNextGenPath));
 
   { 2. Verify zero core engine directories reference experimental units or speculative classes }
-  AssertCoreDirectoryFreeOfExperimentalRefs('src/base_rendering/rhi', ForbiddenExperimentalTokens);
-  AssertCoreDirectoryFreeOfExperimentalRefs('src/base_rendering/vulkan', ForbiddenExperimentalTokens);
-  AssertCoreDirectoryFreeOfExperimentalRefs('src/base_rendering/opengl', ForbiddenExperimentalTokens);
-  AssertCoreDirectoryFreeOfExperimentalRefs('src/scene', ForbiddenExperimentalTokens);
-  AssertCoreDirectoryFreeOfExperimentalRefs('src/window', ForbiddenExperimentalTokens);
-  AssertCoreDirectoryFreeOfExperimentalRefs('src/ui', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs(RepoRootDir, 'src/base_rendering/rhi', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs(RepoRootDir, 'src/base_rendering/vulkan', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs(RepoRootDir, 'src/base_rendering/opengl', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs(RepoRootDir, 'src/scene', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs(RepoRootDir, 'src/window', ForbiddenExperimentalTokens);
+  AssertCoreDirectoryFreeOfExperimentalRefs(RepoRootDir, 'src/ui', ForbiddenExperimentalTokens);
 
   { 3. Verify lazy per-device ExperimentalContext lifecycle, class helpers & callback hooks }
   ShaderGen := TCastleShaderGeneratorRHI.Create(rbVulkan);
