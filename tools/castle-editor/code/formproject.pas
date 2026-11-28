@@ -711,6 +711,7 @@ type
       MenuItemBlueprintScs: TMenuItem;
       MenuItemVertexPaint: TMenuItem;
       MenuItemTakeRecorder: TMenuItem;
+      MenuItemInterchange: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -842,6 +843,7 @@ type
     procedure MenuItemBlueprintScsClick(Sender: TObject);
     procedure MenuItemVertexPaintClick(Sender: TObject);
     procedure MenuItemTakeRecorderClick(Sender: TObject);
+    procedure MenuItemInterchangeClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -3057,6 +3059,11 @@ begin
   MenuItemTakeRecorder.Caption := 'Take Recorder & Live Link Real-Time Streaming Studio...';
   MenuItemTakeRecorder.OnClick := @MenuItemTakeRecorderClick;
   MenuItemDesign.Add(MenuItemTakeRecorder);
+
+  MenuItemInterchange := TMenuItem.Create(MenuItemDesign);
+  MenuItemInterchange.Caption := 'Interchange Asset Import Pipeline & Reimport Rules Studio...';
+  MenuItemInterchange.OnClick := @MenuItemInterchangeClick;
+  MenuItemDesign.Add(MenuItemInterchange);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -6735,6 +6742,12 @@ procedure TProjectForm.MenuItemTakeRecorderClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowTakeRecorderDialog;
+end;
+
+procedure TProjectForm.MenuItemInterchangeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowInterchangeDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

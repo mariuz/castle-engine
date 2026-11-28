@@ -224,6 +224,7 @@ uses
   TestToolBlueprintScs,
   TestToolVertexPaint,
   TestToolTakeRecorder,
+  TestToolInterchange,
   TestCastleVulkanRHI;
 
 implementation

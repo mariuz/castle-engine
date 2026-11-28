@@ -138,7 +138,7 @@ uses
   CastleNiagaraStack, CastleWidgetAnim, CastleIkRetargeter, CastlePhysicsAsset,
   CastleUvEditor, CastleLevelInstance, CastleMaterialInstance, CastleMeshEditor,
   CastleRecastNavMesh, CastleLandscapeLayers, CastleBlueprintScs, CastleVertexPaint,
-  CastleTakeRecorder;
+  CastleTakeRecorder, CastleInterchange;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -597,6 +597,9 @@ begin
   Reg('take_recorder_livelink', 'Take Recorder & Live Link Real-Time Streaming Studio', 'TakeRec',
     shcCinematicsAudioInput, 397, 'take recorder livelink utakerecorder ilivelinkclient smpte timecode slate take douglas peucker reducekeys mocap vcam camera dejitter buffer mcp',
     'PIE gameplay-to-Sequencer clip capture, Douglas-Peucker ReduceKeys compression & LiveLink subject hub (40th MCP).');
+  Reg('interchange_pipeline', 'Interchange Asset Import Pipeline & Reimport Rules Studio', 'Interchg',
+    shcArchitecturePcg, 398, 'interchange asset import pipeline uinterchangemanager uinterchangepipelinestack fbx gltf zup yup cm ucx ubx usp socket srgb linear orm normal reimport override mcp',
+    'DCC Z-Up/cm conversion, UCX_/SOCKET_ extraction, sRGB/Linear ORM rules & override-preserving 1-click Reimport (41st MCP).');
 end;
 
 class function TStudioHubManager.StudioCount: Integer;
@@ -815,6 +818,8 @@ var
       BumpSub(shcMaterialsVfxLighting);
     if C is TCastleTakeRecorder then
       BumpSub(shcCinematicsAudioInput);
+    if C is TCastleInterchangePipeline then
+      BumpSub(shcArchitecturePcg);
 
     { Architecture, CSG, Splines & Soft-Body }
     if C is TCastleCsgModeler then BumpSub(shcArchitecturePcg);

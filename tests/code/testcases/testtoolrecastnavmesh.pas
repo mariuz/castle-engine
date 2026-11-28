@@ -158,7 +158,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify 113 UE Studios in Studio Hub (Phase 393 recast_navmesh) }
-  AssertEquals(117, TStudioHubManager.StudioCount);
+  AssertEquals(118, TStudioHubManager.StudioCount);
   AssertTrue(TStudioHubManager.FindStudioById('recast_navmesh', Entry));
   AssertEquals(393, Entry.PhaseNumber);
 
@@ -178,7 +178,7 @@ begin
     try
       ToolsArr := OuterJson.FindPath('result.tools') as TJSONArray;
       AssertTrue(ToolsArr <> nil);
-      AssertEquals(40, ToolsArr.Count);
+      AssertEquals(41, ToolsArr.Count);
     finally
       FreeAndNil(OuterJson);
     end;
@@ -195,7 +195,7 @@ begin
         AssertTrue(PayloadObj.Integers['polyCount'] >= 6);
         AssertTrue(PayloadObj.Integers['stackedFloorPairs'] >= 1);
         AssertTrue(PayloadObj.Booleans['pathFound']);
-        AssertEquals(117, PayloadObj.Integers['studioCatalogCount']);
+        AssertEquals(118, PayloadObj.Integers['studioCatalogCount']);
       finally
         FreeAndNil(InnerJson);
       end;

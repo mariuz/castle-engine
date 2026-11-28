@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers, CastleBlueprintScs, ToolBlueprintScs, CastleVertexPaint, ToolVertexPaint, CastleTakeRecorder, ToolTakeRecorder;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub, ToolTelemetryInsights, ToolRegressionHarness, ToolLiveCookAuditor, ToolCollabPresence, ToolMacroRecorder, ToolPrefabDiffMerge, ToolBudgetTreemap, ToolLodInstancing, ToolShaderComplexity, CastleBlueprint, ToolBlueprintEditor, CastlePcgGraph, ToolPcgGraph, CastleAnimBlueprint, ToolAnimBlueprint, CastleBehaviorTree, ToolBehaviorTree, CastleNiagaraStack, ToolNiagaraStack, CastleWidgetAnim, ToolWidgetAnim, CastleIkRetargeter, ToolIkRetargeter, CastlePhysicsAsset, ToolPhysicsAsset, CastleUvEditor, ToolUvEditor, CastleLevelInstance, ToolLevelInstance, CastleMaterialInstance, ToolMaterialInstance, CastleMeshEditor, ToolMeshEditor, CastleRecastNavMesh, ToolRecastNavMesh, CastleLandscapeLayers, ToolLandscapeLayers, CastleBlueprintScs, ToolBlueprintScs, CastleVertexPaint, ToolVertexPaint, CastleTakeRecorder, ToolTakeRecorder, CastleInterchange, ToolInterchange;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -1237,6 +1237,16 @@ begin
   AddToolDef('cge_record_take_livelink',
     'Spawn Take Recorder & LiveLink hubs, record auto-incrementing SMPTE Slate/Takes, run Douglas-Peucker ReduceKeys, and audit LiveLink subject health.',
     P, []);
+
+  P := TJSONObject.Create;
+  P.Add('action', MakePropSchema('string', 'Interchange Pipeline operation: status, spawn_preset, lock_slot_override, or reimport_dcc_update (default status).'));
+  P.Add('name', MakePropSchema('string', 'Optional target TCastleInterchangePipeline name (defaults to first Interchange pipeline in design).'));
+  P.Add('preset', MakePropSchema('string', 'Preset for spawn_preset: architecture_fbx, hero_rig_gltf, or foliage_canopy (default architecture_fbx).'));
+  P.Add('slotName', MakePropSchema('string', 'Material slot name for lock_slot_override (default Slot_PortcullisIron).'));
+  P.Add('miUrl', MakePropSchema('string', 'Material Instance URL for lock_slot_override.'));
+  AddToolDef('cge_run_interchange_import',
+    'Spawn UInterchangeManager asset import pipelines, extract UCX_/SOCKET_ nodes, lock Material Instance slot overrides, and run non-destructive 1-click Reimport.',
+    P, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1450,6 +1460,10 @@ var
   TakeComp: TCastleTakeRecorder;
   TakePresetVal: TTakeRecorderPreset;
   TakePosTol: Single;
+  IchgAudit: TInterchangeSceneAudit;
+  IchgComp: TCastleInterchangePipeline;
+  IchgPresetVal: TInterchangePipelinePreset;
+  IchgSlotStr, IchgMiUrl: String;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -3987,6 +4001,88 @@ begin
         OutPayload.Add('takeNumber', TakeComp.TakeNumber);
         OutPayload.Add('keyReductionPct', TakeComp.KeyReductionPercent);
         OutPayload.Add('summaryBadge', TakeComp.TakeRecorderSummaryBadge);
+      end;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_run_interchange_import' then
+  begin
+    ActionStr := 'status';
+    CompName := '';
+    IchgPresetVal := ippModularArchitectureProps;
+    IchgSlotStr := 'Slot_PortcullisIron';
+    IchgMiUrl := 'castle-data:/materials/MI_RustedDamascusSteel.castle-material';
+    if ArgsObj <> nil then
+    begin
+      ActionStr := LowerCase(Trim(ArgsObj.Get('action', 'status')));
+      CompName := Trim(ArgsObj.Get('name', ''));
+      IchgSlotStr := ArgsObj.Get('slotName', 'Slot_PortcullisIron');
+      IchgMiUrl := ArgsObj.Get('miUrl', 'castle-data:/materials/MI_RustedDamascusSteel.castle-material');
+      if SameText(ArgsObj.Get('preset', ''), 'hero_rig_gltf') then
+        IchgPresetVal := ippSkeletalHeroRigAndAnimations
+      else if SameText(ArgsObj.Get('preset', ''), 'foliage_canopy') then
+        IchgPresetVal := ippFoliageWindAndBillboardLod;
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') or SameText(ActionStr, 'lock_slot_override') or
+       SameText(ActionStr, 'reimport_dcc_update') then
+    begin
+      if not RequireAutonomy(mamEditWithUndo, Result) then Exit;
+    end else
+    begin
+      if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    end;
+
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+
+    if SameText(ActionStr, 'spawn_preset') then
+    begin
+      IchgComp := TInterchangeHelper.SpawnInterchangePresetInDesign(
+        DesignRoot, DesignOwner, IchgPresetVal, Vector3(0, 0, 0));
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Spawn Interchange Asset Pipeline');
+    end else
+      IchgComp := TInterchangeHelper.FindInterchangePipelineByName(DesignRoot, DesignOwner, CompName);
+
+    if (IchgComp <> nil) and SameText(ActionStr, 'lock_slot_override') then
+    begin
+      IchgComp.SetUserMaterialSlotOverride(IchgSlotStr, IchgMiUrl);
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP Lock Interchange Material Slot Override');
+    end else
+    if (IchgComp <> nil) and SameText(ActionStr, 'reimport_dcc_update') then
+    begin
+      IchgComp.SimulateReimportUpdatedDccSource(420, 'SOCKET_BannerPole');
+      if Assigned(FOnAfterModify) then
+        FOnAfterModify('MCP 1-Click Interchange Reimport');
+    end;
+
+    IchgAudit := TInterchangeHelper.AuditInterchangeInDesign(DesignRoot);
+
+    OutPayload := TJSONObject.Create;
+    try
+      OutPayload.Add('action', ActionStr);
+      OutPayload.Add('pipelineCount', IchgAudit.PipelineCount);
+      OutPayload.Add('totalTranslatedAssets', IchgAudit.TotalTranslatedAssets);
+      OutPayload.Add('totalVisualTriangles', IchgAudit.TotalVisualTriangles);
+      OutPayload.Add('studioCatalogCount', TStudioHubManager.StudioCount);
+      if IchgComp <> nil then
+      begin
+        OutPayload.Add('activePipeline', IchgComp.Name);
+        OutPayload.Add('reimportRevision', IchgComp.ReimportRevision);
+        OutPayload.Add('extractedColliders', IchgComp.ExtractedColliderCount);
+        OutPayload.Add('extractedSockets', IchgComp.ExtractedSocketCount);
+        OutPayload.Add('lockedOverrides', IchgComp.LockedSlotOverrideCount);
+        OutPayload.Add('summaryBadge', IchgComp.InterchangeSummaryBadge);
       end;
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally

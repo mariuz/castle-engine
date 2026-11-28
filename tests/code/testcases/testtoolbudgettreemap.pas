@@ -116,7 +116,7 @@ var
   PayloadObj: TJSONObject;
 begin
   { 1. Verify all 100 UE 5.x studios (Horizons 2-11, Phases 1-380) are registered }
-  AssertEquals(117, TStudioHubManager.StudioCount);
+  AssertEquals(118, TStudioHubManager.StudioCount);
   AssertTrue(TStudioHubManager.FindStudioById('ballistic_studio', Entry));
   AssertTrue(TStudioHubManager.FindStudioById('acoustic_space', Entry));
   AssertTrue(TStudioHubManager.FindStudioById('budget_treemap', Entry));
@@ -139,7 +139,7 @@ begin
     ListResp := Srv.HandleJsonRpcString('{"jsonrpc":"2.0","id":1,"method":"tools/list"}', '');
     OuterJson := GetJSON(ListResp);
     ToolsArr := TJSONObject(OuterJson).Objects['result'].Arrays['tools'];
-    AssertEquals(40, ToolsArr.Count);
+    AssertEquals(41, ToolsArr.Count);
     FreeAndNil(OuterJson);
 
     CallResp := Srv.HandleJsonRpcString(
@@ -150,7 +150,7 @@ begin
     InnerJson := GetJSON(InnerText);
     PayloadObj := TJSONObject(InnerJson);
     AssertTrue(PayloadObj.Booleans['ok']);
-    AssertEquals(117, PayloadObj.Integers['studioCatalogCount']);
+    AssertEquals(118, PayloadObj.Integers['studioCatalogCount']);
     AssertEquals(2, PayloadObj.Integers['overBudgetNodeCount']);
     AssertEquals(5, PayloadObj.Arrays['cells'].Count);
   finally
